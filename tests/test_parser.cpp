@@ -191,13 +191,16 @@ namespace
             "class User {\n"
             "    @deprecated\n"
             "    mutable name: []character;\n"
+            "}\n"
+            "@target(function, class, var)\n"
+            "class Tagged {\n"
             "}\n";
 
         ParseResult result;
         parseInto(source, result);
 
         CHECK(result.diagnostics.diagnostics().empty());
-        CHECK(result.root->child_count() == 3);
+        CHECK(result.root->child_count() == 4);
 
         AstNode* tag = result.root->child(0);
         CHECK(tag->kind == AstKind::AnnotationDecl);
@@ -237,6 +240,13 @@ namespace
         CHECK(field->child(1)->kind == AstKind::ArrayType);
         CHECK(field->child(1)->text == "slice");
         CHECK(field->child(1)->child(0)->text == "character");
+
+        AstNode* tagged = result.root->child(3);
+        CHECK(tagged->kind == AstKind::ClassDecl);
+        CHECK(tagged->text == "Tagged");
+        CHECK(contains(result.dumpText,
+            "(AnnotationUse target (AnnotationArgList (IdentifierExpr function) "
+            "(IdentifierExpr class) (IdentifierExpr var)))"));
         return 0;
     }
 
@@ -424,6 +434,7 @@ namespace
             "    -a + !b;\n"
             "    f(x)[i].m;\n"
             "    g();\n"
+            "    new Point(1);\n"
             "}\n";
 
         ParseResult result;
@@ -443,6 +454,47 @@ namespace
             "(ExprStmt (MemberExpr m (IndexExpr (CallExpr (IdentifierExpr f) "
             "(ArgumentList (IdentifierExpr x))) (IdentifierExpr i))))"));
         CHECK(contains(result.dumpText, "(ExprStmt (CallExpr (IdentifierExpr g) (ArgumentList)))"));
+        CHECK(contains(result.dumpText,
+            "(ExprStmt (NewExpr (NamedType Point) (ArgumentList (LiteralExpr 1))))"));
+        return 0;
+    }
+
+    int testSpecPointExample()
+    {
+        constexpr std::string_view source =
+            "export class Point {\n"
+            "    mutable x: integer(32);\n"
+            "    mutable y: integer(32);\n"
+            "    init(x: integer(32), y: integer(32)) {\n"
+            "        this.x = x;\n"
+            "        this.y = y;\n"
+            "    }\n"
+            "    lengthSquared(): integer(32) {\n"
+            "        return this.x * this.x + this.y * this.y;\n"
+            "    }\n"
+            "}\n";
+
+        ParseResult result;
+        parseInto(source, result);
+
+        CHECK(result.diagnostics.diagnostics().empty());
+        CHECK(contains(result.dumpText, "(ExportDecl export (ClassDecl Point "));
+        CHECK(contains(result.dumpText,
+            "(FieldDecl mutable:x (GenericType integer (ArgumentList (LiteralExpr 32))))"));
+        CHECK(contains(result.dumpText,
+            "(ConstructorDecl init (ParamList (Param const:x "
+            "(GenericType integer (ArgumentList (LiteralExpr 32)))) (Param const:y "
+            "(GenericType integer (ArgumentList (LiteralExpr 32))))"));
+        CHECK(contains(result.dumpText,
+            "(MethodDecl lengthSquared (ParamList) "
+            "(GenericType integer (ArgumentList (LiteralExpr 32))) (BlockStmt (ReturnStmt "));
+        CHECK(contains(result.dumpText, "(AssignExpr = (MemberExpr x (ThisExpr)) (IdentifierExpr x))"));
+
+        AstNode* exported = result.root->child(0);
+        CHECK(exported->kind == AstKind::ExportDecl);
+        CHECK(exported->child(0)->kind == AstKind::ClassDecl);
+        CHECK(exported->child(0)->text == "Point");
+        CHECK(exported->child(0)->child_count() == 4); // 2 字段 + init + 方法
         return 0;
     }
 
@@ -458,9 +510,14 @@ namespace
             "    const f: []T;\n"
             "    const g: dyn I;\n"
             "    const h: (A, B): R;\n"
+            "    const i: integer(32);\n"
+            "    const j: []character(8);\n"
             "}\n"
             "interface Producer<out T> : Base<T> {\n"
             "    get(): T;\n"
+            "}\n"
+            "@reflect([]character(8))\n"
+            "class Annotated {\n"
             "}\n";
 
         ParseResult result;
@@ -478,8 +535,16 @@ namespace
         CHECK(contains(result.dumpText,
             "(FieldDecl const:h (FunctionType (TypeArgList (NamedType A) (NamedType B)) (NamedType R)))"));
         CHECK(contains(result.dumpText,
+            "(FieldDecl const:i (GenericType integer (ArgumentList (LiteralExpr 32))))"));
+        CHECK(contains(result.dumpText,
+            "(FieldDecl const:j (ArrayType slice "
+            "(GenericType character (ArgumentList (LiteralExpr 8)))))"));
+        CHECK(contains(result.dumpText,
             "(InterfaceDecl Producer (TypeParamList (TypeParam out:T)) "
             "(GenericType Base (TypeArgList (NamedType T))) (MethodDecl get (ParamList) (NamedType T)))"));
+        CHECK(contains(result.dumpText,
+            "(ClassDecl Annotated (AnnotationUse reflect (AnnotationArgList "
+            "(ArrayType slice (GenericType character (ArgumentList (LiteralExpr 8)))))))"));
 
         AstNode* producer = result.root->child(1);
         CHECK(producer->kind == AstKind::InterfaceDecl);
@@ -656,6 +721,7 @@ int main()
         { "declarations", testDeclarations },
         { "statements", testStatements },
         { "expression precedence", testExpressionPrecedence },
+        { "spec point example", testSpecPointExample },
         { "types", testTypes },
         { "module import export", testModuleImportExport },
         { "missing semicolon", testMissingSemicolon },

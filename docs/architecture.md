@@ -1,4 +1,4 @@
-# Coordination 项目架构 v0.1
+﻿# Coordination 项目架构 v0.1
 
 > 本文描述**被实现的语言**（Coordination）及其工具链的架构；仓库当前的 C++20 代码是它的宿主实现（bootstrap 阶段）。
 > 输入：`docs/language-spec.md`（语言规则）、`docs/research/toolchain-architecture.md`（调研与选型依据）。
@@ -52,10 +52,11 @@
 |---|---|---|
 | `structure/` | 宿主 C++ 库：节点、BST/AVL/红黑树、LRU、跳表 | 编译器与运行时的内部数据结构；后续补 hash map、arena、bit set |
 | `syntax/` | C++ 版语法树原型（SyntaxNode/Token/Span/Printer） | 作为前端设计验证；正式前端由 `coordination` 语言自身实现后替换 |
-| `tests/` | CTest 驱动的 C++ 单测（含三棵树差分模糊测试） | 保留为宿主库测试；另建 `conformance/` 语言一致性测试 |
+| `charset/` | Unicode 基础设施：UTF-8/UTF-16 编解码、码点分类、BOM 处理 | Lexer、字符串字面量、`character(8/16/32)` 共用 |
+| `tests/` | CTest 驱动的 C++ 单测（树、LRU、池、词法、语法、语义、driver、charset） | 保留为宿主库测试；另建 `conformance/` 语言一致性测试 |
 | `cmake/` `CMakeLists.txt` | 头文件库 + demo + CTest + install | 增加 `compiler/`、`runtime/`、`stdlib/` 目标；跨平台 CI |
 | `docs/` | 规范、架构、流程、生命周期、调研 | 规范版本化，随 release 发布 |
-| `compiler/`（规划） | — | driver、前端、IR、backend、诊断、缓存 |
+| `compiler/` | 已实现 MVP：`Source`/`Diagnostic`/`Lexer`/`AST`/`Parser`/`Sema`/`Driver` | driver、前端、IR、backend、诊断、缓存 |
 | `stdlib/`（规划） | — | 用 coordination 写的标准库（dogfooding） |
 | `runtime/`（规划） | — | panic/alloc/线程/时间等最小运行时 |
 | `tools/`（规划） | — | fmt、lint、lsp、doc、包管理 |

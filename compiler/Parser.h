@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // ============================================================================
 // 递归下降 Parser：Token 流 -> AstNode 树（Coordination 语言前端）
@@ -55,13 +55,19 @@
 // 成员（Class/Interface/Concept 内）：
 //   * FieldDecl：text = "mutable:名字" 或 "const:名字"（语言里 mutable 不是关键字，
 //       AstFlags 也无法表达可变性，故按约定用 text 前缀；未写修饰符时按语言规范默认 const）。
-//       孩子：AnnotationUse* -> Type -> 初始化表达式?；flags 含 exported 等。
+//       孩子：AnnotationUse* -> Type -> 初始化表达式?；flags 含 open/final_/hidden/comptime 等。
 //   * MethodDecl：text = 名字；flags 含 override_/final_/hidden/comptime 等；
 //       孩子：AnnotationUse* -> ParamList -> 返回 Type? -> BlockStmt?（声明无函数体时省略）。
-//   * OperatorDecl：text = 运算符原文（"+""=="、"[]"、"[]="、"()" 等），其余同 MethodDecl。
+//   * OperatorDecl：text = 运算符原文（"+"、"=="、"[]"、"[]="、"()" 等），其余同 MethodDecl。
 //   * ConstructorDecl：text = "init"；孩子：AnnotationUse* -> ParamList -> BlockStmt?。
 //   * DestructorDecl：text = "deinit"；孩子：AnnotationUse* -> BlockStmt?。
 //   * 成员带标注时，AnnotationUse 永远排在该成员孩子的最前面；无标注时上述顺序即下标顺序。
+//
+// 模块级函数与变量（语言规范示例使用；任务要求之外的有用补充）：
+//   * FunctionDecl：text = 名字；flags 含 exported/comptime 等；
+//       孩子：AnnotationUse* -> ParamList -> 返回 Type? -> BlockStmt?。
+//   * ConstantDecl（const）/ VariableDecl（mutable）：text = 名字；flags 含 exported/comptime；
+//       孩子：AnnotationUse* -> Type? -> 初始化表达式?。
 //
 // 参数与类型参数：
 //   * ParamList / Param：Param.text = "const:名字" / "mutable:名字"（默认 const）；
@@ -76,7 +82,9 @@
 //
 // 类型节点：
 //   * NamedType：text = 名字（含 "void" / "module" 两个关键字形态）。
-//   * GenericType：text = 名字；孩子：TypeArgList（每个孩子是一个类型实参）。
+//   * GenericType：text = 名字；孩子：TypeArgList（`Name<T, U>` 的类型实参）
+//       或 ArgumentList（`integer(32)` 这类编译期类型应用的实参，孩子按表达式解析）；
+//       两种形态由孩子的 kind 区分。
 //   * ReferenceType：孩子 = 被引用类型（`&T`）。
 //   * MutableReferenceType：孩子 = 被引用类型（`&mut T`）。
 //   * PointerType：孩子 = 指针目标类型；text = "const" 表示 `*const T`，否则空。
@@ -115,6 +123,12 @@
 // 运算符优先级（低 -> 高，与任务约定一致）：
 //   = += -= *= /= %=（右结合） -> ?: -> || -> && -> == != -> < <= > >=
 //   -> + - -> * / % -> 一元 + - ! ~ -> 后缀 () [] . -> 基本表达式。
+//
+// 暂未解析（会以 E2xxx 报告并恢复，留待后续迭代）：
+//   * 泛型函数/方法的类型参数列表（`f<T>(...)`；类型声明的 TypeParamList 已支持）；
+//   * if 表达式、comptime if / comptime for；
+//   * 表达式中的 is / as，以及取地址 &、解引用 * 等；
+//   * interface/class 之外的其它声明形态（property、static 等）。
 // ============================================================================
 
 #include <cstddef>
@@ -1679,7 +1693,7 @@ namespace coordination::compiler
             const Span start = current().span;
             advance(); // new
 
-            AstNode* type = parse_type();
+            AstNode* type = parse_type(false); // 构造实参留给 ArgumentList
             AstNode* arguments = nullptr;
             if (check(TokenKind::LParen))
             {
@@ -1698,7 +1712,10 @@ namespace coordination::compiler
 
         // ---------------- 类型 ----------------
 
-        AstNode* parse_type()
+        // allow_application 控制是否把 `Name(args)` 解析成编译期类型应用
+        // （`integer(32)`、`character(8)`）。`new` 后面的类型要关掉它，
+        // 以免把构造实参误当成类型实参。
+        AstNode* parse_type(bool allow_application = true)
         {
             const Span start = current().span;
             switch (current().kind)
@@ -1749,7 +1766,7 @@ namespace coordination::compiler
                 return make_node(AstKind::NamedType, token.span, "module");
             }
             case TokenKind::Identifier:
-                return parse_named_type();
+                return parse_named_type(allow_application);
             default:
                 break;
             }
@@ -1763,13 +1780,22 @@ namespace coordination::compiler
             return make_error(error_span);
         }
 
-        AstNode* parse_named_type()
+        AstNode* parse_named_type(bool allow_application)
         {
             const Span start = current().span;
             const Token& name = advance(); // Identifier
 
             if (!match(TokenKind::Lt))
             {
+                if (allow_application && check(TokenKind::LParen))
+                {
+                    // 编译期类型应用：`integer(32)`、`character(8, unsigned)`。
+                    // 实参是编译期值表达式，用 ArgumentList 承载。
+                    AstNode* arguments = parse_argument_list();
+                    AstNode* node = make_node(AstKind::GenericType, Span::covering(start, arguments->span), name.text);
+                    attach(node, arguments);
+                    return node;
+                }
                 return make_node(AstKind::NamedType, name.span, name.text);
             }
 
@@ -1911,6 +1937,8 @@ namespace coordination::compiler
         }
 
         // 标注实参：类型位置的写法（[]T、&T、*T、dyn I、void）按类型解析，其余按表达式。
+        // `@target(function, class, var)` 中的 class 是关键字但在此处表示目标种类名，
+        // 因此按标识符处理。
         AstNode* parse_annotation_argument()
         {
             switch (current().kind)
@@ -1921,6 +1949,11 @@ namespace coordination::compiler
             case TokenKind::KwDyn:
             case TokenKind::KwVoid:
                 return parse_type();
+            case TokenKind::KwClass:
+            {
+                const Token& token = advance();
+                return make_node(AstKind::IdentifierExpr, token.span, token.text);
+            }
             default:
                 return parse_expression();
             }
