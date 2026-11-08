@@ -1,4 +1,4 @@
-// Parser.h 自包含测试：不依赖第三方测试框架。
+﻿// Parser.h 自包含测试：不依赖第三方测试框架。
 // 覆盖：空输入、最小 class（字段 + 方法）、interface 多继承、annotation 声明与应用、
 // operator、init/deinit/override、if/while/for/return、表达式优先级与后缀链、
 // 复合类型、import/export、module 声明，以及缺 ';' / 缺 '}' 的错误恢复。
@@ -577,6 +577,23 @@ namespace
         return 0;
     }
 
+    int testTopLevelRecovery()
+    {
+        ParseResult result;
+        parseInto("123; class A {}", result);
+
+        CHECK(result.root != nullptr);
+        CHECK(result.root->kind == AstKind::Module);
+        CHECK(result.diagnostics.has_errors());
+        CHECK(hasDiagnostic(result, "E2002"));
+        CHECK(onlyParserErrors(result));
+        CHECK(result.root->child_count() == 2);
+        CHECK(result.root->child(0)->kind == AstKind::Error);
+        CHECK(result.root->child(1)->kind == AstKind::ClassDecl);
+        CHECK(result.root->child(1)->text == "A");
+        return 0;
+    }
+
     int testErrorRecoveryTermination()
     {
         // 各种截断/畸形输入：不允许抛异常、不允许死循环，且必须返回 Module。
@@ -644,6 +661,7 @@ int main()
         { "missing semicolon", testMissingSemicolon },
         { "missing brace", testMissingBrace },
         { "top level recovery", testTopLevelRecovery },
+        { "error recovery termination", testErrorRecoveryTermination },
     };
 
     for (const TestCase& item : cases)
