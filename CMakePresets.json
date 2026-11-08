@@ -1,0 +1,295 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "cl.exe"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_PROJECT_TOP_LEVEL_INCLUDES": "$env{VSINSTALLDIR}Common7/IDE/CommonExtensions/Microsoft/CMake/cmake/Microsoft/SegmentHeap.cmake"
+      }
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release",
+      "inherits": "x64-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PROJECT_TOP_LEVEL_INCLUDES": "$env{VSINSTALLDIR}Common7/IDE/CommonExtensions/Microsoft/CMake/cmake/Microsoft/SegmentHeap.cmake"
+      }
+    },
+    {
+      "name": "x86-debug",
+      "displayName": "x86 Debug",
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x86",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_PROJECT_TOP_LEVEL_INCLUDES": "$env{VSINSTALLDIR}Common7/IDE/CommonExtensions/Microsoft/CMake/cmake/Microsoft/SegmentHeap.cmake"
+      }
+    },
+    {
+      "name": "x86-release",
+      "displayName": "x86 Release",
+      "inherits": "x86-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PROJECT_TOP_LEVEL_INCLUDES": "$env{VSINSTALLDIR}Common7/IDE/CommonExtensions/Microsoft/CMake/cmake/Microsoft/SegmentHeap.cmake"
+      }
+    },
+    {
+      "name": "unix-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Linux Debug",
+      "inherits": "unix-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux Release",
+      "inherits": "linux-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "macos-debug",
+      "displayName": "macOS Debug",
+      "inherits": "unix-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "macOS Release",
+      "inherits": "macos-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x64-debug",
+      "displayName": "Build x64 Debug",
+      "configurePreset": "x64-debug"
+    },
+    {
+      "name": "x64-release",
+      "displayName": "Build x64 Release",
+      "configurePreset": "x64-release"
+    },
+    {
+      "name": "x86-debug",
+      "displayName": "Build x86 Debug",
+      "configurePreset": "x86-debug"
+    },
+    {
+      "name": "x86-release",
+      "displayName": "Build x86 Release",
+      "configurePreset": "x86-release"
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Build Linux Debug",
+      "configurePreset": "linux-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Build Linux Release",
+      "configurePreset": "linux-release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "macos-debug",
+      "displayName": "Build macOS Debug",
+      "configurePreset": "macos-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "Build macOS Release",
+      "configurePreset": "macos-release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "x64-debug",
+      "displayName": "Test x64 Debug",
+      "configurePreset": "x64-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
+      }
+    },
+    {
+      "name": "x64-release",
+      "displayName": "Test x64 Release",
+      "configurePreset": "x64-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
+      }
+    },
+    {
+      "name": "x86-debug",
+      "displayName": "Test x86 Debug",
+      "configurePreset": "x86-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
+      }
+    },
+    {
+      "name": "x86-release",
+      "displayName": "Test x86 Release",
+      "configurePreset": "x86-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
+      }
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Test Linux Debug",
+      "configurePreset": "linux-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
+      }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Test Linux Release",
+      "configurePreset": "linux-release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
+      }
+    },
+    {
+      "name": "macos-debug",
+      "displayName": "Test macOS Debug",
+      "configurePreset": "macos-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
+      }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "Test macOS Release",
+      "configurePreset": "macos-release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
+      }
+    }
+  ]
+}
