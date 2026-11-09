@@ -2,13 +2,14 @@
 
 > 本文描述**被实现的语言**（Coordination）及其工具链的架构；仓库当前的 C++20 代码是它的宿主实现（bootstrap 阶段）。
 > 输入：`docs/language-spec.md`（语言规则）、`docs/research/toolchain-architecture.md`（调研与选型依据）。
+> 仓库与工程结构（目录、模块边界、构建、CI）见 [project-architecture.md](project-architecture.md)；包管理见 [package-manager.md](package-manager.md)。
 
 ## 1. 约束与非目标
 
 | 约束 | 含义 |
 |---|---|
 | 编译型 AOT | 无 JIT、无字节码解释器；构建产物是原生可执行文件 / 静态库 / 动态库 / WASM |
-| 无 UI | 只交付 CLI（`coord`）与 LSP（编辑器协议）；不做 IDE、不做图形安装器 |
+| 无 UI | 只交付 CLI（`coordination`）与 LSP（编辑器协议）；不做 IDE、不做图形安装器 |
 | 跨平台 | 源码与工具链在 Windows / Linux / macOS、x86-64 / arm64 上行为一致 |
 | 语言规则 | interface/type 仅编译期、class 单继承、模板元编程、无 include 宏与 namespace，只有 import/export |
 
@@ -18,7 +19,7 @@
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
-│ 驱动层  coord build|run|check|test|fmt|lint|doc|publish|lsp     │
+│ 驱动层  coordination build|run|check|test|fmt|lint|doc|publish|lsp     │
 │         TargetSpec · sysroot · linker · opt level · action graph │
 └───────────────┬──────────────────────────────────────────────────┘
                 ▼
@@ -57,7 +58,7 @@
 | `cmake/` `CMakeLists.txt` | 头文件库 + demo + CTest + install | 增加 `compiler/`、`runtime/`、`stdlib/` 目标；跨平台 CI |
 | `docs/` | 规范、架构、流程、生命周期、调研 | 规范版本化，随 release 发布 |
 | `compiler/` | 已实现 MVP：`Source`/`Diagnostic`/`Lexer`/`AST`/`Parser`/`Sema`/`Driver` | driver、前端、IR、backend、诊断、缓存 |
-| `stdlib/`（规划） | — | 用 coordination 写的标准库（dogfooding） |
+| `stdlib/` | 已实现 C++ 基础层：`file`/`text`/`process`/`thread` | 后续用 coordination 重写并自举（dogfooding） |
 | `runtime/`（规划） | — | panic/alloc/线程/时间等最小运行时 |
 | `tools/`（规划） | — | fmt、lint、lsp、doc、包管理 |
 
@@ -85,7 +86,7 @@
 
 ### 5.2 词法与语法
 
-- 词法器保留 trivia（注释、空白），供 `coord fmt` 使用；token 带 span。
+- 词法器保留 trivia（注释、空白），供 `coordination fmt` 使用；token 带 span。
 - 语法采用递归下降 + Pratt 表达式解析；语句以 `;` 结束，换行不参与语法。
 - 解析器必须做错误恢复：同步到 `;`、`}`、模块边界，产出 CST 供格式化与 LSP 使用，同时产出压缩后的 AST 供语义分析。
 - 没有宏，所以解析结果就是最终语法结构；`@cfg`、`@reflect`、`@derive` 都是 `annotation` 声明的标注应用（语言规范 §3.5），解析时保留为结构化节点，在名称解析阶段绑定到声明并存入 HIR。
@@ -143,11 +144,11 @@
 
 | 组件 | 形态 |
 |---|---|
-| driver | 单一 `coord` 可执行文件；子命令 `new/build/run/check/test/fmt/lint/doc/publish/lsp`；并行调度、工具链发现、TargetSpec 解析 |
+| driver | 单一 `coordination` 可执行文件；子命令 `new/build/run/check/test/fmt/lint/doc/publish/lsp`；并行调度、工具链发现、TargetSpec 解析 |
 | 包管理 | 声明式清单 + lockfile + workspace；**不执行任意构建脚本**（v1），需要扩展时进沙箱 |
 | 格式化 | 基于 CST，保留注释；`fmt --check` 幂等，不依赖类型信息 |
 | lint | 跑在带类型 HIR 上，独立于错误检查；稳定 lint 名与级别 |
-| LSP | `coord lsp` 独立进程，stdio JSON-RPC；复用容错解析与类型检查，支持快照/取消/增量同步 |
+| LSP | `coordination lsp` 独立进程，stdio JSON-RPC；复用容错解析与类型检查，支持快照/取消/增量同步 |
 | 缓存 | 查询式 red-green + 内容寻址；键含编译器版本、TargetSpec、flags、源码/接口哈希 |
 | 诊断 | 结构化（文本 + JSON）：错误码、主/次 span、note/help、实例化栈、可应用修复 |
 
@@ -184,3 +185,26 @@
 | MVP（0–6 月） | driver、SourceManager/span、lexer/parser、import/export、名称解析/类型检查、HIR、基础单态化、最小 comptime、LLVM x86-64（Windows/Linux）、行表、`build/run/check` | 泛型容器 + 接口示例可编译运行；解析器可模糊测试；错误均带文件/区间；同输入构建可复现 |
 | 自举（6–18 月） | MIR + opt、查询式增量、包/构建/锁文件、fmt、lint、LSP、aarch64/macOS/WASM、PDB、C ABI、标准库 | 三平台 CI 全绿；增量构建 ≤ 全量 20%；标准库用 coordination 写；LSP 可用 |
 | 生态（18–36 月） | 注册表与签名、文档生成、C 互操作、LTO/PGO、sanitizer、远程缓存、调试适配器、版本与弃用策略 | 外部包与真实项目；5+ 目标；性能与 Clang -O2 差距 ≤ 15%；规范 1.0 + 兼容性承诺 |
+
+## 15. 当前实现状态（v0.1）
+
+| 规范/架构章节 | 实现 | 位置 |
+|---|---|---|
+| §3.0 基本类型、§3.1 type、§3.2 interface、§3.3 class | 语法 + 名称解析/基础检查 | `compiler/Parser.h`、`compiler/Sema.h` |
+| §3.5 annotation、§3.6 Proxy | 仅解析（标注应用/声明）；Proxy 属代码生成，未实现 | `compiler/Parser.h`、`compiler/Ast.h` |
+| §3.7 型变、§3.8 运算符重载 | 语法支持（`out`/`in`、`operator`）；语义检查待补 | `compiler/Parser.h` |
+| §4 泛型/concept/comptime | 语法与 HIR 预留；单态化/comptime 解释器未实现 | 规划 `compiler/ir` |
+| §5 模块与 import/export | 单文件解析；跨文件解析与 `.cif` 未实现 | `compiler/Parser.h`、`compiler/Dependency.h` |
+| §5.2 循环 import、§3.3 循环继承 | 图算法与 E5001/E5002 已实现 | `compiler/Dependency.h`、`coordination check` |
+| 后端 LLVM/链接器 | 未实现 | 规划 `compiler/backend` |
+| 标准库 C++ 基础层 | file/text/process/thread 已实现 | `stdlib/` |
+| 跨文件 import 解析 | 已实现（E5001/E5003/E5004） | `compiler/ModuleLoader.h` |
+| `.cif` 接口文件 | 已实现序列化/解析/指纹/兼容判定 | `compiler/Cif.h` |
+| comptime 常量求值 | 已实现（算术/逻辑/三目、预算与错误语义） | `compiler/ConstEval.h` |
+| 常量折叠 | 已实现并接入 check/build 流水线 | `compiler/Fold.h` |
+| HIR | 已实现（函数/局部声明/表达式/调用） | `compiler/Hir.h` |
+| C 后端 | 已实现（HIR → C11，可生成入口） | `compiler/BackendC.h` |
+| 包级 check/build | CLI 已接 ModuleLoader；build 合并 import 图 | `tools/CoordinationMain.cpp` |
+| 跨平台 CI | Windows/Ubuntu/macOS + posix-only | `.github/workflows/ci.yml` |
+
+已知 delta：Parser 的泛型函数/方法、`if` 表达式、`is`/`as`、取地址/解引用尚未支持；Sema 为 MVP（无继承层次、重载区分与完整类型推导）。这两处在 `Parser.h`/`Sema.h` 头部注释中列明。

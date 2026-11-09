@@ -1,4 +1,4 @@
-# Coordination 生命周期 v0.1
+﻿# Coordination 生命周期 v0.1
 
 > 覆盖三类生命周期：**版本**（release）、**语言特性**（feature）、**平台与项目**（platform / project）。
 > 原则：破坏性变更只发生在预先声明的窗口；弃用必须可执行；兼容承诺写进章程，例外公开。
@@ -7,12 +7,12 @@
 
 | 对象 | 版本方式 | 说明 |
 |---|---|---|
-| 编译器/工具链 `coord` | SemVer 2.0.0 | major 破坏 CLI/缓存格式/`.cif` 格式；minor 加功能；patch 修 bug |
+| 编译器/工具链 `coordination` | SemVer 2.0.0 | major 破坏 CLI/缓存格式/`.cif` 格式；minor 加功能；patch 修 bug |
 | 语言 | edition（约三年一个） | 语法/语义的破坏性变更只在 edition 边界发生，跨 edition 可互操作 |
 | 标准库 | 跟随工具链 semver | 与语言 edition 解耦；弃用走 §4 |
 | 包 | 各自 semver | 包管理器按 semver 解析依赖 |
 
-edition 不是 semver major：同一项目内不同包可以用不同 edition，编译器同时支持全部历史 edition（参考 Rust 2015/2018/2021/2024 的做法）。每个 edition 对应一份"迁移指南 + `coord fix` 自动改写规则"。
+edition 不是 semver major：同一项目内不同包可以用不同 edition，编译器同时支持全部历史 edition（参考 Rust 2015/2018/2021/2024 的做法）。每个 edition 对应一份"迁移指南 + `coordination fix` 自动改写规则"。
 
 ## 2. 发布通道与节奏
 
@@ -30,7 +30,7 @@ edition 不是 semver major：同一项目内不同包可以用不同 edition，
 
 1. 语言规范 1.0（条款编号稳定）+ 一致性测试覆盖每条条款；
 2. 至少两个 Tier 1 平台全绿（Windows x64 + Linux x64），macOS 紧随；
-3. `coord fix` 能在示例项目上完成 0.x → 1.0 迁移；
+3. `coordination fix` 能在示例项目上完成 0.x → 1.0 迁移；
 4. 标准库核心稳定（容器、字符串、I/O、错误、并发原语）；
 5. 《兼容性章程》发布（见 §5）；
 6. 至少 10 个真实示例项目与 3–5 个设计伙伴验证。
@@ -51,7 +51,7 @@ edition 不是 semver major：同一项目内不同包可以用不同 edition，
 | deprecated | `@deprecated(since, note, replace_with)`，编译告警 | 至少 2 个 minor 或 12 个月（取较长者） |
 | removed | 只在 edition 边界或 semver major 移除 | 迁移工具覆盖 |
 
-**弃用必须是可执行的**：告警信息给出替代写法；`coord fix --edition` 能自动改写；文档同步更新。禁止"静默移除"或"先移除后公告"。
+**弃用必须是可执行的**：告警信息给出替代写法；`coordination fix --edition` 能自动改写；文档同步更新。禁止"静默移除"或"先移除后公告"。
 
 ## 5. 兼容性章程（1.0 发布）
 
@@ -60,7 +60,7 @@ edition 不是 semver major：同一项目内不同包可以用不同 edition，
 1. **源码兼容**：stable 代码在新版本上继续编译，语义不变（除 §5.2 例外）。
 2. **edition 兼容**：跨 edition 的包可互相调用；同一构建内混用 edition 合法。
 3. **C ABI**：`extern "C"` + `repr(C)` 的类型布局与调用约定稳定。
-4. **CLI 兼容**：`coord` 子命令与参数在 major 内不破坏；新参数默认关闭。
+4. **CLI 兼容**：`coordination` 子命令与参数在 major 内不破坏；新参数默认关闭。
 5. **`.cif` 格式**：major 内向后兼容；新格式可被旧编译器识别或明确报错。
 
 不承诺：
@@ -116,6 +116,6 @@ edition 不是 semver major：同一项目内不同包可以用不同 edition，
 |---|---|---|
 | 兼容性承诺过早 | 1.0 前频繁改语法 | 延长 0.x，用 edition 承载破坏 |
 | 平台矩阵失控 | Tier 1 平台维护者不足 | 降级机制 + 明确 SLA |
-| 弃用不执行 | 告警堆积、迁移工具缺失 | 弃用必须带 `coord fix` 规则，否则不批 |
+| 弃用不执行 | 告警堆积、迁移工具缺失 | 弃用必须带 `coordination fix` 规则，否则不批 |
 | 治理僵化 | RFC 周期持续 > 60 天 | 引入裁决时限与授权 delegate |
 | 资金断档 | 无全职维护者 | 商业支持/培训收入，控制范围 |

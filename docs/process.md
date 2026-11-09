@@ -1,4 +1,4 @@
-# Coordination 项目流程 v0.1
+﻿# Coordination 项目流程 v0.1
 
 > 目标：让"语言语义 → 编译器实现 → 工具链 → 发布"这条链路可预测、可审计、可回滚。
 > 配套文档：`docs/language-spec.md`、`docs/architecture.md`、`docs/lifecycle.md`。
@@ -74,14 +74,14 @@ issue（模板：bug/feature/rfc-track）
 | 性能基准 | 编译时间（hello、增量、10k 行）、运行时间、二进制体积 | 回归超过 5% 阻塞合并 |
 | 跨平台矩阵 | Tier 1 全量、Tier 2 每周 | PR 阻塞 Tier 1 |
 
-宿主库当前用 CTest 驱动（`tests/test_*.cpp`），新增测试文件自动纳入；语言侧一致性测试单独建 `conformance/`，按 `spec/<章节>/<条款号>.cd` 组织。
+宿主库当前用 CTest 驱动（`tests/test_*.cpp`），新增测试文件自动纳入；语言侧一致性测试单独建 `conformance/`，按 `spec/<章节>/<条款号>.cn` 组织。
 
 ## 7. CI 与门禁
 
 - PR 门禁：格式检查 → 构建（Debug/Release）→ 单测 → 一致性测试 → 文档示例编译。
 - nightly：Tier 1 三平台 + sanitizer（ASan/UBSan）+ 模糊测试 + 性能基准。
-- 发布门禁：全矩阵 + 迁移工具 `coord fix` 在示例项目上跑通 + 发布检查单。
-- 缓存：CI 复用 `coord` 的查询缓存；缓存键含编译器版本与 TargetSpec，命中失败必须回退全量而不是报错。
+- 发布门禁：全矩阵 + 迁移工具 `coordination fix` 在示例项目上跑通 + 发布检查单。
+- 缓存：CI 复用 `coordination` 的查询缓存；缓存键含编译器版本与 TargetSpec，命中失败必须回退全量而不是报错。
 
 ## 8. 文档流程
 
@@ -93,7 +93,7 @@ issue（模板：bug/feature/rfc-track）
 ## 9. 发布流程
 
 1. 发布负责人在 `main` 上切 `release/x.y` 分支。
-2. 跑发布检查单：全矩阵 CI、一致性测试、`coord fix` 迁移验证、变更日志、文档版本。
+2. 跑发布检查单：全矩阵 CI、一致性测试、`coordination fix` 迁移验证、变更日志、文档版本。
 3. 打 tag（`vX.Y.Z`），构建三平台产物，签名并生成校验和。
 4. 发布公告：亮点、破坏性变更、弃用项、迁移命令。
 5. 回滚预案：保留上一版本产物与安装包；严重缺陷走 patch 版本，不撤回已发布版本（必要时 yank 包而非删包）。

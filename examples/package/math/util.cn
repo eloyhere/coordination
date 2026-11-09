@@ -1,0 +1,5 @@
+module math.util;
+
+add(a: integer(64), b: integer(64)): integer(64) {
+    return a + b;
+}

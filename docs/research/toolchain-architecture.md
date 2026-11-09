@@ -1,11 +1,11 @@
-# coordination 编译器与工具链架构调研
+﻿# coordination 编译器与工具链架构调研
 
 > 结论：coordination 宜采用“自有前端 + HIR/MIR + LLVM 主后端 + 一体化 driver”。编译速度靠查询式增量与缓存，跨平台靠 TargetSpec 与 lld，模板靠“默认单态化 + 显式擦除 + 实例预算”。
 
 ## 1. 分层：一条可缓存、可观测的流水线
 
 ```text
-[驱动层] coord build/run/check/fmt/lint/lsp
+[驱动层] coordination build/run/check/fmt/lint/lsp
           TargetSpec：triple · CPU · ABI · sysroot · linker
              │ action graph
              ▼
@@ -68,11 +68,11 @@ freestanding 与 WASM 是独立目标族：`*-none-*` 不假设 libc/OS，需要
 
 | 组件 | 建议 |
 |---|---|
-| driver | 单一 `coord`；子命令 `build/run/check/fmt/lint/lsp`；TargetSpec、action graph、工具链发现、并行调度；前端库化供 LSP/测试复用 |
+| driver | 单一 `coordination`；子命令 `build/run/check/fmt/lint/lsp`；TargetSpec、action graph、工具链发现、并行调度；前端库化供 LSP/测试复用 |
 | 包管理/构建 | 声明式清单 + lockfile + workspace；内建构建图与缓存；早期不执行任意构建脚本 |
 | 格式化 | 基于 CST/保真 AST，保留注释与空白；`fmt --check` 幂等，不依赖类型信息 |
 | lint | 跑在带类型 HIR 上，独立于错误检查；稳定 lint 名、级别与机器可应用修复 |
-| LSP | `coord lsp` 独立进程，stdio JSON-RPC；复用容错解析/类型检查；快照、取消、增量；参考 clangd [23] |
+| LSP | `coordination lsp` 独立进程，stdio JSON-RPC；复用容错解析/类型检查；快照、取消、增量；参考 clangd [23] |
 | 调试信息 | ELF/Mach-O 用 DWARF，Windows 用 PDB/CodeView；先行表，后变量/内联/模板实例；用 `llvm-dwarfdump`/`llvm-pdbutil` 验收 [18][19][20][30] |
 | 增量与缓存 | red-green 查询 + 内容寻址；键含编译器版本、TargetSpec、flags、源码/接口哈希；先模块/函数级，后跨机共享 [5] |
 | 诊断/源码映射 | 文本 + JSON、错误码、主/次 span、note/help、可应用性；模板实例化栈；LSP 共用 [7] |
@@ -85,7 +85,7 @@ freestanding 与 WASM 是独立目标族：`*-none-*` 不假设 libc/OS，需要
 - **go toolchain**：单命令、内建缓存、GOOS/GOARCH、工具链自动切换；Go 1.5 用旧编译器自举新编译器，证明“先可用、再自举”可行 [10][11][12]。不要照搬 GC 运行时假设。
 - **swiftpm**：`Package.swift`、`swift build/test`、SourceKit-LSP 与模块稳定性构成闭环 [26][29]。可借“包管理 + LSP + 模块接口”一体设计；不建议照搬“清单即任意代码”，构建确定性与供应链风险太高。
 - **zig build**：`build.zig`、捆绑交叉工具链、全量缓存与 `comptime` 展示了极致一体化 [13]。可借 hermetic 与缓存理念；其构建 API 不稳，coordination 应用声明式清单 + 受限脚本。
-- **clangd**：独立进程、复用编译器前端、背景索引、编译数据库 [23]。coordination 应直接提供 `coord lsp`，不让编辑器插件自己解析源码。
+- **clangd**：独立进程、复用编译器前端、背景索引、编译数据库 [23]。coordination 应直接提供 `coordination lsp`，不让编辑器插件自己解析源码。
 
 ## 7. 分阶段落地路线
 

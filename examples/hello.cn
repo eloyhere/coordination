@@ -1,0 +1,11 @@
+module hello;
+
+export interface Greeter {
+    greet(times: integer(64)): integer(64);
+}
+
+export class Doubler : Greeter {
+    override greet(times: integer(64)): integer(64) {
+        return times * 2;
+    }
+}

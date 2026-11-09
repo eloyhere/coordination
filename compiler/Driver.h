@@ -23,6 +23,7 @@
 #include "Lexer.h"
 #include "Parser.h"
 #include "Source.h"
+#include "charset/Charset.h"
 
 namespace coordination::compiler
 {
@@ -89,7 +90,16 @@ namespace coordination::compiler
     inline FrontendResult runFrontendFromText(std::string_view displayName, std::string_view text)
     {
         FrontendResult result;
-        result.source = result.sources.add_file(std::string(displayName), std::string(text));
+
+        // 剥掉 UTF-8 BOM（EF BB BF）：BOM 不是语言语法的一部分，保留会让 Lexer 报 E1003。
+        // 其它编码的 BOM（UTF-16/UTF-32）不在此处理，按普通字节进入词法并自然报错。
+        std::string_view content = text;
+        if (charset::bom_length(content) == 3)
+        {
+            content.remove_prefix(3);
+        }
+
+        result.source = result.sources.add_file(std::string(displayName), std::string(content));
         result.sourceText = result.sources.file(result.source).text;
         result.arena = std::make_unique<AstArena>();
 

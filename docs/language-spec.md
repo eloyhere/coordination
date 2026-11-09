@@ -130,6 +130,7 @@ export class Circle : Shape {          // 单继承（这里继承的是 class �
 3. 与基类**非虚成员或存储字段**同名 → 编译错误；确需隐藏必须写 `hide`，并在调用点产生告警。存储字段一律不参与覆盖，也不允许字段隐藏。
 4. 属性（property）是 getter/setter 访问器，**父类属性可被子类同名属性覆盖**，覆盖时写 `override`；只读属性可被可写属性覆盖，反之不行；getter 返回类型协变、setter 参数逆变（§3.7）。
 5. 型变：覆盖允许**返回类型协变、参数类型逆变**（与函数子类型规则一致）；引用类型隐式允许，值类型必须显式 `covariant` / `contravariant` 并生成 thunk。详见 §3.7。
+6. **循环继承禁止**：class/interface 的继承图必须是有向无环图；自继承、`A : B, B : A`、多继承环一律编译错误（E5002），在类型声明收集完成后统一检测，并给出环路径。
 6. **构造期安全**：构造器、字段初始化器、`init` 块中禁止虚调用与虚属性读取（编译期判定），避免读到未初始化字段。
 7. `class` 默认 `final`，需要被继承必须写 `open`；`override` 成员默认仍可覆盖，`final override` 封口。
 8. 析构：确定性析构（RAII），`deinit` 在作用域结束时按逆序调用；没有 GC。
@@ -364,12 +365,12 @@ stackBuffer(): void {
 ### 5.2 import / export
 
 ```coordination
-// math/vector.cd
+// math/vector.cn
 export dot(a: Vec3, b: Vec3): f64 { ... }
 export class Vec3 { ... }
 helper(): f64 { ... }          // 默认私有，不导出
 
-// app.cd
+// app.cn
 import math.vector;               // 限定访问：vector.dot(...)
 import math.vector.{Vec3, dot};   // 非限定导入
 import math.vector as mv;         // 别名
@@ -381,7 +382,7 @@ export import math.vector;        // 重导出
 1. **默认私有**，`export` 逐声明标注；包内可见性用 `internal`（仅同包可见）。
 2. `import m` 只引入模块名，访问需限定；`import m.{A, B as C}` 引入非限定名；禁止 `import *` 直接灌入当前作用域（冲突必须显式 alias）。
 3. `export import m` 重导出；重导出链上的名字冲突必须显式 alias，否则编译错误。
-4. **包内允许循环依赖**（模块级做两阶段符号解析）；**跨包禁止循环依赖**（保证分层与并行构建）。
+4. 循环 import 由编译器检测并报 **E5001**：默认包内、跨包都禁止（增量编译与并行构建依赖无环图）。确需包内互引时，只能通过显式配置放开，并单独评审。
 5. 模块接口以"导出声明 + 可内联函数体"计算内容哈希，作为增量编译缓存键；实现体变化不影响下游重编（除非该模块开启全量内联）。
 
 ### 5.3 没有 include 宏之后的条件编译
@@ -441,7 +442,7 @@ export allocate(size: integer(64, unsigned)): *integer(8, unsigned) {
 
 **Q4**：`comptime` 燃料默认值与是否允许用户调高？默认步数 1e7、深度 512、内存 64 MiB，可用编译选项调高但不可关闭。
 
-**Q5**：包内循环 import 是否放开？默认放开；若要求全图无环，增量编译更简单，但重构成本更高。
+**Q5**：循环 import 是否一律禁止？默认禁止（E5001），增量编译与并行构建最简单；若未来允许包内循环，需要显式配置与单独评审。
 
 **Q6**：`class` 默认 `final` 还是默认 `open`？本文取 Kotlin 风格默认 `final`（§3.3-7），若希望继承更自由可改为默认 `open`。
 

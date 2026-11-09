@@ -1,0 +1,7 @@
+module app;
+
+import math.util;
+
+main(): integer(64) {
+    return add(40, 2);
+}

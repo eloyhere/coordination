@@ -1,0 +1,152 @@
+# 跨平台 CI：Windows(MSVC) / Ubuntu(GCC) / macOS(Clang)，统一 C++20 + CTest。
+#
+# 目的：本机以 Windows 为主开发环境，Linux/macOS 的 POSIX 代码路径
+#       （stdlib/file/File.h、stdlib/process/Process.h 等）缺少持续验证。
+#       这里在三个平台用同一套 CMake 配置真正编译并跑测试。
+#
+# 说明：
+#   * 不复用 CMakePresets.json —— 其中的 Windows 预设依赖本机的 VS 环境变量
+#     与 Ninja 路径，不适合 CI；这里全部用显式参数，便于复现与排错。
+#   * 不使用任何 secrets，fork 的 PR 也能跑。
+#   * 所有 run 步骤统一用 bash（Windows runner 自带 Git Bash），
+#     避免三分支维护两套脚本语法。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 只读取仓库内容；上传 artifact 使用的是 Actions 运行时令牌，不需要额外权限。
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      # ccache 目录固定在 workspace 内，便于 actions/cache 统一定位与缓存；
+      # 配置和构建两步都要看到同一个目录。
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      # 即使直接跑 ctest 而不带 --output-on-failure，也会打印失败用例输出。
+      CTEST_OUTPUT_ON_FAILURE: 1
+    strategy:
+      # 一个平台失败不取消其它平台，便于一次性看清三平台差异。
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: "Windows / MSVC (C++20)"
+            artifact: ctest-logs-windows-msvc
+            use_ccache: false
+            # 不指定 -G：使用 VS 默认生成器（CMAKE_GENERATOR 由 runner 决定），
+            # 不写死 Ninja 或任何本机工具链路径。
+            configure_args: ""
+            build_args: "--config Debug"
+            test_args: "-C Debug"
+
+          - os: ubuntu-latest
+            name: "Ubuntu / GCC (C++20)"
+            artifact: ctest-logs-ubuntu-gcc
+            use_ccache: true
+            # 显式用 g++ + Ninja（ninja-build 在下方安装），并挂上 ccache。
+            configure_args: "-G Ninja -DCMAKE_CXX_COMPILER=g++ -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+            build_args: ""
+            test_args: ""
+
+          - os: macos-latest
+            name: "macOS / Clang (C++20)"
+            artifact: ctest-logs-macos-clang
+            use_ccache: false
+            # 用系统自带的 Apple Clang，不额外安装编译器；默认生成器（Makefiles）。
+            configure_args: ""
+            build_args: ""
+            test_args: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++ ccache
+
+      - name: Cache ccache
+        if: matrix.use_ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-ccache-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'tests/CMakeLists.txt', 'tests/**/*.cpp', '**/*.h') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: Configure
+        # Debug + BUILD_TESTING=ON；Windows 不传 -G，走 VS 默认生成器。
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON ${{ matrix.configure_args }}
+
+      - name: Build
+        run: cmake --build build --parallel ${{ matrix.build_args }}
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure ${{ matrix.test_args }}
+
+      - name: Upload CTest logs
+        # 失败时也要留下现场：CTest 日志 + 编译器探测日志。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            build/Testing/**
+            build/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # 可选：在 Ubuntu 上单独跑 stdlib 的 file/process 测试，
+  # 让 POSIX 路径的失败在结果页上一眼可见，不与整包测试混在一起。
+  posix-only:
+    name: "POSIX file/process (Ubuntu, GCC)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -G Ninja
+
+      - name: Build POSIX tests
+        run: cmake --build build --target test_file test_process --parallel
+
+      - name: Run POSIX tests
+        working-directory: build
+        run: ctest --output-on-failure -R '^(test_file|test_process)$'
+
+      - name: Upload CTest logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-logs-posix-only
+          path: |
+            build/Testing/**
+            build/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+          retention-days: 7

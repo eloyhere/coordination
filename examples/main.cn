@@ -1,0 +1,5 @@
+module app;
+
+main(): integer(64) {
+    return 42;
+}

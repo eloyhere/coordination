@@ -1,4 +1,4 @@
-# coordination 市场、治理与版本策略调研
+﻿# coordination 市场、治理与版本策略调研
 
 **口径**（2026-11-09）：TIOBE 为 2026 年 11 月榜；Stack Overflow 为 2025 年调查（31,771 份）；GitHub Octoverse 为 2025 年报（数据至 2025-08）；Rust 调查为 2025 年度（7,156 份，2026-03-02 发布）。TIOBE 统计搜索与提及，不等于岗位数；SO 与 Octoverse 均有自选择偏差，宜看趋势而非绝对值。
 
@@ -20,9 +20,9 @@ Octoverse 2025：GitHub 有 1.8 亿+ 开发者，一年新增 3,600 万、累计
 
 **互操作**：C ABI 是跨语言最小公分母。提供 `extern "C"`、`repr(C)`、明确所有权与错误码、禁止异常跨边界；C++ 先经 C shim，避开名字修饰与标准库 ABI；同时给 CMake config、头文件和 pkg-config，让接入成本低于重写。
 
-**迁移成本**：允许同一构建内 C++ 与 coordination 共存，从叶子模块替换；提供 `coord fix`、迁移指南与兼容层，不要求一次性重写。
+**迁移成本**：允许同一构建内 C++ 与 coordination 共存，从叶子模块替换；提供 `coordination fix`、迁移指南与兼容层，不要求一次性重写。
 
-**工具链**：一个安装包、一个 `coord` 命令（new/build/run/test/fmt/lint/doc/publish）、秒级反馈、可读错误码、LSP、锁文件、交叉编译、可复现构建；编译时间要作为产品指标。
+**工具链**：一个安装包、一个 `coordination` 命令（new/build/run/test/fmt/lint/doc/publish）、秒级反馈、可读错误码、LSP、锁文件、交叉编译、可复现构建；编译时间要作为产品指标。
 
 **文档**：Book（从零到可用）+ Reference（权威语义）+ Cookbook（任务导向）+ 10 个真实项目；文档进 CI、随版本发布、中英双语，并便于 AI 编码代理检索（[Octoverse 2026](https://octoverse.github.com/) 的主题即 agent 参与开发）。教程按任务组织（解析参数、读写文件、调用 C 库、发布二进制），而不是按语法章节排列；每个示例都要能在 CI 中运行，避免文档腐烂。
 
@@ -70,7 +70,7 @@ ABI 不要轻易承诺：Rust 无稳定原生 ABI，默认布局无保证，跨�
 
 **发布节奏**：0.x 每 4 周 minor，nightly 每日、beta 每月；1.0 门槛为规范 + 一致性测试 + 全部 Tier 1 平台 + 文档/迁移工具；1.0 后 6 周列车，约三年一个 edition；只维护最新 stable，并为上一条 minor 线提供 12 个月安全修复。
 
-**兼容性承诺**：1.0 发布《兼容性章程》——stable 源码兼容；破坏性变更只在 edition/大版本，附 `coord fix` 与迁移指南；弃用至少提前 2 个 minor 或 12 个月；安全例外需公告；ABI 只承诺 C 子集。
+**兼容性承诺**：1.0 发布《兼容性章程》——stable 源码兼容；破坏性变更只在 edition/大版本，附 `coordination fix` 与迁移指南；弃用至少提前 2 个 minor 或 12 个月；安全例外需公告；ABI 只承诺 C 子集。
 
 **社区启动**：以“C++/CMake 项目增量模块”为切口，提供 CMake 集成、C ABI 示例、从 C++ 迁移指南；找 3–5 个设计伙伴做真实工具；文档中英双语、进 CI；用 good-first-issue、月度 office hours、RFC 办公时间培养贡献者；早期用 GitHub Sponsors/Open Collective，1.0 后有多家赞助再考虑基金会。
 
@@ -85,6 +85,6 @@ ABI 不要轻易承诺：Rust 无稳定原生 ABI，默认布局无保证，跨�
 5. 1.0 发布《兼容性章程》：stable 源码兼容；破坏只发生在 edition/大版本；弃用至少 2 个 minor 或 12 个月，并提供自动迁移。
 6. ABI 只承诺 C 子集（`extern "C"`、`repr(C)`、无跨边界 unwind）；不承诺原生 ABI；C++ 互操作先经 C shim。
 7. 平台分三级：Tier 1 为 Windows x64 MSVC、Linux x64 glibc、macOS arm64，每提交跑三平台 CI；Tier 2 交叉编译；Tier 3 社区维护。
-8. 工具链先做“一个 `coord` 命令 + LSP + 锁文件 + 可复现构建 + 错误码”，编译时间与冷启动纳入 CI 预算。
+8. 工具链先做“一个 `coordination` 命令 + LSP + 锁文件 + 可复现构建 + 错误码”，编译时间与冷启动纳入 CI 预算。
 9. 注册表 1.0 再上线（之前用 GitHub Releases + vendoring）；先定不可变版本、SHA-256、yank、名称政策、OIDC 发布、Sigstore 签名、2FA 与安全公告流程。
 10. 社区以 3–5 个 C++/CMake 设计伙伴和 10 个真实示例启动；文档中英双语并进 CI；资金先众筹/商业支持，多赞助方后再设基金会。
