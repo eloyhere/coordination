@@ -722,6 +722,42 @@ void CppEmitter::emitPrelude() {
   out_ << "  }\n";
   out_ << "  return a % b;\n";
   out_ << "}\n";
+  out_ << "template <class T>\n";
+  out_ << "T& checkedInc(T& value, int delta, const char* message) {\n";
+  out_ << "  value = checkedAdd(value, delta, message);\n";
+  out_ << "  return value;\n";
+  out_ << "}\n";
+  out_ << "template <class T>\n";
+  out_ << "T checkedPostInc(T& value, int delta, const char* message) {\n";
+  out_ << "  T previous = value;\n";
+  out_ << "  value = checkedAdd(value, delta, message);\n";
+  out_ << "  return previous;\n";
+  out_ << "}\n";
+  out_ << "template <class T, class U>\n";
+  out_ << "T& checkedAddAssign(T& target, U value, const char* message) {\n";
+  out_ << "  target = checkedAdd(target, value, message);\n";
+  out_ << "  return target;\n";
+  out_ << "}\n";
+  out_ << "template <class T, class U>\n";
+  out_ << "T& checkedSubAssign(T& target, U value, const char* message) {\n";
+  out_ << "  target = checkedSub(target, value, message);\n";
+  out_ << "  return target;\n";
+  out_ << "}\n";
+  out_ << "template <class T, class U>\n";
+  out_ << "T& checkedMulAssign(T& target, U value, const char* message) {\n";
+  out_ << "  target = checkedMul(target, value, message);\n";
+  out_ << "  return target;\n";
+  out_ << "}\n";
+  out_ << "template <class T, class U>\n";
+  out_ << "T& checkedDivAssign(T& target, U value, const char* message) {\n";
+  out_ << "  target = checkedDiv(target, value, message);\n";
+  out_ << "  return target;\n";
+  out_ << "}\n";
+  out_ << "template <class T, class U>\n";
+  out_ << "T& checkedModAssign(T& target, U value, const char* message) {\n";
+  out_ << "  target = checkedMod(target, value, message);\n";
+  out_ << "  return target;\n";
+  out_ << "}\n";
   out_ << "inline void check(bool condition) {\n";
   out_ << "  if (!condition) {\n";
   out_ << "    std::cerr << \"assertion failed\\n\";\n";
@@ -2615,6 +2651,15 @@ void CppEmitter::emitExpr(const Expr* expr) {
       out_ << ')';
       return;
     case ExprKind::Inc:
+      if (expr->lhs != nullptr && expr->lhs->resolvedType != nullptr &&
+          expr->lhs->resolvedType->kind == TypeKind::Int) {
+        out_ << (expr->op == "pre" ? "coord_rt::checkedInc("
+                                   : "coord_rt::checkedPostInc(");
+        emitExpr(expr->lhs.get());
+        out_ << ", " << (expr->intValue < 0 ? -1 : 1)
+             << ", \"integer overflow\")";
+        return;
+      }
       out_ << '(';
       if (expr->op == "pre") {
         out_ << (expr->intValue < 0 ? "--" : "++");
@@ -2712,6 +2757,25 @@ void CppEmitter::emitExpr(const Expr* expr) {
           out_ << "))";
           return;
         }
+      }
+      if (expr->lhs != nullptr && expr->rhs != nullptr &&
+          expr->lhs->resolvedType != nullptr &&
+          expr->rhs->resolvedType != nullptr &&
+          expr->lhs->resolvedType->kind == TypeKind::Int &&
+          expr->rhs->resolvedType->kind == TypeKind::Int &&
+          (expr->op == "+=" || expr->op == "-=" || expr->op == "*=" ||
+           expr->op == "/=" || expr->op == "%=")) {
+        out_ << "coord_rt::checked"
+             << (expr->op == "+=" ? "Add" : expr->op == "-=" ? "Sub"
+                                  : expr->op == "*=" ? "Mul"
+                                  : expr->op == "/=" ? "Div"
+                                                   : "Mod")
+             << "Assign(";
+        emitExpr(expr->lhs.get());
+        out_ << ", ";
+        emitExpr(expr->rhs.get());
+        out_ << ", \"integer overflow\")";
+        return;
       }
       out_ << '(';
       emitExpr(expr->lhs.get());

@@ -940,4 +940,12 @@ if(MSVC)
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_optional_return
       -DEXPECTED=false|9|0|0|42
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_compound
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/compound.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_compound
+      -DEXPECTED=7|21|21|22|23|11|3|2
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()

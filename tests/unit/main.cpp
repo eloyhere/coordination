@@ -2357,7 +2357,7 @@ integer main() {
   const std::string generated = output.str();
   CHECK(generated.find("std::int64_t& mutable_") != std::string::npos);
   CHECK(generated.find("const std::int64_t& value") != std::string::npos);
-  CHECK(generated.find("mutable_++") != std::string::npos);
+  CHECK(generated.find("checkedPostInc(mutable_") != std::string::npos);
 }
 
 void testSwitchStatement() {
