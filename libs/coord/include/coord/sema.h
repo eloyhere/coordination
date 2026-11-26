@@ -177,6 +177,7 @@ private:
                            std::string_view target, Span span,
                            bool allowTypeTarget = false);
   void validateDoc(Decl& decl);
+  void checkShareTypeCycles(ModuleAst& module);
   int resolveLength(const std::vector<AnnotationUse>& annotations, Type* type,
                     Span span);
   void inheritAnnotations(Decl& target, const Decl* source);

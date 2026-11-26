@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -498,6 +499,8 @@ bool Checker::check(ModuleAst& module) {
       checkFunction(*decl);
     }
   }
+
+  checkShareTypeCycles(module);
 
   const auto mainIt = functions_.find("main");
   if (mainIt != functions_.end()) {
@@ -5075,6 +5078,56 @@ void Checker::checkDestroy(Stmt* stmt) {
                              "'; only the last declaration takes effect");
   } else {
     destroyedFields_.push_back(target->name);
+  }
+}
+
+void Checker::checkShareTypeCycles(ModuleAst& module) {
+  struct Edge {
+    const Decl* target = nullptr;
+    std::string field;
+  };
+  std::unordered_map<const Decl*, std::vector<Edge>> graph;
+  for (const auto& decl : module.decls) {
+    if (decl->kind != DeclKind::Class || decl->isStandard) {
+      continue;
+    }
+    for (const auto& member : decl->members) {
+      if (member->kind != DeclKind::Field || !member->isShare ||
+          member->type == nullptr || member->type->resolved == nullptr ||
+          member->type->resolved->decl == nullptr) {
+        continue;
+      }
+      graph[decl.get()].push_back(
+          Edge{member->type->resolved->decl, member->name});
+    }
+  }
+  if (graph.empty()) {
+    return;
+  }
+  std::unordered_map<const Decl*, int> color;
+  std::function<void(const Decl*)> visit = [&](const Decl* node) {
+    color[node] = 1;
+    const auto found = graph.find(node);
+    if (found != graph.end()) {
+      for (const Edge& edge : found->second) {
+        const int state = color[edge.target];
+        if (state == 1) {
+          diagnostics_.warning(
+              node->span, "W0005",
+              "possible @Share cycle through field '" + edge.field +
+                  "' of '" + node->name +
+                  "'; use @Weak or restructure the ownership graph");
+        } else if (state == 0) {
+          visit(edge.target);
+        }
+      }
+    }
+    color[node] = 2;
+  };
+  for (const auto& entry : graph) {
+    if (color[entry.first] == 0) {
+      visit(entry.first);
+    }
   }
 }
 

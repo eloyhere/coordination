@@ -552,7 +552,7 @@ Dangling fundamentally means a **reference's scope outlives the referenced objec
 7. **Parameters/returns**: a `@Unique` parameter transfers ownership by value; a `@Share` parameter increments the count; a `&` parameter only borrows and the callee must not store it. Returning `@Unique`/`@Share` transfers/shares ownership; returning `&` is forbidden.
 8. **`@Unique` → `@Share`**: `@Share T r = box;` moves the `@Unique` into a shared control block and invalidates `box`; the reverse is forbidden.
 9. **`const T&` to a temporary**: the temporary's lifetime extends to the end of the reference variable's Scope; owner rules are unchanged.
-10. **Cycles**: only `@Share` can form cycles; reference counting cannot reclaim them. Direct self-cycles through a `@Share` field are rejected with `W0005` at compile time; at shutdown the runtime reports any `@Share` objects still alive as a possible cycle (`W0005`). General graph-based runtime cycle detection remains ⏳. `&` cannot be stored and is inherently acyclic.
+10. **Cycles**: only `@Share` can form cycles; reference counting cannot reclaim them. The type graph warns `W0005` for class-level `@Share` cycles (including self-recursive types), direct self-assignment warns `W0005`, and at shutdown the runtime reports any `@Share` objects still alive as a possible cycle. Exact per-object graph traversal remains ⏳. `&` cannot be stored and is inherently acyclic.
 11. **Statics/globals**: lifetime is the process; they may be borrowed by `&`, but the borrow still must not escape.
 12. **Conservative checking (v0)**: `&` is used only within the current function — not returned, stored or passed across threads; no full lifetime parameterization.
 13. **`@Weak T`**: non-owning `std::weak_ptr<T>` view of an `@Share T` owner; default empty. It can be initialized/assigned from `@Share` or another `@Weak` value. `isPresent()`/`isEmpty()` test expiry; `lock()`/`upgrade()` return a nullable `@Share T` handle that supports `isPresent()/get()/orElse()`. Accessing `get()` after expiry aborts.
@@ -1946,7 +1946,7 @@ Diagnostic format: `path:line:col: error[E2030]: message`, followed by the sourc
 | `super.method()` / `super.field` / `: super(args)` / `: field(expr)` | ✅ | Covered by e2e |
 | Enum methods / `implements` | ✅ | Wrapper class + underlying integer |
 | Virtual dispatch through base references/pointers | ✅ | `examples/polymorphism.coo` |
-| Runtime `@Share` cycle heuristic | ✅ | Shutdown reports live `@Share` objects as `W0005`; direct self-cycle is compile-time; `coord_e2e_share_cycle` |
+| `@Share` cycle detection | ✅/⏳ | Type-graph and direct self-assignment `W0005`; shutdown live-object heuristic; exact object-graph traversal ⏳; `coord_e2e_share_cycle` |
 | `&` borrow / `@Unique`/`@Share` escape (JPA cascade) | 🚧 | `E2039` return/field/container references, `E2045` self-move/use-after-move, `W0005` direct `@Share` self-cycle; full borrow/lifetime analysis ⏳ |
 | Meta-annotations `@Inherit/@Repeatable/@Target/@Meta/@Retention/@Documented` | ✅ | Validation + `@Inherit` effective lists |
 | Runtime/Enum retention tables / annotation comments | ✅ | `kRetainedAnnotations` / `k<Enum>Variants`; Invocation hooks P4 |

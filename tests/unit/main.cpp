@@ -2375,6 +2375,19 @@ integer main() {
 )");
   CHECK(cycle.countCode("W0005") >= 1);
 
+  Harness recursiveType(R"(
+class Node {
+public:
+    @Optional @Share Node next = null;
+}
+
+integer main() {
+    Node node;
+    return 0;
+}
+)");
+  CHECK(recursiveType.countCode("W0005") >= 1);
+
   Harness container(R"(
 integer main() {
     Array<integer&> values;
