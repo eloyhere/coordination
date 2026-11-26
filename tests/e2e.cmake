@@ -50,6 +50,10 @@ if(NOT run_result EQUAL EXPECTED_EXIT)
   message(FATAL_ERROR "generated program exit ${run_result}, expected ${EXPECTED_EXIT}\n${run_stderr}")
 endif()
 
+if(DEFINED EXPECT_STDERR AND NOT "${run_stderr}" MATCHES "${EXPECT_STDERR}")
+  message(FATAL_ERROR "stderr does not contain '${EXPECT_STDERR}'\n${run_stderr}")
+endif()
+
 string(REPLACE "\r\n" "\n" actual "${run_stdout}")
 string(STRIP "${actual}" actual)
 string(REPLACE "\n" "|" actual "${actual}")

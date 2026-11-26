@@ -404,6 +404,7 @@ void CppEmitter::emitPrelude() {
   out_ << "#include <string>\n";
   out_ << "#include <type_traits>\n";
   out_ << "#include <limits>\n";
+  out_ << "#include <vector>\n";
   out_ << "#include <fstream>\n";
   out_ << "#include <chrono>\n";
   out_ << "#include <thread>\n";
@@ -833,6 +834,27 @@ void CppEmitter::emitPrelude() {
   out_ << "    std::cerr << message << '\\n'; std::abort();\n";
   out_ << "  }\n";
   out_ << "  return static_cast<T>(value >> amount);\n";
+  out_ << "}\n";
+  out_ << "inline std::vector<std::weak_ptr<void>>& shareRegistry() {\n";
+  out_ << "  static std::vector<std::weak_ptr<void>> registry;\n";
+  out_ << "  return registry;\n";
+  out_ << "}\n";
+  out_ << "template <class T, class... Args>\n";
+  out_ << "std::shared_ptr<T> makeShared(Args&&... args) {\n";
+  out_ << "  auto value = std::make_shared<T>(std::forward<Args>(args)...);\n";
+  out_ << "  shareRegistry().push_back(value);\n";
+  out_ << "  return value;\n";
+  out_ << "}\n";
+  out_ << "inline void reportShareLeaks() {\n";
+  out_ << "  std::size_t live = 0;\n";
+  out_ << "  for (const auto& weak : shareRegistry()) {\n";
+  out_ << "    if (!weak.expired()) ++live;\n";
+  out_ << "  }\n";
+  out_ << "  if (live != 0) {\n";
+  out_ << "    std::cerr << \"W0005: \" << live\n";
+  out_ << "              << \" @Share object(s) still alive at shutdown (possible \"\n";
+  out_ << "                 \"reference cycle; consider @Weak)\\n\";\n";
+  out_ << "  }\n";
   out_ << "}\n";
   out_ << "inline void check(bool condition) {\n";
   out_ << "  if (!condition) {\n";
@@ -1518,8 +1540,8 @@ void CppEmitter::emitClass(const Decl& decl) {
                 initializer.args[j]->kind == ExprKind::Call &&
                 initializer.args[j]->lhs != nullptr &&
                 initializer.args[j]->lhs->kind == ExprKind::Name) {
-              out_ << "std::make_"
-                   << (field->isUnique ? "unique" : "shared") << "<"
+              out_ << (field->isUnique ? "std::make_unique<"
+                                       : "coord_rt::makeShared<")
                    << sanitize(initializer.args[j]->lhs->name) << ">(";
               for (std::size_t k = 0;
                    k < initializer.args[j]->args.size(); ++k) {
@@ -2082,7 +2104,7 @@ void CppEmitter::emitStmt(const Stmt* stmt) {
             out_ << "{}";
           }
         } else if (stmt->braceInit) {
-          out_ << " = " << (unique ? "std::make_unique<" : "std::make_shared<")
+          out_ << " = " << (unique ? "std::make_unique<" : "coord_rt::makeShared<")
                << typeToString(stmt->type.get()) << ">(";
           for (std::size_t i = 0; i < stmt->initArgs.size(); ++i) {
             if (i != 0) {
@@ -2101,7 +2123,7 @@ void CppEmitter::emitStmt(const Stmt* stmt) {
         } else if (init != nullptr && init->kind == ExprKind::Call &&
                    init->lhs != nullptr &&
                    init->lhs->kind == ExprKind::Name) {
-          out_ << " = " << (unique ? "std::make_unique<" : "std::make_shared<")
+          out_ << " = " << (unique ? "std::make_unique<" : "coord_rt::makeShared<")
                << typeToString(stmt->type.get()) << ">(";
           for (std::size_t i = 0; i < init->args.size(); ++i) {
             if (i != 0) {
@@ -2493,9 +2515,9 @@ void CppEmitter::emitStmt(const Stmt* stmt) {
                    stmt->expr->kind == ExprKind::Call &&
                    stmt->expr->lhs != nullptr &&
                    stmt->expr->lhs->kind == ExprKind::Name) {
-          out_ << "std::make_"
-               << (currentCallable_->isUnique ? "unique" : "shared")
-               << "<" << sanitize(stmt->expr->lhs->name) << ">(";
+          out_ << (currentCallable_->isUnique ? "std::make_unique<"
+                                              : "coord_rt::makeShared<")
+               << sanitize(stmt->expr->lhs->name) << ">(";
           for (std::size_t i = 0; i < stmt->expr->args.size(); ++i) {
             if (i != 0) {
               out_ << ", ";
@@ -2835,8 +2857,9 @@ void CppEmitter::emitExpr(const Expr* expr) {
           expr->rhs->lhs->kind == ExprKind::Name) {
         const Decl* field = fieldOf(currentClassDecl_, expr->lhs->name);
         if (field != nullptr && (field->isUnique || field->isShare)) {
-          out_ << '(' << sanitize(expr->lhs->name) << " = std::make_"
-               << (field->isUnique ? "unique" : "shared") << "<"
+          out_ << '(' << sanitize(expr->lhs->name) << " = "
+               << (field->isUnique ? "std::make_unique<"
+                                   : "coord_rt::makeShared<")
                << sanitize(expr->rhs->lhs->name) << ">(";
           for (std::size_t i = 0; i < expr->rhs->args.size(); ++i) {
             if (i != 0) {
@@ -4028,8 +4051,8 @@ void CppEmitter::emitExpr(const Expr* expr) {
             expr->args[i]->kind == ExprKind::Call &&
             expr->args[i]->lhs != nullptr &&
             expr->args[i]->lhs->kind == ExprKind::Name) {
-          out_ << "std::make_"
-               << (parameter->isUnique ? "unique" : "shared") << "<"
+          out_ << (parameter->isUnique ? "std::make_unique<"
+                                       : "coord_rt::makeShared<")
                << sanitize(expr->args[i]->lhs->name) << ">(";
           for (std::size_t j = 0; j < expr->args[i]->args.size(); ++j) {
             if (j != 0) {
@@ -4815,7 +4838,9 @@ void CppEmitter::emit() {
   if (testMode_) {
     out_ << "int main() {\n";
     out_ << "  coord_rt::enableUtf8Console();\n";
-    out_ << "  return coord_program::coord_test_main();\n";
+    out_ << "  const int __exit = coord_program::coord_test_main();\n";
+    out_ << "  coord_rt::reportShareLeaks();\n";
+    out_ << "  return __exit;\n";
     out_ << "}\n";
     return;
   }
@@ -4851,11 +4876,15 @@ void CppEmitter::emit() {
     out_ << "    std::cerr << __main_result.error << '\\n';\n";
     out_ << "    return 1;\n";
     out_ << "  }\n";
-    out_ << "  return static_cast<int>(__main_result.value);\n";
+    out_ << "  const int __exit = static_cast<int>(__main_result.value);\n";
+    out_ << "  coord_rt::reportShareLeaks();\n";
+    out_ << "  return __exit;\n";
   } else {
-    out_ << "  return static_cast<int>(";
+    out_ << "  const int __exit = static_cast<int>(";
     emitMainCall();
     out_ << ");\n";
+    out_ << "  coord_rt::reportShareLeaks();\n";
+    out_ << "  return __exit;\n";
   }
   out_ << "}\n";
   out_ << "}  // namespace\n\n";

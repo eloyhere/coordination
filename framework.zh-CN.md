@@ -556,7 +556,7 @@ class Holder {
 7. **参数/返回**：`@Unique` 参数按值转移所有权；`@Share` 参数复制计数；`&` 参数只借用且 callee 不得存储。返回 `@Unique`/`@Share` 转移/共享所有权；禁止返回 `&`。
 8. **`@Unique` 转 `@Share`**：`@Share T r = box;` 把 `@Unique` 移入共享控制块，box 失效；反向不允许。
 9. **`const T&` 临时量**：绑定临时量时，临时量生命周期延长到该引用变量的 Scope 结束；不改变 owner 规则。
-10. **环**：只有 `@Share` 能成环；引用计数无法回收。直接自环（`x.field = x` / `this.field = this`，且字段为 `@Share`）在编译期发 `W0005`；一般间接环的运行期检测仍为 ⏳。`&` 不可存储，天然无环。
+10. **环**：只有 `@Share` 能成环；引用计数无法回收。直接自环（`x.field = x` / `this.field = this`，且字段为 `@Share`）在编译期发 `W0005`；程序退出时运行期会把仍存活的 `@Share` 对象报告为可能的环（`W0005`）。基于对象图的精确环检测仍为 ⏳。`&` 不可存储，天然无环。
 11. **静态/全局**：生命周期到程序结束；可被 `&` 借用，但借用仍不得逃逸。
 12. **保守检查（v0）**：`&` 只在当前函数内使用，不返回、不存储、不跨线程；不做完整生命周期参数化。
 13. **`@Weak T`**：非拥有、`std::weak_ptr<T>` 形式的 `@Share T` 观察者；默认空，可由 `@Share` 或另一个 `@Weak` 初始化/赋值。`isPresent()`/`isEmpty()` 判断是否过期；`lock()`/`upgrade()` 返回可空 `@Share T` 句柄，支持 `isPresent()/get()/orElse()`；过期后 `get()` 终止。
@@ -1162,7 +1162,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **121 项**：`coord_unit` 加 120 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 当前注册 **122 项**：`coord_unit` 加 121 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1949,6 +1949,7 @@ coorc config list|get|set
 | `super.method()` / `super.field` / `: super(args)` / `: field(expr)` | ✅ | e2e 覆盖 |
 | 枚举方法 / `implements` 接口 | ✅ | 包装类 + 底层整数 |
 | 基类引用/指针的虚分派 | ✅ | `examples/polymorphism.coo` |
+| `@Share` 环运行期启发式 | ✅ | 退出时把仍存活的 `@Share` 对象报告为 `W0005`；直接自环在编译期检查；`coord_e2e_share_cycle` |
 | `&` 借用 / `@Unique`/`@Share` 逃逸（JPA cascade） | 🚧 | 基础所有权/移动检查已落地；完整 borrow 分析 ⏳ |
 | 元注解 `@Inherit/@Repeatable/@Target/@Meta/@Retention/@Documented` | ✅ | 校验 + `@Inherit` effective 列表 |
 | Runtime/Enum 保留表 / 注解注释物化 | ✅ | `kRetainedAnnotations` / `k<Enum>Variants`；Invocation hook P4 |
@@ -1965,7 +1966,7 @@ coorc config list|get|set
 | `@Constructure` 类型化/命名字面量 | ✅ | `examples/constructure.coo`；负例 `constructure_error`（`E2076`）；`@Proxy` 类默认支持类型化/命名构造 |
 | `@Weak` C++ 映射 + weak API | ✅ | `std::weak_ptr<T>`；局部/字段/参数/返回值；`isPresent/isEmpty/lock/upgrade`；`coord_e2e_weak` |
 | 默认初始化 | ✅ | 局部变量、字段、数组和对象字面量临时值生成 `{}`；`coord_e2e_default_init` |
-| 整数运算检查 | ✅ | `+ - * / %`、`++/--`、`+= -= *= /= %=` 使用溢出/除零 helper，覆盖 64 位与 128 位；`<<`/`>>` 对 8/16/32/64/128 位使用范围/溢出 helper；`coord_e2e_division`、`coord_e2e_overflow`、`coord_e2e_compound`、`coord_e2e_shift` |
+| 整数运算检查 | ✅ | `+ - * / %`、`++/--`、`+= -= *= /= %=` 使用溢出/除零 helper，覆盖 64 位与 128 位；`<<`/`>>` 对 8/16/32/64/128 位使用范围/溢出 helper；`coord_e2e_division`、`coord_e2e_overflow`、`coord_e2e_compound`、`coord_e2e_shift`、`coord_e2e_share_cycle` |
 | `[]` 边界检查 | ✅ | `Array`/固定数组与 `ArrayView` 走 `checkedIndex`/`checkedIndexView`，越界终止；裸指针索引仍为 unsafe；`coord_e2e_bounds` |
 | `@Destructure` 目标类方法 + ProxyHandler trap | ✅ | `coord_e2e_destructure_annotation`；逐绑定 hook |
 | 代码块保留（`@Retention(Compile/Runtime)` 块） | ✅ | `examples/retention_block.coo` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`；`Invocation`/`enum` 块报 `E2044` |
@@ -1988,9 +1989,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器落地后的 121 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器落地后的 122 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-26）**：`ctest` 注册 **121 项**，Windows 全套 **121/121 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
+**基线（2026-11-26）**：`ctest` 注册 **122 项**，Windows 全套 **122/122 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
 
 **最终验收**：
 
