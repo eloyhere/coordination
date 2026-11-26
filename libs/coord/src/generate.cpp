@@ -3676,6 +3676,38 @@ void CppEmitter::emitExpr(const Expr* expr) {
         }
       }
       if (callee != nullptr && callee->kind == ExprKind::Member &&
+          callee->lhs != nullptr && callee->lhs->optionalField) {
+        const std::string& name = callee->name;
+        if (name == "isPresent") {
+          out_ << "((";
+          emitExpr(callee->lhs.get());
+          out_ << ") != nullptr)";
+          return;
+        }
+        if (name == "isEmpty") {
+          out_ << "((";
+          emitExpr(callee->lhs.get());
+          out_ << ") == nullptr)";
+          return;
+        }
+        if (name == "get") {
+          out_ << "coord_rt::optionalAbort(";
+          emitExpr(callee->lhs.get());
+          out_ << ", \"optional field is null\")";
+          return;
+        }
+        if (name == "orElse" && expr->args.size() == 1) {
+          out_ << "((";
+          emitExpr(callee->lhs.get());
+          out_ << ") ? *";
+          emitExpr(callee->lhs.get());
+          out_ << " : (";
+          emitExpr(expr->args[0].get());
+          out_ << "))";
+          return;
+        }
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Member &&
           callee->lhs != nullptr && callee->lhs->weakValue) {
         const std::string& name = callee->name;
         if (name == "isPresent") {

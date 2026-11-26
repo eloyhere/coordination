@@ -1,0 +1,33 @@
+class Box {
+public:
+    integer value;
+
+    Box() {
+        value = 0;
+    }
+
+    Box(integer initial) {
+        value = initial;
+    }
+}
+
+class Holder {
+public:
+    @Optional(Skip) Box* pointer = null;
+    @Optional(Skip) @Unique Box owned = null;
+    @Optional(Default(Box(5))) @Unique Box fallback = null;
+}
+
+integer main() {
+    Holder holder;
+    print(holder.pointer.isPresent());
+    print((*holder.pointer).value);
+    print(holder.owned.value);
+    print(holder.fallback.value);
+
+    Box local(7);
+    holder.pointer = &local;
+    print(holder.pointer.get().value);
+    print(holder.pointer.orElse(local).value);
+    return 0;
+}

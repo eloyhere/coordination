@@ -91,6 +91,7 @@ struct Expr : Node {
   std::string proxyMessage;
   int radix = 0;
   bool weakValue = false;
+  bool optionalField = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -283,6 +284,7 @@ struct Decl : Node {
   bool isUnique = false;
   bool isShare = false;
   bool isWeak = false;
+  bool isOptional = false;
   int length = 0;
   int radix = 0;
   bool isCore = false;

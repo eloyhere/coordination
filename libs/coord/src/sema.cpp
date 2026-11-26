@@ -1,6 +1,7 @@
 #include "coord/sema.h"
 
 #include <algorithm>
+#include <cctype>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -32,6 +33,41 @@ bool numericLike(const Type* type) {
   }
   return type->kind == TypeKind::Int || type->kind == TypeKind::Decimal ||
          type->kind == TypeKind::Float || type->name == "decimal";
+}
+
+void parseOptionalPolicy(const AnnotationUse& use, ProxyPolicy& policy,
+                         const Expr*& fallback) {
+  if (use.args.empty() || use.args[0] == nullptr) {
+    return;
+  }
+  const Expr* argument = use.args[0].get();
+  if (argument->kind == ExprKind::Name) {
+    std::string name = argument->name;
+    for (char& character : name) {
+      character = static_cast<char>(
+          std::tolower(static_cast<unsigned char>(character)));
+    }
+    if (name == "skip") {
+      policy = ProxyPolicy::Skip;
+    } else if (name == "abort") {
+      policy = ProxyPolicy::Abort;
+    } else if (name == "error") {
+      policy = ProxyPolicy::Error;
+    }
+  } else if (argument->kind == ExprKind::Call &&
+             argument->lhs != nullptr &&
+             argument->lhs->kind == ExprKind::Name &&
+             argument->args.size() == 1) {
+    std::string name = argument->lhs->name;
+    for (char& character : name) {
+      character = static_cast<char>(
+          std::tolower(static_cast<unsigned char>(character)));
+    }
+    if (name == "default") {
+      policy = ProxyPolicy::Default;
+      fallback = argument->args[0].get();
+    }
+  }
 }
 
 bool isComparisonOperator(const std::string& op) {
@@ -599,6 +635,23 @@ Checker::Variable* Checker::lookupVariable(std::string_view name) {
 bool Checker::checkOptionalDirectAccess(Expr* expr, std::string_view action) {
   if (expr == nullptr) {
     return false;
+  }
+  if (expr->lhs != nullptr && expr->lhs->optionalField) {
+    const Expr* field = expr->lhs.get();
+    const Expr* defaultExpr = field->optionalDefault;
+    if (field->proxyPolicy == ProxyPolicy::Error) {
+      diagnostics_.error(
+          expr->span, "E2048",
+          "un-narrowed @Optional field is used by " + std::string(action) +
+              "; configure @Optional(Skip|Abort|Default(expr)) or use "
+              "isPresent()/get()");
+      return false;
+    }
+    expr->optionalAccess = true;
+    expr->proxyPolicy = field->proxyPolicy;
+    expr->optionalDefault = defaultExpr;
+    expr->optionalSmart = field->optionalSmart;
+    return true;
   }
   Variable* variable = nullptr;
   Expr* marked = nullptr;
@@ -1352,6 +1405,10 @@ void Checker::checkClass(Decl& decl) {
         member->isShare = true;
       } else if (use.name == "Weak") {
         member->isWeak = true;
+      } else if (use.name == "Optional") {
+        member->isOptional = true;
+        member->proxyPolicy = ProxyPolicy::Error;
+        parseOptionalPolicy(use, member->proxyPolicy, member->proxyDefault);
       }
     }
     if (member->isUnique && member->isShare) {
@@ -1410,7 +1467,7 @@ void Checker::checkClass(Decl& decl) {
     }
     member->length = resolveLength(member->annotations, fieldType,
                                    member->span);
-    bool optionalField = false;
+    bool optionalField = member->isOptional;
     for (const AnnotationUse& use : member->annotations) {
       if (use.name == "Optional") {
         optionalField = true;
@@ -1421,6 +1478,15 @@ void Checker::checkClass(Decl& decl) {
         fieldType->kind != TypeKind::Class) {
       diagnostics_.error(member->span, "E2047",
                          "@Optional requires a pointer, @Unique or @Share");
+    }
+    if (optionalField && member->proxyPolicy == ProxyPolicy::Default &&
+        member->proxyDefault != nullptr && fieldType != nullptr) {
+      Type* expected = fieldType->kind == TypeKind::Pointer
+                           ? fieldType->pointee
+                           : fieldType;
+      Type* fallback = checkExpr(const_cast<Expr*>(member->proxyDefault));
+      requireAssignable(fallback, expected, member->proxyDefault->span,
+                        "@Optional Default(expr)");
     }
     bool duplicate = false;
     for (const FieldInfo& existing : type->fields) {
@@ -3465,6 +3531,25 @@ Type* Checker::checkCall(Expr* expr) {
 
   if (callee->kind == ExprKind::Member) {
     Type* baseType = checkExpr(callee->lhs.get());
+    if (callee->lhs != nullptr && callee->lhs->optionalField) {
+      Type* fieldType = callee->lhs->resolvedType;
+      Type* valueType =
+          fieldType != nullptr && fieldType->kind == TypeKind::Pointer
+              ? fieldType->pointee
+              : fieldType;
+      if (callee->name == "isPresent" || callee->name == "isEmpty") {
+        expr->resolvedType = boolType_;
+        return boolType_;
+      }
+      if (callee->name == "get") {
+        expr->resolvedType = valueType;
+        return valueType;
+      }
+      if (callee->name == "orElse" && expr->args.size() == 1) {
+        expr->resolvedType = valueType;
+        return valueType;
+      }
+    }
     if (callee->lhs != nullptr && callee->lhs->weakValue) {
       if (callee->name == "isPresent" || callee->name == "isEmpty") {
         expr->resolvedType = boolType_;
@@ -3977,7 +4062,7 @@ Type* Checker::checkMember(Expr* expr) {
 
   Type* baseType = checkExpr(expr->lhs.get());
   if (baseType != nullptr && baseType->kind == TypeKind::Class &&
-      expr->lhs != nullptr && expr->lhs->kind == ExprKind::Name &&
+      expr->lhs != nullptr &&
       expr->name != "isPresent" && expr->name != "isEmpty" &&
       expr->name != "get" && expr->name != "orElse") {
     checkOptionalDirectAccess(expr, "member access");
@@ -3991,6 +4076,13 @@ Type* Checker::checkMember(Expr* expr) {
     }
     if (field->decl != nullptr && field->decl->isWeak) {
       expr->weakValue = true;
+    }
+    if (field->decl != nullptr && field->decl->isOptional) {
+      expr->optionalField = true;
+      expr->proxyPolicy = field->decl->proxyPolicy;
+      expr->optionalDefault = field->decl->proxyDefault;
+      expr->optionalSmart =
+          field->decl->isUnique || field->decl->isShare;
     }
     expr->resolvedType = field->type;
     return field->type;

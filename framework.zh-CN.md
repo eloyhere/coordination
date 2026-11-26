@@ -596,7 +596,7 @@ JPA cascade 映射：
 | `Default(expr)` | 用 `expr` 作为回退值；必须可赋给目标类型/pointee | 类型不符 `E2005` |
 
 - `@Optional` 是 `@Target(type)` 注解，应用在类型 `T*`、`@Unique T`、`@Share T` 上（如 `@Optional integer*`、`@Optional @Unique Box`）。v0 中普通 `@Optional Class` 仅描述符场景，**不承诺运行期可空**；默认策略是 `Error`。
-- **v0 覆盖范围**：已验证的 policy 执行主要针对 **局部变量** `T*`/`@Unique`/`@Share`（直接解引用、成员访问、隐式转非空、局部 Optional 解构）、收窄、`@Proxy(handler, policy)` 的 `Skip`/`Abort`/`Error` 解构路径，以及静态/runtime `@Construct`/`@Destructure` 钩子。字段/参数/返回值上的 `@Optional` 已解析和校验，但完整 policy 执行仍不完整 🚧；`@Proxy` 的 `Default(expr)` 构造/解构、runtime handler 构造前钩子、任意非默认构造类的 `Skip` 默认值也仍属 🚧。
+- **v0 覆盖范围**：已验证的 policy 执行覆盖 **局部变量** `T*`/`@Unique`/`@Share`（直接解引用、成员访问、隐式转非空、局部 Optional 解构）、**参数与字段**、收窄、`@Proxy(handler, policy)` 的 `Skip`/`Abort`/`Error` 解构路径，以及静态/runtime `@Construct`/`@Destructure` 钩子。字段/参数/返回值上的 `@Optional` 已解析和校验，但完整 policy 执行仍不完整 🚧；`@Proxy` 的 `Default(expr)` 构造/解构、runtime handler 构造前钩子、任意非默认构造类的 `Skip` 默认值也仍属 🚧。
 - `@Proxy(handler, policy)` 为代理对象配置同一套四策略；不写 policy 时默认 `Skip`。`@Proxy` 策略同样作用于构造与解构路径（§4.8.1、§4.8.2）。
 - **直接访问**（Optional）指：`*p`、`p.field`、`p.method()`，以及把 optional 值赋给非 optional 变量/参数（隐式转非空）。
 - **收窄**：`if (p != null)`、`if (p.isPresent())` 的对应分支内视为已收窄；`if (p == null)` / `if (p.isEmpty())` 的 **else 分支**同理。收窄后访问不受 `Error` 策略限制。
@@ -1162,7 +1162,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **117 项**：`coord_unit` 加 116 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 当前注册 **118 项**：`coord_unit` 加 117 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1968,7 +1968,7 @@ coorc config list|get|set
 | `[]` 边界检查 | ✅ | `Array`/固定数组与 `ArrayView` 走 `checkedIndex`/`checkedIndexView`，越界终止；裸指针索引仍为 unsafe；`coord_e2e_bounds` |
 | `@Destructure` 目标类方法 + ProxyHandler trap | ✅ | `coord_e2e_destructure_annotation`；逐绑定 hook |
 | 代码块保留（`@Retention(Compile/Runtime)` 块） | ✅ | `examples/retention_block.coo` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`；`Invocation`/`enum` 块报 `E2044` |
-| 字段/参数/返回值上的 `@Optional`；`@Proxy` 的 `Default(expr)` 构造/解构；runtime 构造前钩子；任意非默认构造类的 `Skip` 默认值 | 🚧 | 已解析/校验，但完整 policy 执行仍不完整 |
+| 返回值上的 `@Optional`；`@Proxy` 的 `Default(expr)` 构造/解构；runtime 构造前钩子；任意非默认构造类的 `Skip` 默认值 | 🚧 | 参数与字段已实现；返回值策略及部分构造/解构回退仍不完整 |
 | `@Has/@Delete/@Keys/@Describe` trap | ⏳ | 仅声明，未展开 |
 | 交叉编译 `--target`/`--sysroot` | 🚧 | 设计锁定，正在实现 |
 | workspace / feature / 签名 / git 依赖 | ⏳ | workspace `members` 只解析 |
@@ -1986,9 +1986,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器落地后的 117 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器落地后的 118 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-26）**：`ctest` 注册 **117 项**，Windows 全套 **117/117 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
+**基线（2026-11-26）**：`ctest` 注册 **118 项**，Windows 全套 **118/118 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
 
 **最终验收**：
 
