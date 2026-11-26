@@ -556,7 +556,7 @@ class Holder {
 7. **参数/返回**：`@Unique` 参数按值转移所有权；`@Share` 参数复制计数；`&` 参数只借用且 callee 不得存储。返回 `@Unique`/`@Share` 转移/共享所有权；禁止返回 `&`。
 8. **`@Unique` 转 `@Share`**：`@Share T r = box;` 把 `@Unique` 移入共享控制块，box 失效；反向不允许。
 9. **`const T&` 临时量**：绑定临时量时，临时量生命周期延长到该引用变量的 Scope 结束；不改变 owner 规则。
-10. **环**：只有 `@Share` 能成环；引用计数无法回收。类型图会对类级 `@Share` 环（含自递归类型）发 `W0005`，直接自赋值也发 `W0005`；程序退出时运行期会把仍存活的 `@Share` 对象报告为可能的环。基于对象图的精确逐对象检测仍为 ⏳。`&` 不可存储，天然无环。
+10. **环**：只有 `@Share` 能成环；引用计数无法回收。类型图会对类级 `@Share` 环（含自递归类型）发 `W0005`，直接自赋值也发 `W0005`；运行期会记录 `@Share` 字段赋值形成的小对象图，退出时 DFS 检测环并发 `W0005`；若仍有存活对象但未检测到环，则报告可能泄漏。构造函数初始化列表和任意表达式别名产生的边可能缺失，因此运行期遍历仍是部分实现。`&` 不可存储，天然无环。
 11. **静态/全局**：生命周期到程序结束；可被 `&` 借用，但借用仍不得逃逸。
 12. **保守检查（v0）**：`&` 只在当前函数内使用，不返回、不存储、不跨线程；不做完整生命周期参数化。
 13. **`@Weak T`**：非拥有、`std::weak_ptr<T>` 形式的 `@Share T` 观察者；默认空，可由 `@Share` 或另一个 `@Weak` 初始化/赋值。`isPresent()`/`isEmpty()` 判断是否过期；`lock()`/`upgrade()` 返回可空 `@Share T` 句柄，支持 `isPresent()/get()/orElse()`；过期后 `get()` 终止。
@@ -1949,7 +1949,7 @@ coorc config list|get|set
 | `super.method()` / `super.field` / `: super(args)` / `: field(expr)` | ✅ | e2e 覆盖 |
 | 枚举方法 / `implements` 接口 | ✅ | 包装类 + 底层整数 |
 | 基类引用/指针的虚分派 | ✅ | `examples/polymorphism.coo` |
-| `@Share` 环检测 | ✅/⏳ | 类型图与直接自赋值发 `W0005`；退出期存活对象启发式；精确逐对象图遍历 ⏳；`coord_e2e_share_cycle` |
+| `@Share` 环检测 | ✅/⏳ | 类型图 + 直接自赋值发 `W0005`；运行期记录字段赋值边并在退出时 DFS 检测环；构造/别名边仍部分缺失；`coord_e2e_share_cycle` |
 | `&` 借用 / `@Unique`/`@Share` 逃逸（JPA cascade） | 🚧 | 基础所有权/移动检查已落地；完整 borrow 分析 ⏳ |
 | 元注解 `@Inherit/@Repeatable/@Target/@Meta/@Retention/@Documented` | ✅ | 校验 + `@Inherit` effective 列表 |
 | Runtime/Enum 保留表 / 注解注释物化 | ✅ | `kRetainedAnnotations` / `k<Enum>Variants`；Invocation hook P4 |

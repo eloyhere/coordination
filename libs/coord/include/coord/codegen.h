@@ -51,6 +51,7 @@ private:
   void emitBlock(const Stmt* block);
   void emitExpr(const Expr* expr);
   void emitInitializer(const Expr* expr, int radix);
+  void emitShareEdgeRecord(const Expr* assign);
 
   [[nodiscard]] std::string typeToString(const TypeExpr* type) const;
   [[nodiscard]] std::string sanitize(const std::string& name) const;

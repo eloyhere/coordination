@@ -405,6 +405,7 @@ void CppEmitter::emitPrelude() {
   out_ << "#include <type_traits>\n";
   out_ << "#include <limits>\n";
   out_ << "#include <vector>\n";
+  out_ << "#include <functional>\n";
   out_ << "#include <fstream>\n";
   out_ << "#include <chrono>\n";
   out_ << "#include <thread>\n";
@@ -835,25 +836,76 @@ void CppEmitter::emitPrelude() {
   out_ << "  }\n";
   out_ << "  return static_cast<T>(value >> amount);\n";
   out_ << "}\n";
-  out_ << "inline std::vector<std::weak_ptr<void>>& shareRegistry() {\n";
-  out_ << "  static std::vector<std::weak_ptr<void>> registry;\n";
+  out_ << "struct ShareRegistryEntry {\n";
+  out_ << "  std::weak_ptr<void> weak;\n";
+  out_ << "};\n";
+  out_ << "inline std::vector<ShareRegistryEntry>& shareRegistry() {\n";
+  out_ << "  static std::vector<ShareRegistryEntry> registry;\n";
   out_ << "  return registry;\n";
+  out_ << "}\n";
+  out_ << "inline std::unordered_map<void*, std::vector<void*>>& shareEdges() {\n";
+  out_ << "  static std::unordered_map<void*, std::vector<void*>> edges;\n";
+  out_ << "  return edges;\n";
+  out_ << "}\n";
+  out_ << "template <class T>\n";
+  out_ << "void* shareObjectAddress(T& value) { return &value; }\n";
+  out_ << "template <class T>\n";
+  out_ << "void* shareObjectAddress(std::shared_ptr<T>& value) {\n";
+  out_ << "  return value.get();\n";
+  out_ << "}\n";
+  out_ << "template <class T>\n";
+  out_ << "void* shareObjectAddress(const std::shared_ptr<T>& value) {\n";
+  out_ << "  return value.get();\n";
+  out_ << "}\n";
+  out_ << "inline void recordShareEdge(void* from, void* to) {\n";
+  out_ << "  if (from == nullptr) return;\n";
+  out_ << "  if (to == nullptr) {\n";
+  out_ << "    shareEdges().erase(from);\n";
+  out_ << "    return;\n";
+  out_ << "  }\n";
+  out_ << "  auto& edges = shareEdges()[from];\n";
+  out_ << "  if (std::find(edges.begin(), edges.end(), to) == edges.end()) {\n";
+  out_ << "    edges.push_back(to);\n";
+  out_ << "  }\n";
   out_ << "}\n";
   out_ << "template <class T, class... Args>\n";
   out_ << "std::shared_ptr<T> makeShared(Args&&... args) {\n";
   out_ << "  auto value = std::make_shared<T>(std::forward<Args>(args)...);\n";
-  out_ << "  shareRegistry().push_back(value);\n";
+  out_ << "  shareRegistry().push_back(ShareRegistryEntry{value});\n";
   out_ << "  return value;\n";
   out_ << "}\n";
   out_ << "inline void reportShareLeaks() {\n";
-  out_ << "  std::size_t live = 0;\n";
-  out_ << "  for (const auto& weak : shareRegistry()) {\n";
-  out_ << "    if (!weak.expired()) ++live;\n";
+  out_ << "  std::unordered_map<void*, std::weak_ptr<void>> live;\n";
+  out_ << "  for (const auto& entry : shareRegistry()) {\n";
+  out_ << "    if (auto locked = entry.weak.lock()) {\n";
+  out_ << "      live[locked.get()] = entry.weak;\n";
+  out_ << "    }\n";
   out_ << "  }\n";
-  out_ << "  if (live != 0) {\n";
-  out_ << "    std::cerr << \"W0005: \" << live\n";
+  out_ << "  std::unordered_map<void*, int> color;\n";
+  out_ << "  bool cycle = false;\n";
+  out_ << "  std::function<void(void*)> visit = [&](void* node) {\n";
+  out_ << "    color[node] = 1;\n";
+  out_ << "    const auto found = shareEdges().find(node);\n";
+  out_ << "    if (found != shareEdges().end()) {\n";
+  out_ << "      for (void* next : found->second) {\n";
+  out_ << "        if (live.find(next) == live.end()) continue;\n";
+  out_ << "        const int state = color[next];\n";
+  out_ << "        if (state == 1) cycle = true;\n";
+  out_ << "        else if (state == 0) visit(next);\n";
+  out_ << "      }\n";
+  out_ << "    }\n";
+  out_ << "    color[node] = 2;\n";
+  out_ << "  };\n";
+  out_ << "  for (const auto& entry : live) {\n";
+  out_ << "    if (color[entry.first] == 0) visit(entry.first);\n";
+  out_ << "  }\n";
+  out_ << "  if (cycle) {\n";
+  out_ << "    std::cerr << \"W0005: reference cycle detected among @Share \"\n";
+  out_ << "                 \"objects; use @Weak to break it\\n\";\n";
+  out_ << "  } else if (!live.empty()) {\n";
+  out_ << "    std::cerr << \"W0005: \" << live.size()\n";
   out_ << "              << \" @Share object(s) still alive at shutdown (possible \"\n";
-  out_ << "                 \"reference cycle; consider @Weak)\\n\";\n";
+  out_ << "                 \"leak; consider @Weak)\\n\";\n";
   out_ << "  }\n";
   out_ << "}\n";
   out_ << "inline void check(bool condition) {\n";
@@ -1987,6 +2039,33 @@ void CppEmitter::emitInitializer(const Expr* expr, int radix) {
   literalRadix_ = saved;
 }
 
+void CppEmitter::emitShareEdgeRecord(const Expr* assign) {
+  if (assign == nullptr || assign->kind != ExprKind::Assign ||
+      assign->lhs == nullptr || assign->lhs->kind != ExprKind::Member ||
+      assign->lhs->lhs == nullptr || assign->lhs->lhs->resolvedType == nullptr) {
+    return;
+  }
+  const Decl* owner = assign->lhs->lhs->resolvedType->decl;
+  const Decl* field = fieldOf(owner, assign->lhs->name);
+  if (field == nullptr || !field->isShare) {
+    return;
+  }
+  indent();
+  out_ << "coord_rt::recordShareEdge(coord_rt::shareObjectAddress(";
+  emitExpr(assign->lhs->lhs.get());
+  out_ << "), ";
+  if (assign->rhs != nullptr && assign->rhs->kind == ExprKind::NullLit) {
+    out_ << "nullptr";
+  } else if (assign->rhs != nullptr) {
+    out_ << "coord_rt::shareObjectAddress(";
+    emitExpr(assign->rhs.get());
+    out_ << ')';
+  } else {
+    out_ << "nullptr";
+  }
+  out_ << ");\n";
+}
+
 void CppEmitter::emitBlock(const Stmt* block) {
   if (block == nullptr) {
     return;
@@ -2258,6 +2337,7 @@ void CppEmitter::emitStmt(const Stmt* stmt) {
       indent();
       emitExpr(stmt->expr.get());
       out_ << ";\n";
+      emitShareEdgeRecord(stmt->expr.get());
       --depth_;
       line("}");
       return;
