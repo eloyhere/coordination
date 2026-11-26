@@ -1,0 +1,22 @@
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}
+
+class Factory {
+public:
+    @Unique Payload make() {
+        return Payload(7);
+    }
+}
+
+integer main() {
+    Factory factory;
+    @Unique Payload payload = factory.make();
+    print(payload.value);
+    return 0;
+}

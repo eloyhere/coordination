@@ -1,0 +1,29 @@
+// Single inheritance plus interfaces.
+
+interface Drawable {
+    void draw() const;
+}
+
+class Shape {
+public:
+    Shape() {}
+
+    integer sides() const {
+        return 0;
+    }
+}
+
+class Point extends Shape implements Drawable {
+public:
+    Point() {}
+
+    override void draw() const {
+        print("point");
+    }
+}
+
+integer main() {
+    Point p;
+    p.draw();
+    return 0;
+}

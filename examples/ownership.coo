@@ -1,0 +1,25 @@
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+
+    integer get() {
+        return value;
+    }
+}
+
+integer main() {
+    @Unique Payload owned = Payload(7);
+    @Share Payload shared = Payload(9);
+
+    print(owned.value);
+    print(owned.get());
+    print(shared.value);
+
+    owned.value = 8;
+    print(owned.value);
+    return 0;
+}

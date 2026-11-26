@@ -1,0 +1,10 @@
+integer main() {
+    integer value = 1;
+
+    print(value << 3);        // 8
+    print(value >> 1);        // 0
+    print((value << 4) >> 2); // 4
+    print(1 + 2 << 3);        // 24
+
+    return 0;
+}

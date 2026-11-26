@@ -1,0 +1,4 @@
+integer main(integer argc, Array<string> args) {
+    print(argc);
+    return 0;
+}

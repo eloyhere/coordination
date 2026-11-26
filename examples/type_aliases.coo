@@ -1,0 +1,14 @@
+integer main() {
+    Integer count = 3;
+    String name = "coordination";
+    Float ratio = 1.5;
+    Decimal fixed = 2.5;
+    Record value;
+
+    print(count);
+    print(name);
+    print(ratio);
+    print(fixed);
+
+    return 0;
+}

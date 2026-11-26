@@ -1,0 +1,7 @@
+// The exact class from the language sketch.
+// The compiler synthesizes nothing here: the user declared both members.
+
+class File {
+    File() {}
+    ~File() {}
+}

@@ -1,0 +1,15 @@
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}
+
+integer main() {
+    @Unique Payload first = Payload(1);
+    @Unique Payload second = first;
+    print(second.value);
+    return 0;
+}

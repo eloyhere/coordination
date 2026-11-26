@@ -1,0 +1,29 @@
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}
+
+class Holder {
+public:
+    @Unique Payload owned;
+    @Share Payload shared;
+
+    Holder() {
+        owned = Payload(7);
+        shared = Payload(9);
+    }
+
+    integer read() {
+        return owned.value + shared.value;
+    }
+}
+
+integer main() {
+    Holder holder;
+    print(holder.read());
+    return 0;
+}

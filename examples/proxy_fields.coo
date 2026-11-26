@@ -1,0 +1,25 @@
+class Trace implements ProxyHandler {
+public:
+    @Get
+    static void onGet() {
+        print("get");
+    }
+
+    @Set
+    static void onSet() {
+        print("set");
+    }
+}
+
+@Proxy(Trace)
+class Box {
+public:
+    integer value;
+}
+
+integer main() {
+    Box box;
+    box.value = 7;
+    print(box.value);
+    return 0;
+}

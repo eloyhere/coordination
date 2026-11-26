@@ -1,0 +1,32 @@
+class First implements InvocationHandler {
+public:
+    void before(integer value) {
+        print("first-before");
+    }
+
+    void after(integer result) {
+        print("first-after");
+    }
+}
+
+class Second implements InvocationHandler {
+public:
+    void before(integer value) {
+        print("second-before");
+    }
+
+    void after(integer result) {
+        print("second-after");
+    }
+}
+
+@Invocation(First, Second)
+integer work(integer value) {
+    print(value);
+    return value + 1;
+}
+
+integer main() {
+    print(work(3));
+    return 0;
+}

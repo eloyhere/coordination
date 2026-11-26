@@ -1,0 +1,28 @@
+class Point {
+public:
+    integer x;
+    string y;
+
+    @Constructure
+    Point(integer x, string y) {
+        this.x = x;
+        this.y = y;
+    }
+}
+
+integer main() {
+    integer a = 3;
+    string b = "hi";
+    Point p = {a, b};
+    print(p.x);
+    print(p.y);
+
+    Point q = {5, "ok"};
+    print(q.x + 1);
+    print(q.y);
+
+    Point r = {y = "named", x = 9};
+    print(r.x);
+    print(r.y);
+    return 0;
+}

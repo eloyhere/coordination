@@ -1,0 +1,28 @@
+class Animal {
+public:
+    Animal() {}
+
+    virtual void speak() const {
+        print("animal");
+    }
+}
+
+class Dog extends Animal {
+public:
+    Dog() {}
+
+    override void speak() const {
+        print("dog");
+    }
+}
+
+void speakTwice(const Animal& animal) {
+    animal.speak();
+    animal.speak();
+}
+
+integer main() {
+    Dog dog;
+    speakTwice(dog);
+    return 0;
+}

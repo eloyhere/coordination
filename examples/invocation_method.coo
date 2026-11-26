@@ -1,0 +1,25 @@
+class Trace implements InvocationHandler {
+public:
+    void before() {
+        print("before");
+    }
+
+    void after() {
+        print("after");
+    }
+}
+
+class Service {
+public:
+    @Invocation(Trace)
+    integer work() {
+        print("work");
+        return 1;
+    }
+}
+
+integer main() {
+    Service service;
+    print(service.work());
+    return 0;
+}

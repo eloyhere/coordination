@@ -1,0 +1,8 @@
+integer main() {
+    Array<integer> queue = [1, 2, 3];
+    ArrayView<integer> view = queue.view();
+    print(view.length());
+    print(view[1]);
+    print(view.isEmpty());
+    return 0;
+}

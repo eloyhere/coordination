@@ -1,0 +1,20 @@
+class Trace implements InvocationHandler {
+public:
+    void before() {
+        print("before");
+    }
+    void after() {
+        print("after");
+    }
+}
+
+@Invocation(Trace)
+integer work() {
+    print("work");
+    return 1;
+}
+
+integer main() {
+    print(work());
+    return 0;
+}

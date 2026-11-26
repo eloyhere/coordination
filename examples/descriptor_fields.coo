@@ -1,0 +1,66 @@
+class Base {}
+
+/// PointDocs.
+class Point extends Base {
+public:
+    integer x;
+    string y;
+
+    /// LengthDocs.
+    integer length() {
+        return x;
+    }
+
+    integer add(integer a, integer b) {
+        return a + b;
+    }
+}
+
+integer main() {
+    Point point;
+    Descriptor descriptor = point.getDescriptor();
+
+    print(descriptor.name);                  // Point
+    print(descriptor.baseNames.length());    // 1
+    print(descriptor.baseNames[0]);          // Base
+    print(descriptor.fieldCount());          // 2
+    print(descriptor.methodCount());         // 2
+    print(descriptor.fieldAt(1));            // y
+    print(descriptor.methodAt(1));           // add
+    print(descriptor.getDocument());         // Point docs.
+    print(descriptor.fieldTypeAt(0));        // integer
+    print(descriptor.methodReturnTypeAt(0)); // integer
+    print(descriptor.methodDocumentAt(0));   // LengthDocs.
+    print(descriptor.fieldNames.length());   // 2
+    print(descriptor.fieldNames[0]);         // x
+    print(descriptor.fieldNames[1]);         // y
+    print(descriptor.methodNames[0]);        // length
+    print(descriptor.hasField("x"));         // true
+    print(descriptor.hasField("z"));         // false
+    print(descriptor.hasMethod("length"));   // true
+    print(descriptor.fieldIndex("y"));        // 1
+    print(descriptor.fieldIndex("z"));        // -1
+    print(descriptor.methodIndex("length"));  // 0
+
+    Field field = descriptor.getField("x");
+    print(field.name);  // x
+    print(field.index); // 0
+    print(field.typeName); // integer
+    print(field.ownerName); // Point
+    print(field.modifiers); // 1
+
+    Array<Method> methods = descriptor.getMethods("length");
+    print(methods.length()); // 1
+    print(methods[0].name);  // length
+    print(methods[0].returnTypeName); // integer
+    print(methods[0].ownerName); // Point
+    print(methods[0].parameterCount); // 0
+    print(methods[0].modifiers); // 1
+    print(methods[0].document); // LengthDocs.
+
+    Array<Method> addMethods = descriptor.getMethods("add");
+    print(addMethods[0].parameterCount);      // 2
+    print(addMethods[0].parameterTypesText);  // integer,integer
+    print(descriptor.getMethods("missing").length()); // 0
+    return 0;
+}

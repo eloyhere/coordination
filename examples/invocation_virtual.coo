@@ -1,0 +1,37 @@
+class Trace implements InvocationHandler {
+public:
+    void before() {
+        print("before");
+    }
+
+    void after(integer result) {
+        print("after");
+    }
+}
+
+class Base {
+public:
+    @Invocation(Trace)
+    virtual integer work() const {
+        print("base");
+        return 1;
+    }
+}
+
+class Child extends Base {
+public:
+    override integer work() const {
+        print("child");
+        return 2;
+    }
+}
+
+void call(const Base& base) {
+    print(base.work());
+}
+
+integer main() {
+    Child child;
+    call(child);
+    return 0;
+}

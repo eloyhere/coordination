@@ -1,0 +1,33 @@
+class Point {
+public:
+    integer x;
+    string y;
+}
+
+class Trace implements ProxyHandler {
+public:
+    @Get
+    static void onGet() {
+        print("get");
+    }
+}
+
+@Proxy(Trace)
+class Box {
+public:
+    integer value;
+}
+
+integer main() {
+    Point point{1, "a"};
+    {integer x, string y} = point;
+    print(x);
+    print(y);
+
+    Box box;
+    box.value = 7;
+    {integer value} = box;
+    print(value);
+
+    return 0;
+}

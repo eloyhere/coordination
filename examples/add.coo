@@ -1,0 +1,4 @@
+// The exact declaration from the language sketch.
+// N is a type parameter constrained to the integer root type.
+
+integer add<N extends integer>(const N& a, const N& b);

@@ -1,0 +1,14 @@
+integer main() {
+    OrderedSet<string> names;
+    names.add("alice");
+    names.add("bob");
+    names.add("alice");
+
+    print(names.length());
+    print(names.contains("alice"));
+    print(names.contains("carol"));
+
+    names.remove("bob");
+    print(names.length());
+    return 0;
+}

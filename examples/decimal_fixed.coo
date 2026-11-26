@@ -1,0 +1,23 @@
+integer main() {
+    decimal a = 1.5;
+    decimal b = 0.25;
+
+    print(a + b); // 1.75
+    print(a - b); // 1.25
+    print(a * b); // 0.375
+    print(a / b); // 6
+    print(a > b); // true
+
+    decimal left = 3.0;
+    decimal right = 1.0;
+    print(left & right); // 1
+    print(left | right); // 3
+    print(left ^ right); // 2
+    print(left << 1);    // 6
+    print(left >> 1);    // 1
+
+    @Length(32) decimal narrow = 1.5;
+    print(narrow); // 1.5
+
+    return 0;
+}

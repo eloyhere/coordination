@@ -1,0 +1,25 @@
+integer main() {
+    Array<integer> queue = [1, 2, 3];
+    ArrayView<integer> view = queue.view();
+
+    integer* value = queue.get(1);
+    if (value != null) {
+        print(*value); // 2
+    } else {
+        print(0);
+    }
+
+    integer* missing = queue.get(99);
+    if (missing != null) {
+        print(*missing);
+    } else {
+        print("missing");
+    }
+
+    const integer* item = view.get(0);
+    if (item != null) {
+        print(*item); // 1
+    }
+
+    return 0;
+}

@@ -1,0 +1,19 @@
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}
+
+integer main() {
+    @Optional @Unique Payload empty = null;
+    print(empty.isPresent());
+    print(empty.isEmpty());
+
+    @Optional @Unique Payload full = Payload(7);
+    print(full.get().value);
+    print(full.orElse(Payload(0)).value);
+    return 0;
+}

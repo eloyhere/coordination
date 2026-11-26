@@ -1,0 +1,9 @@
+integer main() {
+    Class integerClass = (42).getClass();
+
+    print(integerClass.name);                  // integer
+    print(integerClass.getSuperClass().name);  // Object
+    print(integerClass.getSupperClass().name); // Object
+
+    return 0;
+}

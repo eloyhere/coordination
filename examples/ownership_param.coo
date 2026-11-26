@@ -1,0 +1,26 @@
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}
+
+class Sink {
+public:
+    void take(@Unique Payload payload) {
+        print(payload.value);
+    }
+
+    void share(@Share Payload payload) {
+        print(payload.value);
+    }
+}
+
+integer main() {
+    Sink sink;
+    sink.take(Payload(7));
+    sink.share(Payload(9));
+    return 0;
+}

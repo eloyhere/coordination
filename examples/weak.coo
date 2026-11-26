@@ -1,0 +1,38 @@
+class Box {
+public:
+    integer value;
+
+    Box(integer initial) {
+        value = initial;
+    }
+}
+
+class Holder {
+public:
+    @Weak Box box;
+}
+
+integer main() {
+    @Weak Box dangling;
+    print(dangling.isPresent());
+
+    @Share Box owner = Box(7);
+    @Weak Box weak = owner;
+    print(weak.isPresent());
+    if (weak.lock().isPresent()) {
+        print(weak.lock().get().value);
+    }
+
+    Holder holder;
+    holder.box = owner;
+    print(holder.box.isPresent());
+    print(holder.box.lock().get().value);
+
+    {
+        @Share Box temporary = Box(9);
+        dangling = temporary;
+        print(dangling.isPresent());
+    }
+    print(dangling.isPresent());
+    return 0;
+}

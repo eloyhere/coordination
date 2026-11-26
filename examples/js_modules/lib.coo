@@ -1,0 +1,9 @@
+integer twice(integer value) {
+    return value * 2;
+}
+
+integer triple(integer value) {
+    return value * 3;
+}
+
+export { twice, triple };

@@ -1,0 +1,15 @@
+class Point {
+public:
+    integer x;
+}
+
+integer main() {
+    Point point;
+    Class info = point.getClass();
+
+    print(info.name);                 // Point
+    print(info.getDescription());     // Point
+    print(info.getDescriptor().name); // Point
+    print((42).getClass().name);      // integer
+    return 0;
+}

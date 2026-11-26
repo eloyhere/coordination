@@ -1,0 +1,30 @@
+class Trace implements ProxyHandler {
+public:
+    @Construct
+    static void onConstruct(integer value) {
+        print("construct");
+    }
+
+    @Destructure
+    static void onDestructure(string field) {
+        print("destructure " + field);
+    }
+}
+
+@Proxy(Trace)
+class Box {
+public:
+    integer value;
+    Box(integer value) {
+        this.value = value;
+    }
+}
+
+integer main() {
+    Box box = {integer 5};
+    print(box.value);
+
+    {integer value} = box;
+    print(value);
+    return 0;
+}

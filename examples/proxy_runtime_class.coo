@@ -1,0 +1,23 @@
+@Retention(runtime)
+class Trace implements ProxyHandler {
+public:
+    @Call
+    void onCall(string method) {
+        print("trap");
+        print(method);
+    }
+}
+
+@Proxy(Trace)
+class Service {
+public:
+    void work() {
+        print("work");
+    }
+}
+
+integer main() {
+    Service service;
+    service.work();
+    return 0;
+}

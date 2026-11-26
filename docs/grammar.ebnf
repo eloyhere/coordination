@@ -1,0 +1,225 @@
+(*
+  Coordination grammar (draft).
+
+  Notation: ISO/IEC 14977 EBNF.
+  - { x }      zero or more
+  - [ x ]      optional
+  - ( x | y )  alternative
+  - (* ... *)  comment
+
+  Conventions:
+  - Identifiers are ASCII; literals follow the lexer in docs/02-spec.md.
+  - `Scope` is semantic: every `block` introduces a scope.
+  - Features marked [planned] are not implemented by the M0 bootstrap.
+*)
+
+(* ------------------------------------------------------------------------- *)
+(* Lexical                                                                   *)
+(* ------------------------------------------------------------------------- *)
+
+identifier      = letter | "_", { letter | digit | "_" } ;
+integer-literal = decimal-integer | hex-integer | bin-integer | oct-integer ;
+decimal-literal = digit, { digit | "_" }, ".", digit, { digit | "_" },
+                  [ exponent ] ;
+exponent        = ( "e" | "E" ), [ "+" | "-" ], digit, { digit } ;
+character-lit   = "'", ( character | escape ), "'" ;
+string-lit      = '"', { character | escape }, '"' ;
+
+(* ------------------------------------------------------------------------- *)
+(* Modules and declarations                                                  *)
+(* ------------------------------------------------------------------------- *)
+
+(* Keywords include: enumerate, class, interface, annotation, ...            *)
+
+compilation-unit = [ module-decl ], { import-decl }, { top-level-decl } ;
+
+module-decl      = "module", path, ";" ;
+import-decl      = "import", path, [ "as", identifier ],
+                   [ ".", "{", identifier, { ",", identifier }, "}" ], ";" ;
+path             = identifier, { ".", identifier } ;
+
+top-level-decl   = { annotation-use },
+                   [ "export" ],
+                   ( class-decl | interface-decl | annotation-decl
+                   | enum-decl | function-decl | const-decl ) ;
+
+class-decl       = [ "final" ], "class", identifier,
+                   [ generic-params ],
+                   [ "extends", type ],
+                   [ "implements", type, { ",", type } ],
+                   class-body, [ ";" ] ;
+
+enum-decl        = "enumerate", identifier,
+                   [ "implements", type, { ",", type } ],
+                   "{", [ enum-variant, { ",", enum-variant }, [ "," ] ],
+                   [ ";", { method-decl } ], "}", [ ";" ] ;
+
+enum-variant     = { annotation-use }, identifier, [ "=", expression ] ;
+
+interface-decl   = "interface", identifier, [ generic-params ],
+                   "{", { interface-member }, "}" ;
+
+annotation-decl  = "annotation", identifier, [ generic-params ],
+                   [ "(", params, ")" ],
+                   ( ";"
+                   | "{", { annotation-member }, "}" ) ;
+
+function-decl    = type, ( identifier | operator-name ),
+                   [ generic-params ], "(", params, ")",
+                   [ "where", constraint, { ",", constraint } ],
+                   ( block | ";" ) ;
+
+const-decl       = "const", [ type ], identifier, "=", expression, ";" ;
+
+(* ------------------------------------------------------------------------- *)
+(* Classes, interfaces, annotations                                          *)
+(* ------------------------------------------------------------------------- *)
+
+class-body       = "{", { access-section | class-member }, "}" ;
+access-section   = ( "public" | "private" | "protected" ), ":" ;
+class-member     = { annotation-use },
+                   ( field-decl | method-decl | constructor-decl
+                   | destructor-decl ) ;
+
+field-decl       = [ "const" | "final" ], type, identifier,
+                   [ "=", expression ], ";" ;
+
+method-decl      = { "virtual" | "override" | "final" | "static" },
+                   type, identifier, [ generic-params ],
+                   "(", params, ")", [ "const" ],
+                   ( block | ";" ) ;
+
+constructor-decl = identifier, "(", params, ")",
+                   [ ":", initializer, { ",", initializer } ], block ;
+initializer      = "super", "(", arguments, ")"
+                 | identifier, "(", arguments, ")" ;
+destructor-decl  = "~", identifier, "(", ")", block ;
+
+interface-member = { annotation-use },
+                   ( method-decl | destructor-decl ) ;
+
+annotation-member = { annotation-use },
+                    ( method-decl | field-decl ) ;
+
+(* ------------------------------------------------------------------------- *)
+(* Generic parameters and constraints                                        *)
+(* ------------------------------------------------------------------------- *)
+
+generic-params   = "<", generic-param, { ",", generic-param }, ">" ;
+generic-param    = identifier, [ "extends", type ] ;
+constraint       = type, [ "extends", type ] ;
+
+(* ------------------------------------------------------------------------- *)
+(* Types                                                                     *)
+(* ------------------------------------------------------------------------- *)
+
+type             = union-type ;
+union-type       = intersect-type, { "|", intersect-type } ;
+intersect-type   = postfix-type, { "&", postfix-type } ;
+postfix-type     = primary-type, { "?" | "*" | "[", expression, "]" } ;
+primary-type     = [ "const" ],
+                   ( path, [ "<", type, { ",", type }, ">" ]
+                   | "(", [ type, { ",", type } ], ")", "->", type
+                   | "(" type ")" ) ;
+
+(* ------------------------------------------------------------------------- *)
+(* Parameters and arguments                                                  *)
+(* ------------------------------------------------------------------------- *)
+
+params           = [ param, { ",", param } ] ;
+param            = type, identifier, [ "=", expression ] ;
+arguments        = [ expression, { ",", expression } ] ;
+
+(* ------------------------------------------------------------------------- *)
+(* Statements (each block is a Scope)                                         *)
+(* ------------------------------------------------------------------------- *)
+
+block            = "{", { statement }, "}" ;
+statement        = block
+                 | var-decl
+                 | "if", "(", expression, ")", statement,
+                   [ "else", statement ]
+                 | "while", "(", expression, ")", statement
+                 | "for", "(", [ for-init ], ";", [ expression ], ";",
+                   [ expression ], ")", statement
+                 | "return", [ expression ], ";"
+                 | "break", ";"
+                 | "continue", ";"
+                 | "unsafe", block
+                 | "match", "(", expression, ")", "{",
+                   { pattern, "=>", ( expression | block ), [ "," ] }, "}"
+                 | "~", postfix-expression, ";"      (* destructor declaration *)
+                 | expression, ";" ;
+
+var-decl         = { annotation-use }, [ "const" ], type, identifier,
+                   [ "=", expression
+                   | "(", arguments, ")"        (* 构造函数重载 *)
+                   | "{", arguments, "}"        (* 聚合逐属性 *) ], ";" ;
+for-init         = var-decl | expression ;
+
+(* ------------------------------------------------------------------------- *)
+(* Expressions                                                               *)
+(* ------------------------------------------------------------------------- *)
+
+expression       = assignment-expression | lambda-expression | method-reference ;
+
+(* 规划：Java 目标类型 + C++ 捕获；省略捕获列表 = 外部变量按值复制 *)
+lambda-expression = [ capture-list ], "(", [ param, { ",", param } ], ")",
+                    [ ":", type ], "->", ( expression | block ) ;
+
+capture-list      = "[", [ capture-item, { ",", capture-item } ], "]" ;
+capture-item      = [ "&" ], ( identifier | "this" ) | "=" | "&" ;
+
+(* 规划：Type::method / object::method *)
+method-reference  = ( path | expression ), "::", identifier ;
+assignment-expression = conditional-expression
+                 | unary-expression, assign-op, assignment-expression ;
+assign-op        = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                 | "&=" | "|=" | "^=" ;
+
+conditional-expression = logical-or-expression
+                 | "if", "(", expression, ")", block,
+                   [ "else", ( block | conditional-expression ) ] ;
+
+logical-or-expression  = logical-and-expression,
+                         { "||", logical-and-expression } ;
+logical-and-expression = bit-or-expression,
+                         { "&&", bit-or-expression } ;
+bit-or-expression      = bit-xor-expression, { "|", bit-xor-expression } ;
+bit-xor-expression     = bit-and-expression, { "^", bit-and-expression } ;
+bit-and-expression     = equality-expression, { "&", equality-expression } ;
+equality-expression    = relational-expression,
+                         { ( "==" | "!=" ), relational-expression } ;
+relational-expression  = additive-expression,
+                         { ( "<" | "<=" | ">" | ">=" ), additive-expression } ;
+additive-expression    = multiplicative-expression,
+                         { ( "+" | "-" ), multiplicative-expression } ;
+multiplicative-expression = unary-expression,
+                         { ( "*" | "/" | "%" ), unary-expression } ;
+
+unary-expression = [ "!" | "-" | "+" | "~" | "*" | "&" ], postfix-expression ;
+postfix-expression = primary-expression,
+                     { "(", arguments, ")"
+                     | ".", identifier
+                     | "[", expression, "]" } ;
+
+primary-expression = literal
+                   | "this"
+                   | path
+                   | "(", expression, ")"
+                   | block ;
+
+literal          = integer-literal | decimal-literal | character-lit
+                 | string-lit | "true" | "false" ;
+
+(* ------------------------------------------------------------------------- *)
+(* Annotations and patterns                                                  *)
+(* ------------------------------------------------------------------------- *)
+
+annotation-use   = "@", path, [ "(", arguments, ")" ] ;
+
+pattern          = "_"
+                 | literal
+                 | path, [ "(", [ pattern, { ",", pattern } ], ")" ]
+                 | pattern, "|", pattern
+                 | pattern, "if", expression ;

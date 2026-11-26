@@ -1,0 +1,4 @@
+integer main(Array<string> args) {
+    print(args.length());
+    return 0;
+}

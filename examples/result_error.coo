@@ -1,0 +1,15 @@
+@Result<integer>
+integer divide(integer a, integer b) {
+    if (b == 0) {
+        return error("division by zero");
+    }
+    return a / b;
+}
+
+@Result<integer>
+integer main() {
+    print("before");
+    divide(1, 0);
+    print("after");
+    return 0;
+}

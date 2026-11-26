@@ -1,0 +1,9 @@
+integer main() {
+    @Unsigned @Length(128) integer big = 65;
+    print(big);
+    big = big + 1;
+    print(big);
+    big = big * 2;
+    print(big);
+    return 0;
+}

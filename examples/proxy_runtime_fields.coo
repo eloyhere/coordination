@@ -1,0 +1,28 @@
+@Retention(runtime)
+class Trace implements ProxyHandler {
+public:
+    @Get
+    void onGet(string field) {
+        print("get");
+        print(field);
+    }
+
+    @Set
+    void onSet(integer value) {
+        print("set");
+        print(value);
+    }
+}
+
+@Proxy(Trace)
+class Box {
+public:
+    integer value;
+}
+
+integer main() {
+    Box box;
+    box.value = 7;
+    print(box.value);
+    return 0;
+}

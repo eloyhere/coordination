@@ -1,0 +1,24 @@
+# Build trees and toolchain output
+out/
+build/
+cmake-build-*/
+.vs/
+
+# Generated executables / objects / debug data
+*.exe
+*.dll
+*.lib
+*.obj
+*.o
+*.a
+*.pdb
+*.ilk
+*.stamp
+*.coord.cpp
+
+# CMake / IDE user state
+CMakeUserPresets.json
+*.user
+*.suo
+*.VC.db
+*.VC.opendb

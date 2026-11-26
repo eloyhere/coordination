@@ -1,0 +1,19 @@
+@Target(class)
+annotation Serializable {
+    @Processor
+    void generate(Description target) {
+        addFunctionReturning("serialize", target.fieldCount());
+    }
+}
+
+@Serializable
+class Data {
+public:
+    integer first;
+    string second;
+}
+
+integer main() {
+    print(serialize());
+    return 0;
+}

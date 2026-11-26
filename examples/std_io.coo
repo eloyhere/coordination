@@ -1,0 +1,21 @@
+integer main() {
+    string path = "coord_io_e2e.txt";
+
+    if (writeFile(path, "hello").isOk()) {
+        print("written");
+    }
+
+    if (fileExists(path)) {
+        print("exists");
+    }
+
+    if (readFile(path).isOk()) {
+        print(readFile(path).unwrap());
+    }
+
+    print(deleteFile(path));
+    print(timeMillis() > 0);
+    sleepMillis(1);
+
+    return 0;
+}

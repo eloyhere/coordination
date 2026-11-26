@@ -1,0 +1,14 @@
+import lib as l;
+
+class Sink {
+public:
+    void take(l.Payload payload) {
+        print(payload.value);
+    }
+}
+
+integer main() {
+    Sink sink;
+    sink.take(l.Payload(7));
+    return 0;
+}

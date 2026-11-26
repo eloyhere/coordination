@@ -1,0 +1,25 @@
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}
+
+class Holder {
+public:
+    @Unique Payload owned;
+
+    Holder() : owned(Payload(7)) {}
+
+    integer read() {
+        return owned.value;
+    }
+}
+
+integer main() {
+    Holder holder;
+    print(holder.read());
+    return 0;
+}

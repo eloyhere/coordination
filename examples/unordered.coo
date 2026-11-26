@@ -1,0 +1,15 @@
+integer main() {
+    UnorderedMap<string, integer> ages;
+    ages.set("alice", 30);
+    ages.set("bob", 25);
+    print(ages.length());
+    print(ages.get("alice").orElse(0));
+
+    UnorderedSet<string> names;
+    names.add("alice");
+    names.add("bob");
+    names.add("alice");
+    print(names.length());
+    print(names.contains("bob"));
+    return 0;
+}

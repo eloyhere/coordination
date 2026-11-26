@@ -1,0 +1,27 @@
+class Box {
+public:
+    integer value;
+
+    Box() {
+        value = 0;
+    }
+
+    Box(integer initial) {
+        value = initial;
+    }
+}
+
+integer main() {
+    @Optional(Skip) @Unique Box present = Box(9);
+    Box copied = present;
+    print(copied.value);
+
+    @Optional(Default(Box(5))) @Unique Box missing = null;
+    Box fallback = missing;
+    print(fallback.value);
+
+    Box assigned;
+    assigned = present;
+    print(assigned.value);
+    return 0;
+}

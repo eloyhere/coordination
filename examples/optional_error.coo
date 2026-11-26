@@ -1,0 +1,5 @@
+integer main() {
+    @Optional integer* pointer = null;
+    print(*pointer);
+    return 0;
+}

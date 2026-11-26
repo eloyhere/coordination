@@ -1,0 +1,18 @@
+class Holder {
+public:
+    integer value;
+    string text;
+}
+
+integer main() {
+    integer number;
+    string text;
+    boolean flag;
+    Holder holder;
+    print(number);
+    print(text == "");
+    print(flag);
+    print(holder.value);
+    print(holder.text == "");
+    return 0;
+}

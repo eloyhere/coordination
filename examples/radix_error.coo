@@ -1,0 +1,5 @@
+integer main() {
+    @Radix(3) integer mask = 1;
+    print(mask);
+    return 0;
+}

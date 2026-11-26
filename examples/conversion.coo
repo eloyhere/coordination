@@ -1,0 +1,27 @@
+class B {
+public:
+    B() {}
+}
+
+class A {
+public:
+    A() {}
+    A(B value) {}
+}
+
+class Point {
+public:
+    integer x;
+    integer y;
+}
+
+integer main() {
+    B b;
+    A converted = b;
+    A parentheses();
+
+    Point point{1, 2};
+    print(point.x);
+    print("ok");
+    return 0;
+}

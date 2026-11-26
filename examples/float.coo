@@ -1,0 +1,15 @@
+float twice(float value) {
+    return value * 2.0;
+}
+
+integer main() {
+    float ratio = 1.5;
+    float result = twice(ratio) + 0.25;
+
+    decimal fixed = result;
+
+    print(ratio);  // 1.5
+    print(result); // 3.25
+    print(fixed);  // 3.25
+    return 0;
+}

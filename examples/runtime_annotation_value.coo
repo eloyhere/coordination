@@ -1,0 +1,13 @@
+@Retention(runtime)
+@Target(class)
+annotation Tag {}
+
+@Tag("prod", 1)
+class Data {}
+
+integer main() {
+    print(hasRuntimeAnnotation("Data", "Tag"));
+    print(runtimeAnnotationValue("Data", "Tag"));
+    print(runtimeAnnotationValue("Data", "Missing"));
+    return 0;
+}

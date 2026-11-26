@@ -1,0 +1,17 @@
+@Target(class)
+annotation Generate {
+    @Processor
+    void generate(Description target) {
+        addFunction("generated");
+        addConstant("ANSWER", 42);
+    }
+}
+
+@Generate
+class Data {}
+
+integer main() {
+    generated();
+    print(ANSWER);
+    return 0;
+}

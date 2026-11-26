@@ -1,0 +1,4 @@
+integer main() {
+    print(twice(21));
+    return 0;
+}

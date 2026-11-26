@@ -1,0 +1,287 @@
+@Target(function, method)
+annotation Result {}
+
+interface ProxyHandler {}
+interface InvocationHandler {}
+
+// Specialized ProxyHandler marker interfaces. They extend ProxyHandler, so a
+// handler that implements any of them is also a valid @Proxy handler.
+interface MethodProxyHandler extends ProxyHandler {}
+interface DestructureProxyHandler extends ProxyHandler {}
+interface ConstructureProxyHandler extends ProxyHandler {}
+interface ClassProxyHandler extends ProxyHandler {}
+interface ObjectProxyHandler extends ProxyHandler {}
+interface FunctionProxyHandler extends ProxyHandler {}
+
+class Class {
+public:
+    string name;
+}
+
+enumerate Modifier {
+    None      = 0,
+    Public    = 1,
+    Private   = 2,
+    Protected = 4,
+    Static    = 8,
+    Final     = 16,
+    Virtual   = 32,
+    Override  = 64,
+    Abstract  = 128,
+    Const     = 256,
+    Optional  = 512,
+    Unique    = 1024,
+    Share     = 2048,
+}
+
+class Member {
+public:
+    string name;
+    integer modifiers;
+    @Optional Class owner;
+}
+
+class Field extends Member {
+public:
+    string name;
+    @Optional Class type;
+    string typeName;
+    string ownerName;
+    integer index;
+}
+
+class Function extends Member {
+public:
+    @Optional Class returnType;
+    Array<Class> parameterTypes;
+}
+
+class Method extends Function {
+public:
+    string name;
+    string returnTypeName;
+    integer parameterCount;
+    string parameterTypesText;
+    string ownerName;
+    string document;
+    Array<string> baseNames;
+}
+class Constructor extends Function {}
+
+class Descriptor {
+public:
+    string name;
+    Array<string> fieldNames;
+    Array<string> fieldTypes;
+    Array<integer> fieldModifiers;
+    Array<string> methodNames;
+    Array<string> methodReturnTypes;
+    Array<integer> methodParameterCounts;
+    Array<string> methodParameterTypeTexts;
+    Array<integer> methodModifiers;
+    Array<string> methodDocuments;
+    string document;
+    Array<string> baseNames;
+
+    string getDocument() {
+        return document;
+    }
+
+    string fieldAt(integer index) {
+        if (index < 0 || index >= fieldNames.length()) {
+            return "";
+        }
+        return fieldNames[index];
+    }
+
+    string fieldTypeAt(integer index) {
+        if (index < 0 || index >= fieldTypes.length()) {
+            return "";
+        }
+        return fieldTypes[index];
+    }
+
+    string methodDocumentAt(integer index) {
+        if (index < 0 || index >= methodDocuments.length()) {
+            return "";
+        }
+        return methodDocuments[index];
+    }
+
+    string methodReturnTypeAt(integer index) {
+        if (index < 0 || index >= methodReturnTypes.length()) {
+            return "";
+        }
+        return methodReturnTypes[index];
+    }
+
+    string methodAt(integer index) {
+        if (index < 0 || index >= methodNames.length()) {
+            return "";
+        }
+        return methodNames[index];
+    }
+
+    integer fieldCount() {
+        return fieldNames.length();
+    }
+
+    integer methodCount() {
+        return methodNames.length();
+    }
+
+    boolean hasField(string value) {
+        for field in fieldNames {
+            if (field == value) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    boolean hasMethod(string value) {
+        for method in methodNames {
+            if (method == value) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    integer fieldIndex(string value) {
+        integer index = 0;
+        for field in fieldNames {
+            if (field == value) {
+                return index;
+            }
+            index = index + 1;
+        }
+        return -1;
+    }
+
+    integer methodIndex(string value) {
+        integer index = 0;
+        for method in methodNames {
+            if (method == value) {
+                return index;
+            }
+            index = index + 1;
+        }
+        return -1;
+    }
+
+    Field getField(string value) {
+        Field result;
+        result.name = value;
+        result.index = this.fieldIndex(value);
+        if (result.index >= 0) {
+            result.typeName = fieldTypes[result.index];
+            result.ownerName = this.name;
+            result.modifiers = fieldModifiers[result.index];
+        }
+        return result;
+    }
+
+    Array<Method> getMethods(string value) {
+        Array<Method> result;
+        if (this.methodIndex(value) >= 0) {
+            Method method;
+            method.name = value;
+            integer index = this.methodIndex(value);
+            method.returnTypeName = methodReturnTypes[index];
+            method.parameterCount = methodParameterCounts[index];
+            method.parameterTypesText = methodParameterTypeTexts[index];
+            method.ownerName = this.name;
+            method.modifiers = methodModifiers[index];
+            method.document = methodDocuments[index];
+            result.pushBack(method);
+        }
+        return result;
+    }
+}
+class Reflection {}
+
+@Target(function, method)
+annotation Expect {}
+
+@Target(method)
+annotation Processor {}
+
+@Target(function, method)
+annotation Invocation {}
+
+@Target(class, method)
+@Retention
+annotation Proxy {}
+
+@Target(method)
+annotation Get {}
+
+@Target(method)
+annotation Set {}
+
+@Target(method)
+annotation Has {}
+
+@Target(method)
+annotation Delete {}
+
+@Target(method)
+annotation Keys {}
+
+@Target(method)
+annotation Describe {}
+
+@Target(method)
+annotation Call {}
+
+@Target(method)
+annotation Construct {}
+
+@Target(method)
+annotation Destructure {}
+
+@Target(constructor)
+annotation Constructure {}
+
+@Target(class)
+annotation Copy {}
+
+@Target(class, method)
+annotation Wrap {}
+
+@Target(class, function, method, variable)
+annotation Native {}
+
+@Target(interface)
+annotation FunctionalInterface {}
+
+@Target(function)
+annotation Test {}
+
+@Target(function)
+annotation Bench {}
+
+@Target(type)
+annotation Unique {}
+
+@Target(type)
+annotation Share {}
+
+@Target(type)
+annotation Weak {}
+
+@Target(type)
+annotation Optional {}
+
+@Target(type)
+annotation Signed {}
+
+@Target(type)
+annotation Unsigned {}
+
+@Target(type)
+annotation Length {}
+
+@Target(type)
+annotation Radix {}

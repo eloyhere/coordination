@@ -1,0 +1,5 @@
+integer main() {
+    line("generated.coo", 100);
+    print("ok");
+    return 0;
+}

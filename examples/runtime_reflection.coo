@@ -1,0 +1,27 @@
+class Base {
+public:
+    integer baseField;
+
+    void baseMethod() {}
+}
+
+class Child extends Base {
+public:
+    string childField;
+
+    void childMethod() {}
+}
+
+integer main() {
+    print(runtimeFieldCount("Child"));
+    print(runtimeFieldName("Child", 0));
+    print(runtimeFieldName("Child", 1));
+    print(runtimeMethodCount("Child"));
+    print(runtimeMethodName("Child", 0));
+    print(runtimeBase("Child"));
+    print(runtimeHasMember("Child", "childMethod"));
+    print(runtimeHasMember("Child", "missing"));
+    print(runtimeFieldType("Child", 0));
+    print(runtimeMethodType("Child", 0));
+    return 0;
+}

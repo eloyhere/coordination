@@ -1,0 +1,36 @@
+// Observable RAII order.
+//
+// Locals are destroyed in reverse construction order.
+// Holder has no user destructor, so the compiler synthesizes one:
+// members are destroyed in reverse declaration order (b, then a).
+
+class A {
+public:
+    A() {}
+    ~A() { print("~A"); }
+}
+
+class B {
+public:
+    B() {}
+    ~B() { print("~B"); }
+}
+
+class Holder {
+    A a;
+    B b;
+}
+
+integer main() {
+    print("scope1");
+    {
+        A x;
+        B y;
+    }
+    print("scope2");
+    {
+        Holder h;
+    }
+    print("done");
+    return 0;
+}

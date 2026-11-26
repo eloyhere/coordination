@@ -1,0 +1,23 @@
+@Radix(16)
+const integer MASK = 255;
+
+class Flags {
+public:
+    @Radix(2)
+    integer bits = 10;
+
+    @Radix(8)
+    integer mode = 64;
+}
+
+integer main() {
+    @Radix(16)
+    integer mask = 255;
+    @Radix(2)
+    integer flags = 10;
+    @Radix(8)
+    integer mode = 64;
+    Flags value;
+    print(MASK + mask + flags + mode + value.bits + value.mode);
+    return 0;
+}

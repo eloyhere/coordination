@@ -1,0 +1,34 @@
+// Program-level portability: the same source runs on Windows, macOS and Linux.
+// The platform helpers are compiler builtins lowered to portable C++ runtime
+// code (Windows argv/console are converted to UTF-8).
+
+integer main() {
+    print(operatingSystem() == "windows" || operatingSystem() == "linux" ||
+          operatingSystem() == "macos" || operatingSystem() == "freebsd");
+    print(architecture() != "");
+    print(targetTriple() != "");
+    print(pathSeparator() == '/' || pathSeparator() == '\\');
+    print(lineSeparator() != "");
+    print(executableSuffix() == ".exe" || executableSuffix() == "");
+    print(pathFileName(pathJoin("data", "file.txt")) == "file.txt");
+    print(pathExtension("file.txt") == ".txt");
+    print(pathNormalize(pathJoin("data", "..")) == ".");
+    print(pathIsAbsolute(currentDirectory()));
+    print(pathExists(currentDirectory()));
+    print(homeDirectory() != "");
+    print(temporaryDirectory() != "");
+    print(environment("PATH").isOk());
+    print(setEnvironment("COORD_PLATFORM_TEST", "1"));
+    print(environment("COORD_PLATFORM_TEST").unwrap() == "1");
+
+    string directory = pathJoin(currentDirectory(), "coord_platform_test");
+    print(createDirectories(directory));
+    string file = pathJoin(directory, "data.txt");
+    print(writeFile(file, "hello").isOk());
+    print(pathExists(file));
+    print(readFile(file).unwrap() == "hello");
+    print(listDirectory(directory).unwrap().length() > 0);
+    print(deleteFile(file));
+    print(deleteDirectory(directory));
+    return 0;
+}

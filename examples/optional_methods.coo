@@ -1,0 +1,13 @@
+integer main() {
+    @Optional integer* pointer = null;
+    if (pointer.isEmpty()) {
+        print("empty");
+    }
+    print(pointer.isPresent());
+
+    integer value = 5;
+    @Optional integer* present = &value;
+    print(present.get());
+    print(present.orElse(0));
+    return 0;
+}

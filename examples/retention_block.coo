@@ -1,0 +1,12 @@
+integer main() {
+    @Retention(Compile)
+    {
+        print("compile-time");
+    }
+
+    @Retention(Runtime)
+    {
+        print("runtime");
+    }
+    return 0;
+}

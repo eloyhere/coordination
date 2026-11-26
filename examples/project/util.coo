@@ -1,0 +1,3 @@
+integer add(integer left, integer right) {
+    return left + right;
+}

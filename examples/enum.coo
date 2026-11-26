@@ -1,0 +1,11 @@
+enumerate Color {
+    Red,
+    Green = 3,
+    Blue,
+}
+
+integer main() {
+    Color c = Color.Green;
+    print(c);
+    return 0;
+}

@@ -1,0 +1,6 @@
+import {twice} from lib;
+
+integer main() {
+    print(triple(2));
+    return 0;
+}

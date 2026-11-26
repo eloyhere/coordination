@@ -1,0 +1,14 @@
+integer main() {
+    Array<integer> queue;
+    queue.pushBack(1);
+    queue.pushBack(2);
+    queue.pushFront(0);
+    print(queue.length());
+    print(queue.isEmpty());
+    print(queue.popFront());
+    print(queue.popFront());
+    print(queue.popBack());
+    queue.clear();
+    print(queue.length());
+    return 0;
+}

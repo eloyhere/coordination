@@ -1,0 +1,24 @@
+class Adjust implements InvocationHandler {
+public:
+    void before(integer& value) {
+        value = value + 1;
+    }
+
+    void after(integer& result) {
+        result = result * 2;
+    }
+}
+
+class Service {
+public:
+    @Invocation(Adjust)
+    integer work(integer value) {
+        return value;
+    }
+}
+
+integer main() {
+    Service service;
+    print(service.work(3));
+    return 0;
+}

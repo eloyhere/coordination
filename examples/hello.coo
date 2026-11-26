@@ -1,0 +1,23 @@
+// Classes, constructors, methods, and a program entry point.
+
+class File {
+    string path;
+
+public:
+    File(string p) {
+        this.path = p;
+    }
+
+    ~File() {}
+
+    integer size() const {
+        return 0;
+    }
+}
+
+integer main() {
+    File f("hello.coo");
+    print("hello, coordination");
+    print(f.size());
+    return 0;
+}

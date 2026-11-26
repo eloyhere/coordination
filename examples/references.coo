@@ -1,0 +1,10 @@
+integer main() {
+    integer& mutable = 5;
+    mutable++;
+
+    const integer& value = 7;
+
+    print(mutable);
+    print(value);
+    return 0;
+}

@@ -1,0 +1,14 @@
+integer main() {
+    OrderedMap<string, integer> ages;
+    ages.set("alice", 30);
+    ages.set("bob", 25);
+
+    print(ages.length());
+    print(ages.contains("alice"));
+    print(ages.get("alice").orElse(0));
+    print(ages.get("missing").isPresent());
+
+    ages.remove("alice");
+    print(ages.length());
+    return 0;
+}

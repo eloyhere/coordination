@@ -1,0 +1,58 @@
+enumerate Color {
+    Red,
+    Green,
+    Blue,
+}
+
+integer main() {
+    integer value = 2;
+
+    switch (value) {
+        case 1: {
+            print("one");
+        }
+        case 2: {
+            print("two");
+        }
+        default: {
+            print("other");
+        }
+    }
+
+    switch (value) {
+        case 99: {
+            print("never");
+        }
+        default: {
+            print("fallback");
+        }
+    }
+
+    Color color = Color.Green;
+    switch (color) {
+        case Color.Red: {
+            print("red");
+        }
+        case Color.Green: {
+            print("green");
+        }
+        default: {
+            print("blue");
+        }
+    }
+
+    string name = "b";
+    switch (name) {
+        case "a": {
+            print("a");
+        }
+        case "b": {
+            print("b");
+        }
+        default: {
+            print("unknown");
+        }
+    }
+
+    return 0;
+}

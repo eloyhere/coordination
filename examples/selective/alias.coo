@@ -1,0 +1,6 @@
+import lib as l;
+
+integer main() {
+    print(l.twice(2));
+    return 0;
+}

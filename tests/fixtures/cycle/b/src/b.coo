@@ -1,0 +1,1 @@
+export integer b() { return 2; }

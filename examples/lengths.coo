@@ -1,0 +1,7 @@
+integer main() {
+    @Unsigned @Length(32) integer wide = 65;
+    @Signed @Length(16) integer narrow = -2;
+    print(wide);
+    print(narrow);
+    return 0;
+}

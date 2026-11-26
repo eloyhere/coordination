@@ -1,0 +1,31 @@
+class Animal {
+public:
+    Animal(integer legs) {
+        this.legs = legs;
+    }
+
+    virtual void speak() const {
+        print("animal");
+    }
+
+    integer legs;
+}
+
+class Dog extends Animal {
+public:
+    Dog() : super(4), name("rex") {}
+
+    override void speak() const {
+        super.speak();
+        print("dog");
+    }
+
+    string name;
+}
+
+integer main() {
+    Dog d;
+    d.speak();
+    print(d.legs);
+    return 0;
+}

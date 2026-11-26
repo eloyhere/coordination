@@ -1,0 +1,6 @@
+import math;
+
+integer main() {
+    print(add(2, 3));
+    return 0;
+}

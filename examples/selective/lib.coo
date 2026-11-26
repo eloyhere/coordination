@@ -1,0 +1,16 @@
+export integer twice(integer value) {
+    return value * 2;
+}
+
+export integer triple(integer value) {
+    return value * 3;
+}
+
+export class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}

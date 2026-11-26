@@ -1,0 +1,12 @@
+@Retention(runtime)
+@Target(class)
+annotation Marker {}
+
+@Marker
+class Data {}
+
+integer main() {
+    print(hasRuntimeAnnotation("Data", "Marker"));
+    print(hasRuntimeAnnotation("Data", "Missing"));
+    return 0;
+}

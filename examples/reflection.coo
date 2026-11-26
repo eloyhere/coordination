@@ -1,0 +1,31 @@
+@Target(class)
+annotation Marker {}
+
+@Marker
+class Data {
+public:
+    integer first;
+    string second;
+
+    void run(integer count, string label) {}
+}
+
+integer main() {
+    Reflector<Data> info;
+    print(info.name());
+    print(info.kind());
+    print(info.fieldCount());
+    print(info.methodCount());
+    print(info.fieldName(0));
+    print(info.fieldType(0));
+    print(info.methodName(0));
+    print(info.methodReturnType(0));
+    print(info.methodParamCount(0));
+    print(info.methodParamType(0, 0));
+    print(info.methodParamType(0, 1));
+    print(info.annotationCount());
+    print(info.annotationName(0));
+    print(info.hasAnnotation("Marker"));
+    print(info.hasAnnotation("Missing"));
+    return 0;
+}

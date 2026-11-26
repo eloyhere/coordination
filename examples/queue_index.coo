@@ -1,0 +1,9 @@
+integer main() {
+    Array<integer> queue;
+    queue.pushBack(1);
+    queue.pushBack(2);
+    queue[0] = 7;
+    print(queue[0]);
+    print(queue[1]);
+    return 0;
+}

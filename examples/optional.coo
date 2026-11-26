@@ -1,0 +1,12 @@
+integer main() {
+    @Optional integer* pointer = null;
+    if (pointer == null) {
+        print("empty");
+    }
+
+    @Optional integer* defaulted;
+    if (defaulted == null) {
+        print("also-empty");
+    }
+    return 0;
+}

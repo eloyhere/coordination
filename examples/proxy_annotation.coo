@@ -1,0 +1,32 @@
+@Target(method)
+annotation Trace implements ProxyHandler {
+    @Call
+    void call(string method) {
+        print("call");
+        print(method);
+    }
+
+    @Get
+    void get(string field) {
+        print("get");
+        print(field);
+    }
+}
+
+@Proxy(Trace)
+class Box {
+public:
+    integer value;
+
+    void run() {
+        print("run");
+    }
+}
+
+integer main() {
+    Box box;
+    box.value = 7;
+    print(box.value);
+    box.run();
+    return 0;
+}

@@ -1,0 +1,524 @@
+# Coordination 快速上手
+
+> 本文件是 Coordination 的 QuickStart、CLI、工具链与包管理器使用说明；语言与框架的权威定义见 [framework.zh-CN.md](framework.zh-CN.md)。
+
+Coordination 是面向系统编程的静态类型语言：**没有宏**，编译期元编程由注解、描述符、反射与 proxy 驱动；对象生命周期复用 C++ RAII，当前后端输出 C++20。
+
+- 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
+- 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
+- 当前基线：**116 项 CTest**，Windows 全套 **116/116 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
+
+## 1 30 秒跑起来
+
+前置：CMake 3.20+、Ninja、C++20 宿主编译器：
+
+- Windows：Visual Studio 2022（MSVC 14.3x），在 **x64 Native Tools Command Prompt for VS 2022** 中执行；
+- Linux/macOS：GCC 10+ 或 Clang 12+（`c++` 在 `PATH` 中）。
+
+Windows：
+
+```bat
+cmake -S . -B out\build\coord -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build out\build\coord --clean-first
+ctest --test-dir out\build\coord --output-on-failure
+
+set COORC=out\build\coord\tools\coorc\coorc.exe
+%COORC% run examples\hello.coo
+```
+
+Linux/macOS：
+
+```bash
+cmake --preset linux-release     # 或 macos-release / linux-debug
+cmake --build out/build/linux-release
+ctest --test-dir out/build/linux-release --output-on-failure
+
+./out/build/linux-release/tools/coorc/coorc run examples/hello.coo
+```
+
+输出：
+
+```text
+hello, coordination
+0
+```
+
+创建一个包并构建：
+
+```bat
+%COORC% init my-app --name my_app
+%COORC% build my-app -o out\my_app.exe
+```
+
+> **修改头文件后必须清理重建**：MSVC 的 `showIncludes` 输出为中文，Ninja 无法可靠解析头文件依赖。请使用 `--clean-first` 或删除 `out\build\coord`。
+
+## 2 第一个程序与主函数
+
+```coo
+integer main() {
+    print("hello");
+    return 0;
+}
+```
+
+主函数**只能**返回 `integer`，不存在 `int`、`void main` 或隐式返回。支持三种签名：
+
+```coo
+integer main() { return 0; }
+
+integer main(Array<string> args) {
+    print(args.length());
+    return 0;
+}
+
+integer main(integer argc, Array<string> args) {
+    print(argc);
+    return 0;
+}
+```
+
+- `void main()`、`decimal main()`、任意其他参数形式报 `E2052`；
+- `@Result<T>` 只改变错误传播，不改变“必须返回 `integer`”；
+- 生成的 C++ 入口会把结果转成进程退出码。
+
+## 3 构建与测试
+
+```bat
+cmake -S . -B out\build\coord -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build out\build\coord --clean-first
+ctest --test-dir out\build\coord --output-on-failure
+```
+
+Linux/macOS preset：
+
+```bash
+cmake --preset linux-release
+cmake --build out/build/linux-release
+ctest --test-dir out/build/linux-release --output-on-failure
+```
+
+- Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
+- `ctest` 注册 **116 项**（1 个单元测试 + 115 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
+
+## 4 CLI
+
+### 4.1 编译、运行与检查
+
+```bat
+coorc check examples\add.coo
+coorc run examples\hello.coo
+coorc build examples\project -o out\project.exe
+coorc build examples\hello.coo -o out\hello.exe --incremental
+coorc check examples\hello.coo --emit-coox out\hello.coox
+coorc --emit-cpp out\hello.cpp examples\hello.coo
+```
+
+| 命令 / 选项 | 作用 |
+| --- | --- |
+| `check <file-or-dir>` | 加载、词法、语法、注解处理器、Sema、ConstEval；不生成可执行文件 |
+| `build <file-or-dir>` | 到 C++ lowering + 宿主编译/链接；`-o` 指定产物 |
+| `run <file>` | 构建并执行；交叉编译目标不能 `run` |
+| `--emit-cpp <file>` | 输出生成的 C++（`-` 表示 stdout） |
+| `--emit-coox <file>` | 输出声明级模块接口摘要 |
+| `--incremental` | 基于 `.coo`、根清单与 `.coox` stamp 跳过未变更构建 |
+| `--keep-cpp` | 保留中间 C++ 文件 |
+| `--cxx <path>` | 指定宿主 C++ 编译器 |
+| `--cxx-flavor msvc\|gnu` | 强制编译器参数风格 |
+| `--target <triple>` | 交叉编译目标（clang 传 `--target`） |
+| `--sysroot <path>` | 交叉编译 sysroot |
+| `--dump-tokens` / `--dump-ast` / `--print-consts` | 调试输出；`--print-consts` 同时显示 `@Retention(Compile)` 块的编译期输出 |
+| `-Werror` | warning 升级为 error |
+| `--verbose` | 打印宿主命令行 |
+| `--version` | 版本 |
+
+宿主编译器查找顺序：`--cxx` → `COORD_CXX` → `CXX` → 平台候选
+（Windows：`cl`/`clang++`/`g++`；其它：`c++`/`clang++`/`g++`）。
+
+### 4.2 测试
+
+```bat
+coorc test examples\test_sample.coo
+coorc test examples\test_sample.coo --filter addition
+```
+
+`@Test` 标注零参、返回 `void` 的函数；`coorc test` 编译并**串行**运行当前文件收集到的测试，失败非零退出并打印文件/行。断言 API：`assert`、`assertEq`、`assertTrue`、`assertFalse`。
+
+### 4.3 outline、deps 与接口
+
+```bat
+coorc outline examples\hello.coo
+coorc deps tests\fixtures\two_packages\app
+coorc check examples\hello.coo --emit-coox out\hello.coox
+```
+
+- `outline` 输出模块/类/字段/方法/构造/析构/枚举变体，含签名、访问、注解、proxy 标记；tree 由 descriptor 构建。
+- `deps` 输出依赖优先顺序，循环依赖报错。
+- `.coox` 是声明级接口/元数据，供增量构建与跨包导入。
+
+### 4.4 包命令
+
+```bat
+coorc init [dir] [--name <name>] [--force]
+coorc install [--locked|--frozen] [--offline] [--no-dev] [--all-optional]
+coorc update [package...]
+coorc add <name[@req] | path> [--dev] [--path]
+coorc remove <name>
+coorc list
+coorc tree
+coorc clean [--cache]
+coorc pack [-o archive.tar.gz]
+coorc publish [--dry-run]
+coorc search <term>
+```
+
+包命令共用：`--manifest <path>`、`--mirror <name|url>`、`--registry <name|url>`、`--verbose`。清单自动从当前目录向上查找。`add`/`remove` 先改清单再安装，安装失败自动回滚清单。
+
+### 4.5 镜像、配置与诊断
+
+```bat
+coorc mirror list|show|add|remove|use|test|auto
+coorc config list|get|set
+coorc doctor [--network]
+coorc platform
+```
+
+- `mirror test` 探测可达性与延迟；`mirror auto` 选择当前最快镜像。
+- `doctor` 检查编译器候选、`curl`、配置/缓存目录、清单与网络；`platform` 打印宿主、目标三元组与可执行/对象/库命名。
+- `config set mirror.timeout-ms 5000` 可调整超时。
+
+## 5 包管理器与镜像简明用法
+
+### 5.1 清单
+
+包根目录有 `coordination.toml`（推荐）或 `coord.pkg`（M0 行式格式）即可成为包；两者同时存在时优先 `coordination.toml`。
+
+`coord.pkg`：
+
+```text
+name app
+version 0.1.0
+source src
+dependency ../lib
+dependency math ^1.2
+dev-dependency testkit 0.1
+```
+
+`coordination.toml`：
+
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2026"
+source = "src"
+
+[dependencies]
+math = "^1.2"
+local = { path = "../lib" }
+core = { version = "~0.3", platform = "windows" }
+
+[dev-dependencies]
+testkit = "0.1"
+
+[registries]
+official = "https://registry.coordination-lang.org"
+
+[[mirrors]]
+name = "cn"
+registry = "official"
+url = "https://cn.registry.coordination-lang.org"
+priority = 10
+```
+
+- 版本约束：`^`、`~`、`*`、`>=`/`<`、`=1.2.3`；预发布只在其 `major.minor.patch` 被显式约束时匹配。
+- `platform` 过滤支持 `windows`/`linux`/`macos`/`unix`/架构名与 `!` 取反；`optional = true` 仅在 `--all-optional` 时解析。
+- workspace `[workspace] members` 当前只解析、不递归安装。
+
+### 5.2 安装、锁与 vendor
+
+```bat
+coorc install
+coorc install --locked          # 锁文件过期直接失败，CI 推荐
+coorc install --frozen          # 不写锁文件
+coorc install --offline         # 只读缓存与 vendor
+coorc update math               # 只更新指定包
+coorc build tests\fixtures\two_packages\app -o out\app.exe
+```
+
+- 注册表包解压到 `coord_modules/<name>/`（含 `.coord-package.toml`），路径依赖不复制。
+- `coord.lock` 固定版本、来源、注册表 URL、SHA-256 与依赖边；`install/update/add/remove` 自动原子写入。
+- `coorc build` 自动收集 `coord_modules/*`、清单中的路径依赖（递归）与当前包 `source` 下的 `.coo`，因此安装后无需改语言 `import`。
+- 增量 stamp 包含根清单、`coord.lock`、各 vendor 清单、文件数与最新 mtime，以及宿主目标三元组与编译器。
+
+### 5.3 注册表
+
+注册表就是一棵目录树（本地目录或 HTTP(S) 根）：
+
+```text
+index.toml
+index/<name>.toml
+packages/<name>/<version>.tar.gz
+health
+```
+
+`coorc pack` 生成确定性 `.tar.gz`（条目排序、mtime 0、gzip stored 块）；`coorc publish` 写本地注册表或通过系统 `curl` PUT 到远程；凭据来自 `COORD_TOKEN`。归档 SHA-256 在解压前校验。
+
+### 5.4 镜像
+
+- **registry** 是仓库端点；**mirror** 是同一 registry 的另一个端点，带 `priority`（越大越先尝试）。
+- 选择顺序：显式 `--mirror` → 项目配置 → 用户配置 → 内置目录；同一 registry 的镜像按 priority 降序尝试，失败自动切换。
+- 连续失败写入 `<cache>/mirror-health.toml`，冷却 5 分钟；`health` 缺失时探测 `index.toml`。
+- 配置层：内置 → 用户 `config.toml` → 项目清单 → 环境变量 → 命令行。环境变量：`COORD_REGISTRY`、`COORD_MIRROR`、`COORD_OFFLINE`、`COORD_TIMEOUT_MS`、`COORD_CONFIG`、`COORD_CACHE_DIR`、`COORD_CURL`。
+- 内置 `cn`/`eu` 默认禁用，URL 是占位端点；实际使用时用 `mirror add` 或项目清单覆盖。
+
+```bat
+coorc mirror add cn https://cn.example/coord --registry official --priority 10
+coorc mirror use cn
+coorc mirror test cn
+coorc config set mirror.timeout-ms 5000
+```
+
+### 5.5 缓存
+
+```text
+<cache>/coord/
+  registries/<hash>/index/...
+  downloads/<name>-<version>.archive
+  sources/<name>-<version>-<hash>/
+  tmp/
+  mirror-health.toml
+```
+
+`<cache>` 默认 Windows `%LOCALAPPDATA%\coord\cache`、macOS `~/Library/Caches/coord`、Linux `${XDG_CACHE_HOME:-~/.cache}/coord`；`coorc clean` 删除 `coord_modules/`，`coorc clean --cache` 同时清缓存。
+
+## 6 跨平台说明
+
+### 6.1 支持的宿主
+
+| 宿主 | 目标三元组 | 默认宿主 C++ 编译器 |
+| --- | --- | --- |
+| Windows x64/arm64 | `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc` | `cl` |
+| Linux x64/arm64 | `x86_64-unknown-linux-gnu` / `aarch64-unknown-linux-gnu` | `c++`（g++/clang++） |
+| macOS x64/arm64 | `x86_64-apple-darwin` / `aarch64-apple-darwin` | `c++`（Apple clang） |
+| FreeBSD | `*-unknown-freebsd` | `c++` |
+
+Linux/macOS 已用 g++ 本地验证；Windows 为主开发平台。工具链源码不写 `#ifdef _WIN32`，平台差异集中在 `modules/platform`。
+
+### 6.2 子进程与编译器
+
+- 工具链用 `platform::run(argv)` 直接启动子进程，**不经过 shell**；参数按平台规则引用，避免路径空格、引号与 `cmd.exe` 展开问题。
+- Windows 使用 `CreateProcessW`（UTF-16 命令行与环境块），Unix 使用 `fork`/`execvp` + 进程组；支持超时、输出捕获、stdin 管道与取消。
+- MSVC 参数：`/nologo /std:c++20 /EHsc /utf-8 /Fe<exe> /Fo<obj>`；GCC/Clang：`-std=c++20 -O2 -pthread -o <exe>`。`--cxx-flavor` 可覆盖自动判断；`--verbose` 打印命令行。
+
+### 6.3 路径、编码与目录
+
+- 所有跨模块路径以 UTF-8 字符串传递；Windows 转换到 UTF-16 文件 API。
+- 源文件内部统一 LF；读取时归一 CRLF/CR，写回 LF，行号/字节偏移跨平台一致。
+- 可执行后缀 `.exe`（Windows），对象 `.obj`/`.o`，静态库 `foo.lib`/`libfoo.a`，动态库 `foo.dll`/`libfoo.so`/`libfoo.dylib`；`platform.h` 统一提供。
+- 配置目录：`%APPDATA%\coord`、`~/Library/Application Support/coord`、`${XDG_CONFIG_HOME:-~/.config}/coord`；缓存目录见 §5.5。
+- Windows 控制台启动时切换到 UTF-8 代码页；检测 `NO_COLOR` 与终端能力。
+
+### 6.4 生成程序与交叉编译
+
+生成 C++ 使用标准 C++20 + 条件 `<windows.h>`：
+
+- Windows/MSVC 使用 `wmain`，把 UTF-16 `argv` 转成 UTF-8，并在启动时 `SetConsoleOutputCP/SetConsoleInputCP` 设 UTF-8；
+- POSIX 使用 `main`，`argv` 按 UTF-8 解释；
+- 路径/文件 API 使用 UTF-8 → `std::filesystem::path`（Windows 用 `u8string`）。
+
+程序可用的内建：`readFile`、`writeFile`、`fileExists`、`deleteFile`、`timeMillis`、`sleepMillis`，以及 `operatingSystem()`、`architecture()`、`targetTriple()`、`pathSeparator()`、`lineSeparator()`、`executableSuffix()`、`currentDirectory()`、`temporaryDirectory()`、`homeDirectory()`、`environment(name)`、`setEnvironment`、`pathJoin`、`pathFileName`、`pathParent`、`pathExtension`、`pathIsAbsolute`、`pathNormalize`、`pathExists`、`createDirectory`、`createDirectories`、`deleteDirectory`、`listDirectory(path)`。
+
+交叉编译：
+
+```bat
+coorc build src\main.coo --target x86_64-unknown-linux-gnu --sysroot C:\sysroots\linux
+coorc build src\main.coo --cxx C:\toolchains\aarch64-linux-gnu\bin\aarch64-linux-gnu-g++
+```
+
+- clang 宿主会收到 `--target`；GCC 交叉工具链通过 `--cxx` 指定；`--sysroot` 传递 sysroot。
+- MSVC 不能交叉编译；交叉编译目标不能 `coorc run`，只能 `check`/`build`/`--emit-cpp`。
+
+## 7 示例
+
+### 7.1 ProxyPolicy 与 Optional
+
+`ProxyPolicy` 由所有代理对象共享；Optional 只是代理的一种。
+
+```coo
+class Payload {
+public:
+    integer value;
+    Payload() { value = 0; }
+    Payload(integer initial) { value = initial; }
+}
+
+integer main() {
+    @Optional @Unique Payload empty = null;
+    print(empty.isPresent());            // false
+    print(empty.orElse(Payload(0)).value); // 0
+
+    @Optional(Abort) Payload* pointer = null;
+    // *pointer  -> 运行期终止并打印 optional value is null
+
+    @Optional(Skip) Payload* skipped = null;
+    print((*skipped).value);             // 0（默认构造对象）
+
+    @Optional(Default(Payload(7))) Payload* fallback = null;
+    print((*fallback).value);            // 7
+    return 0;
+}
+```
+
+默认 `@Optional` 策略是 `Error`，要求先收窄：
+
+```coo
+@Optional Payload* pointer = null;
+if (pointer != null) {
+    print(pointer.value); // 收窄后可直接访问
+}
+// print(pointer.value);  // E2048
+```
+
+`@Proxy` 使用同一套策略；不写 policy 时默认 `Skip`：
+
+```coo
+@Proxy(Trace, Abort)
+class Service { ... }
+```
+
+`@Weak T` 映射为 `std::weak_ptr<T>`，观察 `@Share T` 但不延长生命周期：
+
+```coo
+@Share Box owner = Box(7);
+@Weak Box weak = owner;
+print(weak.isPresent());          // true
+print(weak.lock().get().value);   // 7
+```
+
+`isPresent()/isEmpty()` 判断是否过期；`lock()/upgrade()` 返回可空 `@Share` 句柄。未初始化的局部变量和字段会默认初始化（`0`、空字符串、默认构造对象），不再保留不确定值。
+
+### 7.2 构造与解构
+
+`@Constructure` 开启类型化/命名字面量构造；`@Proxy` 类默认支持同样的类型化/命名构造和字段解构，无需显式 `@Constructure`/`@Destructure`。类型标签可省略，已有类型的变量/字面量直接写：
+
+```coo
+class Point {
+public:
+    integer x;
+    string y;
+
+    @Constructure
+    Point(integer x, string y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    @Destructure
+    void unpack(integer& outX, string& outY) {
+        outX = x + 1;
+        outY = y + "!";
+    }
+}
+
+integer main() {
+    integer a = 3;
+    string b = "hi";
+
+    Point p = {a, b};                  // 已声明变量
+    Point q = {5, "ok"};               // 位置值
+    Point r = {y = "named", x = 9};    // 命名参数
+    Point s = {integer a, string b};   // 显式标签消歧
+
+    {integer ax, string by} = p;       // ax == 4, by == "hi!"
+    return 0;
+}
+```
+
+- 条目为 `[A] value`、`[A] name` 或 `[A] name = expr`；`A` 与 name 可省略。无 `=` 的裸 name 既是值也是匹配名；有 `=` 的按参数名匹配。
+- 只匹配 `@Constructure` 构造函数：数量、名字、位置/值类型与可选类型标签；无匹配或歧义报 `E2076`。
+- 目标类 `@Destructure` 方法接收默认初始化绑定的引用并写入输出；否则逐字段读取（存在代理 trap 时先经过 trap）。
+
+### 7.3 代码块保留
+
+```coo
+integer main() {
+    @Retention(Compile)
+    {
+        print("compile-time");
+    }
+
+    @Retention(Runtime)
+    {
+        print("runtime");
+    }
+    return 0;
+}
+```
+
+- `@Retention(Compile)` 块由解释器在编译期执行；`print` 输出可用 `coorc --print-consts` 查看，生成程序不包含该块。
+- `@Retention(Runtime)` 块不在编译期执行，运行时正常执行。
+- 代码块只允许 `Compile`/`Runtime`；`Invocation`/`enum` 报 `E2044`。
+
+### 7.4 数字进制
+
+```coo
+@Radix(16)
+const integer MASK = 255;
+
+integer main() {
+    @Radix(2)
+    integer flags = 10;
+    @Radix(8)
+    integer mode = 64;
+    print(MASK + flags + mode); // 值仍是 255、10、64
+    return 0;
+}
+```
+
+- `@Radix(2|8|10|16)` 是类型注解，只改变生成的 C++ 在声明初始化、字段默认值和 `const` 值中的整数字面量写法：`0XFF`、`0B1010`、C++ 八进制 `0100`。
+- 它不改变源码字面量解析，也不改变运行期 `print`；非法进制或非整数目标报 `E2066`。
+
+### 7.5 包依赖
+
+```bat
+coorc init app --name app
+cd app
+coorc add math@^1.2
+coorc install --locked
+coorc build . -o out\app.exe
+```
+
+## 8 仓库结构
+
+| 路径 | 内容 |
+| --- | --- |
+| [`libs/coord`](libs/coord) | `coorc_core`：前端、Sema、解释器、C++ 后端、driver、包管理/镜像/注册表；`include/coord/modules/` 下 38 个模块头 |
+| [`tools/coorc`](tools/coorc) | CLI：编译、测试、包管理、镜像与诊断命令 |
+| [`tests`](tests) | 单元测试、CTest、e2e 脚本与 fixtures |
+| [`examples`](examples) | 可运行 `.coo` 示例 |
+| [`lib/standard`](lib/standard) | 标准库源（注解已接入） |
+| [`framework.md`](framework.md) / [`framework.zh-CN.md`](framework.zh-CN.md) | 权威框架与语言规范 |
+| [`docs/grammar.ebnf`](docs/grammar.ebnf) | 形式化文法 |
+| [`docs/archive`](docs/archive) | 历史文档，以 `framework.md` 为准 |
+
+## 9 限制与已知问题
+
+- `lambda`、`if` 表达式、完整模式匹配、`@Native`/FFI、`@Copy`/`@Wrap` 语义、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 尚未实现；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
+- `ProxyPolicy` 的执行主要验证了局部 `T*`/`@Unique`/`@Share` 变量（直接访问、收窄、局部 Optional 解构）与 `@Proxy` 的 `Skip`/`Abort`/`Error` 解构路径。字段/参数/返回值上的 `@Optional` 已解析/校验，但完整 policy 执行仍不完整；`@Proxy` 的 `Default(expr)` 构造/解构、runtime 构造前钩子、任意非默认构造类的 `Skip` 默认值仍属 🚧。
+- `@Constructure` 类型化/命名构造与 `@Retention(Compile/Runtime)` 代码块已实现基础版；编译期块不能依赖运行期局部状态，代码块上的 `Invocation`/`enum` 报 `E2044`；复杂构造重载消歧仍属 🚧。
+- 所有权与 borrow 检查仍是保守子集：`&` 不能返回/存字段，但跨线程/闭包逃逸检查待补。
+- 别名局部变量声明 `l.Payload p = ...` 有语法歧义，当前只完整支持参数/返回类型位置。
+- 包管理：workspace 只解析不递归安装；无 feature、git 依赖、包签名/信任链；`search` 依赖 `index.toml`。
+- 交叉编译：MSVC 宿主不能交叉编译，交叉目标不能运行。
+- 修改头文件后必须清理重建；Windows 上 Ninja 对 MSVC 中文 `showIncludes` 不可靠。
+- 测试数量是撰写时已验证的基线；请在本机重新运行 `ctest` 确认。
+- 生成 C++ 后端是单翻译单元；大型项目/多模块链接与标准库完整 API 仍在推进。
+
+## 10 文档
+
+- 框架与语言规范：[framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md)
+- 英文 QuickStart：[readme.md](readme.md)
+- 形式文法：[docs/grammar.ebnf](docs/grammar.ebnf)
+- 历史归档：[docs/archive/](docs/archive/)（不再维护）

@@ -1,0 +1,20 @@
+class Data {
+public:
+    integer first;
+    string second;
+
+    void run() {}
+}
+
+integer main() {
+    Reflector<Data> info;
+    print(info.fieldCount());
+    print(runtimeFieldCount("Data"));
+    print(info.fieldName(0));
+    print(runtimeFieldName("Data", 0));
+    print(info.methodCount());
+    print(runtimeMethodCount("Data"));
+    print(info.methodName(0));
+    print(runtimeMethodName("Data", 0));
+    return 0;
+}

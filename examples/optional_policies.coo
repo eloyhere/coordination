@@ -1,0 +1,36 @@
+class Box {
+public:
+    integer value;
+
+    Box() {
+        value = 0;
+    }
+}
+
+integer main() {
+    @Optional @Unique Box missing = null;
+    print(missing.isPresent());
+
+    @Optional(Skip) integer* skip = null;
+    print(*skip);
+
+    integer present = 7;
+    @Optional(Abort) integer* aborting = &present;
+    print(*aborting);
+
+    @Optional(Default(42)) integer* fallback = null;
+    print(*fallback);
+
+    @Optional(Skip) @Unique Box emptyBox = null;
+    {integer value} = emptyBox;
+    print(value);
+
+    @Optional integer* narrowed = &present;
+    if (narrowed != null) {
+        print(*narrowed);
+    }
+    if (narrowed.isPresent()) {
+        print(*narrowed + 1);
+    }
+    return 0;
+}

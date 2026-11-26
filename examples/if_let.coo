@@ -1,0 +1,14 @@
+@Expect<integer>
+integer risky() {
+    return 7;
+}
+
+@Result<integer>
+integer main() {
+    if (risky().isOk()) {
+        print(risky().unwrap());
+    } else {
+        print(0);
+    }
+    return 0;
+}

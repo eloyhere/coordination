@@ -1,0 +1,3 @@
+[dependencies]
+alpha = { version = "1.0", requires = ["beta"] }
+beta = { version = "1.0" }

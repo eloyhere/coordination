@@ -1,0 +1,19 @@
+interface Named {
+    string name() const;
+}
+
+enumerate Color implements Named {
+    Red,
+    Green;
+
+    override string name() const {
+        return "color";
+    }
+}
+
+integer main() {
+    Color c = Color.Green;
+    print(c.name());
+    print(c);
+    return 0;
+}

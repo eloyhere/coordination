@@ -1,0 +1,23 @@
+enumerate Color {
+    Red,
+    Green,
+    Blue,
+}
+
+integer main() {
+    Color color = Color.Green;
+
+    match (color) {
+        case Color.Red: {
+            print("red");
+        }
+        case Color.Green: {
+            print("green");
+        }
+        case Color.Blue: {
+            print("blue");
+        }
+    }
+
+    return 0;
+}

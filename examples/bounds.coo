@@ -1,0 +1,7 @@
+integer main() {
+    Array<integer> values = [10, 20, 30];
+    print(values[1]);
+    values[0] = 5;
+    print(values[0]);
+    return 0;
+}

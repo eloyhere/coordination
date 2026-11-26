@@ -1,0 +1,14 @@
+integer main() {
+    Member member;
+    member.name = "x";
+    member.modifiers = 1;
+
+    Field field;
+    field.index = 2;
+
+    print(member.name);      // x
+    print(member.modifiers); // 1
+    print(Modifier.Public);  // 1
+    print(field.index);      // 2
+    return 0;
+}

@@ -1,0 +1,21 @@
+class Trace implements ProxyHandler {
+public:
+    @Call
+    static void onCall() {
+        print("trap");
+    }
+}
+
+@Proxy(Trace)
+class Service {
+public:
+    void run() {
+        print("run");
+    }
+}
+
+integer main() {
+    Service service;
+    service.run();
+    return 0;
+}

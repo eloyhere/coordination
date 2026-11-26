@@ -1,0 +1,17 @@
+// Compile-time evaluation without a `comptime` / `constexpr` keyword:
+// a top-level const initializer is evaluated by the compiler. Any pure
+// function can be interpreted, so `fib` is reused unchanged.
+
+integer fib(const integer n) {
+    if (n < 2) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+const integer FIB10 = fib(10);
+
+integer main() {
+    print(FIB10);
+    return 0;
+}

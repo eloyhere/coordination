@@ -1,0 +1,15 @@
+class Point {
+public:
+    integer x;
+
+    @Constructure
+    Point(integer x) {
+        this.x = x;
+    }
+}
+
+integer main() {
+    Point point = {string x};
+    print(point.x);
+    return 0;
+}

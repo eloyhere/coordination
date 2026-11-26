@@ -1,0 +1,15 @@
+integer readValue(@Optional(Skip) integer* pointer) {
+    return *pointer;
+}
+
+integer readFallback(@Optional(Default(41)) integer* pointer) {
+    return *pointer + 1;
+}
+
+integer main() {
+    print(readValue(null));
+    print(readFallback(null));
+    integer value = 7;
+    print(readValue(&value));
+    return 0;
+}

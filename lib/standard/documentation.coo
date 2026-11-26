@@ -1,0 +1,44 @@
+module standard.documentation;
+
+// 文档注释的只读表示。
+class DocumentTag {
+public:
+    string name;      // parameter / return / template / ...
+    string subject;   // 参数名、泛型名；@return 为空
+    string text;
+}
+
+class Document {
+public:
+    string summary;   // 第一段说明
+    string text;      // 完整原始文本
+    Array<DocumentTag> tags;
+
+    DocumentTag? tag(string name) {
+        // 标准库实现；当前为接口占位
+        return null;
+    }
+
+    Array<DocumentTag> tagsOf(string name) {
+        // 标准库实现；当前为接口占位
+        return [];
+    }
+
+    string render() {
+        // 标准库实现；当前为接口占位
+        return text;
+    }
+}
+
+// 文档提取与渲染入口。
+class Documentation {
+public:
+    static Document parse(string text) {
+        // 标准库实现；当前为接口占位
+        return Document{};
+    }
+
+    static string render(Document document) {
+        return document.render();
+    }
+}
