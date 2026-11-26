@@ -483,6 +483,38 @@ void CppEmitter::emitPrelude() {
   out_ << "         a.hi * b.lo + a.lo * b.hi;\n";
   out_ << "  return r;\n";
   out_ << "}\n";
+  out_ << "inline UInt128 operator/(const UInt128& a, const UInt128& b);\n";
+  out_ << "inline UInt128 operator%(const UInt128& a, const UInt128& b);\n";
+  out_ << "inline bool operator<(const UInt128& a, const UInt128& b);\n";
+  out_ << "inline UInt128 operator/(const UInt128& a, const UInt128& b) {\n";
+  out_ << "  UInt128 quotient;\n";
+  out_ << "  UInt128 remainder;\n";
+  out_ << "  for (int bit = 127; bit >= 0; --bit) {\n";
+  out_ << "    remainder = remainder + remainder;\n";
+  out_ << "    const std::uint64_t next =\n";
+  out_ << "        bit < 64 ? ((a.lo >> bit) & 1ULL)\n";
+  out_ << "                 : ((a.hi >> (bit - 64)) & 1ULL);\n";
+  out_ << "    if (next != 0) remainder = remainder + UInt128(1);\n";
+  out_ << "    if (!(remainder < b)) {\n";
+  out_ << "      remainder = remainder - b;\n";
+  out_ << "      if (bit < 64) quotient.lo |= (1ULL << bit);\n";
+  out_ << "      else quotient.hi |= (1ULL << (bit - 64));\n";
+  out_ << "    }\n";
+  out_ << "  }\n";
+  out_ << "  return quotient;\n";
+  out_ << "}\n";
+  out_ << "inline UInt128 operator%(const UInt128& a, const UInt128& b) {\n";
+  out_ << "  UInt128 remainder;\n";
+  out_ << "  for (int bit = 127; bit >= 0; --bit) {\n";
+  out_ << "    remainder = remainder + remainder;\n";
+  out_ << "    const std::uint64_t next =\n";
+  out_ << "        bit < 64 ? ((a.lo >> bit) & 1ULL)\n";
+  out_ << "                 : ((a.hi >> (bit - 64)) & 1ULL);\n";
+  out_ << "    if (next != 0) remainder = remainder + UInt128(1);\n";
+  out_ << "    if (!(remainder < b)) remainder = remainder - b;\n";
+  out_ << "  }\n";
+  out_ << "  return remainder;\n";
+  out_ << "}\n";
   out_ << "inline bool operator==(const UInt128& a, const UInt128& b) {\n";
   out_ << "  return a.lo == b.lo && a.hi == b.hi;\n";
   out_ << "}\n";
@@ -562,6 +594,115 @@ void CppEmitter::emitPrelude() {
   out_ << "    std::cerr << message << '\\n';\n";
   out_ << "    std::abort();\n";
   out_ << "  }\n";
+  out_ << "}\n";
+  out_ << "template <class T>\n";
+  out_ << "T checkedNeg(T value, const char* message) {\n";
+  out_ << "  if constexpr (std::is_signed_v<T>) {\n";
+  out_ << "    if (value == std::numeric_limits<T>::min()) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "  }\n";
+  out_ << "  return static_cast<T>(-value);\n";
+  out_ << "}\n";
+  out_ << "template <class A, class B,\n";
+  out_ << "          class = std::enable_if_t<\n";
+  out_ << "              !std::is_same_v<std::decay_t<A>, UInt128> &&\n";
+  out_ << "              !std::is_same_v<std::decay_t<B>, UInt128>>>\n";
+  out_ << "auto checkedAdd(A a, B b, const char* message)\n";
+  out_ << "    -> std::common_type_t<A, B> {\n";
+  out_ << "  using R = std::common_type_t<A, B>;\n";
+  out_ << "  const R x = static_cast<R>(a);\n";
+  out_ << "  const R y = static_cast<R>(b);\n";
+  out_ << "  if constexpr (std::is_unsigned_v<R>) {\n";
+  out_ << "    if (y > std::numeric_limits<R>::max() - x) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "  } else {\n";
+  out_ << "    if (y > 0 && x > std::numeric_limits<R>::max() - y) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "    if (y < 0 && x < std::numeric_limits<R>::min() - y) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "  }\n";
+  out_ << "  return static_cast<R>(x + y);\n";
+  out_ << "}\n";
+  out_ << "template <class A, class B,\n";
+  out_ << "          class = std::enable_if_t<\n";
+  out_ << "              !std::is_same_v<std::decay_t<A>, UInt128> &&\n";
+  out_ << "              !std::is_same_v<std::decay_t<B>, UInt128>>>\n";
+  out_ << "auto checkedSub(A a, B b, const char* message)\n";
+  out_ << "    -> std::common_type_t<A, B> {\n";
+  out_ << "  using R = std::common_type_t<A, B>;\n";
+  out_ << "  const R x = static_cast<R>(a);\n";
+  out_ << "  const R y = static_cast<R>(b);\n";
+  out_ << "  if constexpr (std::is_unsigned_v<R>) {\n";
+  out_ << "    if (y > x) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "  } else {\n";
+  out_ << "    if (y > 0 && x < std::numeric_limits<R>::min() + y) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "    if (y < 0 && x > std::numeric_limits<R>::max() + y) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "  }\n";
+  out_ << "  return static_cast<R>(x - y);\n";
+  out_ << "}\n";
+  out_ << "template <class A, class B,\n";
+  out_ << "          class = std::enable_if_t<\n";
+  out_ << "              !std::is_same_v<std::decay_t<A>, UInt128> &&\n";
+  out_ << "              !std::is_same_v<std::decay_t<B>, UInt128>>>\n";
+  out_ << "auto checkedMul(A a, B b, const char* message)\n";
+  out_ << "    -> std::common_type_t<A, B> {\n";
+  out_ << "  using R = std::common_type_t<A, B>;\n";
+  out_ << "  const R x = static_cast<R>(a);\n";
+  out_ << "  const R y = static_cast<R>(b);\n";
+  out_ << "  if constexpr (std::is_unsigned_v<R>) {\n";
+  out_ << "    if (x != 0 && y > std::numeric_limits<R>::max() / x) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "  } else {\n";
+  out_ << "    if (x != 0 && y != 0) {\n";
+  out_ << "      if ((x == -1 && y == std::numeric_limits<R>::min()) ||\n";
+  out_ << "          (y == -1 && x == std::numeric_limits<R>::min())) {\n";
+  out_ << "        std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "      }\n";
+  out_ << "      if (x > 0) {\n";
+  out_ << "        if (y > 0 ? x > std::numeric_limits<R>::max() / y\n";
+  out_ << "                  : y < std::numeric_limits<R>::min() / x) {\n";
+  out_ << "          std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "        }\n";
+  out_ << "      } else {\n";
+  out_ << "        if (y > 0 ? x < std::numeric_limits<R>::min() / y\n";
+  out_ << "                  : y < std::numeric_limits<R>::max() / x) {\n";
+  out_ << "          std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "        }\n";
+  out_ << "      }\n";
+  out_ << "    }\n";
+  out_ << "  }\n";
+  out_ << "  return static_cast<R>(x * y);\n";
+  out_ << "}\n";
+  out_ << "inline UInt128 checkedAdd(UInt128 a, UInt128 b, const char* message) {\n";
+  out_ << "  const UInt128 result = a + b;\n";
+  out_ << "  if (result < a) {\n";
+  out_ << "    std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "  }\n";
+  out_ << "  return result;\n";
+  out_ << "}\n";
+  out_ << "inline UInt128 checkedSub(UInt128 a, UInt128 b, const char* message) {\n";
+  out_ << "  if (a < b) {\n";
+  out_ << "    std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "  }\n";
+  out_ << "  return a - b;\n";
+  out_ << "}\n";
+  out_ << "inline UInt128 checkedMul(UInt128 a, UInt128 b, const char* message) {\n";
+  out_ << "  const UInt128 result = a * b;\n";
+  out_ << "  if (!(a == UInt128(0)) && !((result / a) == b)) {\n";
+  out_ << "    std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "  }\n";
+  out_ << "  return result;\n";
   out_ << "}\n";
   out_ << "template <class A, class B>\n";
   out_ << "auto checkedDiv(A a, B b, const char* message) -> decltype(a / b) {\n";
@@ -2363,6 +2504,14 @@ void CppEmitter::emitExpr(const Expr* expr) {
       out_ << "(*this)";
       return;
     case ExprKind::Unary:
+      if (expr->op == "-" && expr->lhs != nullptr &&
+          expr->lhs->resolvedType != nullptr &&
+          expr->lhs->resolvedType->kind == TypeKind::Int) {
+        out_ << "coord_rt::checkedNeg(";
+        emitExpr(expr->lhs.get());
+        out_ << ", \"integer overflow\")";
+        return;
+      }
       if (expr->op == "*" && expr->optionalAccess) {
         const auto emitSource = [&]() { emitExpr(expr->lhs.get()); };
         if (expr->proxyPolicy == ProxyPolicy::Abort) {
@@ -2414,6 +2563,21 @@ void CppEmitter::emitExpr(const Expr* expr) {
         out_ << ", ";
         emitExpr(expr->rhs.get());
         out_ << ", \"integer division by zero\")";
+        return;
+      }
+      if ((expr->op == "+" || expr->op == "-" || expr->op == "*") &&
+          expr->lhs != nullptr && expr->rhs != nullptr &&
+          expr->lhs->resolvedType != nullptr &&
+          expr->rhs->resolvedType != nullptr &&
+          expr->lhs->resolvedType->kind == TypeKind::Int &&
+          expr->rhs->resolvedType->kind == TypeKind::Int) {
+        out_ << (expr->op == "+" ? "coord_rt::checkedAdd("
+                                 : expr->op == "-" ? "coord_rt::checkedSub("
+                                                   : "coord_rt::checkedMul(");
+        emitExpr(expr->lhs.get());
+        out_ << ", ";
+        emitExpr(expr->rhs.get());
+        out_ << ", \"integer overflow\")";
         return;
       }
       out_ << '(';

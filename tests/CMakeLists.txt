@@ -916,4 +916,12 @@ if(MSVC)
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_division
       -DEXPECTED=3|1|-3|-1
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_overflow
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/overflow.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_overflow
+      -DEXPECTED=9223372036854775807|9223372036854775807|9223372036854775807
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()

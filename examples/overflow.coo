@@ -1,0 +1,7 @@
+integer main() {
+    @Length(64) integer maximum = 9223372036854775807;
+    print(maximum + 0);
+    print(maximum - 0);
+    print(maximum * 1);
+    return 0;
+}
