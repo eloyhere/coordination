@@ -41,6 +41,13 @@ if(COORD_FUZZ)
       -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -g)
     target_link_options(coord_parser_fuzz PRIVATE
       -fsanitize=fuzzer,address,undefined)
+
+    add_executable(coord_compiler_fuzz tests/fuzz/compiler_fuzz.cpp)
+    target_link_libraries(coord_compiler_fuzz PRIVATE coorc_core)
+    target_compile_options(coord_compiler_fuzz PRIVATE
+      -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -g)
+    target_link_options(coord_compiler_fuzz PRIVATE
+      -fsanitize=fuzzer,address,undefined)
   endif()
 endif()
 

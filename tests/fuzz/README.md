@@ -1,13 +1,19 @@
-# Parser fuzzing
+# Parser and compiler fuzzing
 
-The harness drives `Lexer` + `Parser` with arbitrary bytes. Build with Clang:
+The harnesses drive the front end with arbitrary bytes:
+- `coord_parser_fuzz`: Lexer + Parser only.
+- `coord_compiler_fuzz`: Lexer + Parser + Sema + Interpreter + C++ emitter. It
+  keeps the `Checker` alive until emission because `TypeExpr::resolved` points
+  into checker-owned types.
+
+Build with Clang:
 
 ```bash
 cmake -S . -B out/build/fuzz -G Ninja \
   -DCMAKE_CXX_COMPILER=clang++ -DCOORD_FUZZ=ON -DCOORD_SANITIZE=ON
-cmake --build out/build/fuzz --target coord_parser_fuzz
+cmake --build out/build/fuzz --target coord_parser_fuzz coord_compiler_fuzz
 ASAN_OPTIONS=detect_leaks=0 \
-  ./out/build/fuzz/coord_parser_fuzz -runs=10000 \
+  ./out/build/fuzz/coord_compiler_fuzz -runs=10000 \
   -artifact_prefix=out/fuzz/ tests/fuzz/corpus
 ```
 
