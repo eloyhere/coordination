@@ -388,7 +388,11 @@ std::unique_ptr<ModuleAst> Parser::parseModule(std::uint32_t fileId) {
       }
       module->decls.push_back(std::move(decl));
     } else {
+      const std::size_t before = pos_;
       synchronizeTopLevel();
+      if (pos_ == before && !atEnd() && !check(TokKind::RBrace)) {
+        advance();
+      }
     }
   }
   for (const std::string& name : module->exportedNames) {
@@ -741,7 +745,11 @@ DeclPtr Parser::parseClass(std::vector<AnnotationUse> annotations, bool exported
       member->access = currentAccess;
       decl->members.push_back(std::move(member));
     } else {
+      const std::size_t before = pos_;
       synchronizeTopLevel();
+      if (pos_ == before && !atEnd() && !check(TokKind::RBrace)) {
+        advance();
+      }
     }
   }
   expect(TokKind::RBrace, "'}'");
@@ -889,6 +897,9 @@ DeclPtr Parser::parseClassMember(const std::string& className) {
   TypeExprPtr type = parseType(true);
   if (!check(TokKind::Identifier)) {
     error(current(), "expected member name");
+    if (!atEnd() && !check(TokKind::RBrace)) {
+      advance();
+    }
     return nullptr;
   }
   std::string name(advance().text);

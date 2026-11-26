@@ -16,6 +16,13 @@ cmake-build-*/
 *.stamp
 *.coord.cpp
 
+# Fuzzer artifacts
+oom-*
+crash-*
+leak-*
+timeout-*
+slow-unit-*
+
 # CMake / IDE user state
 CMakeUserPresets.json
 *.user

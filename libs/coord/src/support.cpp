@@ -223,33 +223,46 @@ const char* severityName(Severity severity) {
 }
 
 void DiagnosticEngine::error(Span span, std::string code, std::string message) {
-  diagnostics_.push_back(Diagnostic{Severity::Error, std::move(code),
-                                    std::move(message), span});
+  static constexpr std::size_t kMaxStoredDiagnostics = 256;
   ++errorCount_;
+  if (diagnostics_.size() < kMaxStoredDiagnostics) {
+    diagnostics_.push_back(Diagnostic{Severity::Error, std::move(code),
+                                      std::move(message), span});
+  } else if (!truncated_) {
+    truncated_ = true;
+    diagnostics_.push_back(
+        Diagnostic{Severity::Error, "E0001",
+                   "too many diagnostics; further messages suppressed", span});
+  }
 }
 
 void DiagnosticEngine::warning(Span span, std::string code,
                                std::string message) {
+  static constexpr std::size_t kMaxStoredDiagnostics = 256;
   if (warningsAsErrors_) {
-    diagnostics_.push_back(Diagnostic{Severity::Error, std::move(code),
-                                      std::move(message), span});
-    ++errorCount_;
+    error(span, std::move(code), std::move(message));
     return;
   }
-  diagnostics_.push_back(Diagnostic{Severity::Warning, std::move(code),
-                                    std::move(message), span});
   ++warningCount_;
+  if (diagnostics_.size() < kMaxStoredDiagnostics) {
+    diagnostics_.push_back(Diagnostic{Severity::Warning, std::move(code),
+                                      std::move(message), span});
+  }
 }
 
 void DiagnosticEngine::note(Span span, std::string code, std::string message) {
-  diagnostics_.push_back(Diagnostic{Severity::Note, std::move(code),
-                                    std::move(message), span});
+  static constexpr std::size_t kMaxStoredDiagnostics = 256;
+  if (diagnostics_.size() < kMaxStoredDiagnostics) {
+    diagnostics_.push_back(Diagnostic{Severity::Note, std::move(code),
+                                      std::move(message), span});
+  }
 }
 
 void DiagnosticEngine::clear() {
   diagnostics_.clear();
   errorCount_ = 0;
   warningCount_ = 0;
+  truncated_ = false;
 }
 
 void DiagnosticEngine::render(const SourceManager& sources,

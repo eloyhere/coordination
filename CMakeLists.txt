@@ -15,9 +15,34 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(COORD_BUILD_TESTS "Build the coord test suite" ON)
 option(COORD_BUILD_LEGACY_DEMO "Build the original CMake template demo" OFF)
+option(COORD_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(COORD_FUZZ "Build the Clang/libFuzzer parser harness" OFF)
+
+if(COORD_SANITIZE)
+  if(MSVC)
+    add_compile_options(/fsanitize=address /Zi)
+    add_link_options(/fsanitize=address)
+  else()
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+  endif()
+endif()
 
 add_subdirectory(libs/coord)
 add_subdirectory(tools/coorc)
+
+if(COORD_FUZZ)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(WARNING "COORD_FUZZ requires Clang (libFuzzer); target not built")
+  else()
+    add_executable(coord_parser_fuzz tests/fuzz/parser_fuzz.cpp)
+    target_link_libraries(coord_parser_fuzz PRIVATE coorc_core)
+    target_compile_options(coord_parser_fuzz PRIVATE
+      -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -g)
+    target_link_options(coord_parser_fuzz PRIVATE
+      -fsanitize=fuzzer,address,undefined)
+  endif()
+endif()
 
 if(COORD_BUILD_TESTS)
   enable_testing()

@@ -92,6 +92,7 @@ private:
   std::size_t errorCount_ = 0;
   std::size_t warningCount_ = 0;
   bool warningsAsErrors_ = false;
+  bool truncated_ = false;
 };
 
 }  // namespace coord

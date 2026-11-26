@@ -82,6 +82,14 @@
             }
         },
         {
+            "name": "linux-sanitize",
+            "displayName": "Linux Debug + ASan/UBSan",
+            "inherits": "linux-debug",
+            "cacheVariables": {
+                "COORD_SANITIZE": "ON"
+            }
+        },
+        {
             "name": "linux-release",
             "displayName": "Linux Release",
             "inherits": "unix-base",

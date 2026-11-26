@@ -1,0 +1,5 @@
+class Box {
+public:
+    integer value;
+    Box(integer value) { this.value = value; }
+}

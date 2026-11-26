@@ -2360,6 +2360,17 @@ integer main() {
   CHECK(generated.find("checkedPostInc(mutable_") != std::string::npos);
 }
 
+void testDiagnosticLimit() {
+  std::string source = "class Broken {\n";
+  for (int i = 0; i < 2000; ++i) {
+    source += "  ) broken member\n";
+  }
+  source += "}\n";
+  Harness harness(source);
+  CHECK(harness.diagnostics.hasErrors());
+  CHECK(harness.diagnostics.diagnostics().size() <= 257);
+}
+
 void testSwitchStatement() {
   Harness harness(R"(
 integer main() {
@@ -3164,6 +3175,7 @@ int main() {
   testMainSignature();
   testJsImportExport();
   testReferenceLocals();
+  testDiagnosticLimit();
   testSwitchStatement();
   testMatch();
   testDocAttachment();
