@@ -77,6 +77,8 @@ struct RegistryOptions {
   std::filesystem::path cacheRoot;
   std::string preferredMirror;
   bool verbose = false;
+  bool requireChecksum = false;
+  bool allowInsecureHttp = false;
 };
 
 class RegistryClient {

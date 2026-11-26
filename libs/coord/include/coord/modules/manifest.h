@@ -87,6 +87,8 @@ struct Manifest {
   std::vector<std::string> members;
   std::vector<RegistryEntry> registries;
   std::vector<MirrorEntry> mirrors;
+  bool requireChecksum = false;
+  bool allowInsecureHttp = false;
   bool legacy = false;
 
   [[nodiscard]] const DependencySpec* dependency(std::string_view name) const;

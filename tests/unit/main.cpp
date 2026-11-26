@@ -2956,6 +2956,10 @@ void testManifestModule() {
           "[registries]\n"
           "official = \"file:///registry\"\n"
           "\n"
+          "[trust]\n"
+          "require_checksum = true\n"
+          "allow_insecure_http = false\n"
+          "\n"
           "[[mirrors]]\n"
           "name = \"local\"\n"
           "url = \"file:///registry\"\n"
@@ -2968,6 +2972,8 @@ void testManifestModule() {
     CHECK(tomlManifest->dependencies.size() == 3);
     CHECK(tomlManifest->registries.size() == 1);
     CHECK(tomlManifest->mirrors.size() == 1);
+    CHECK(tomlManifest->requireChecksum);
+    CHECK(!tomlManifest->allowInsecureHttp);
     const package::DependencySpec* local = tomlManifest->dependency("local");
     CHECK(local != nullptr && local->isPath());
   }

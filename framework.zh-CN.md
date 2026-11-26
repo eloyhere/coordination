@@ -1724,8 +1724,9 @@ coorc config set mirror.timeout-ms 5000
 - 所有归档成员名在剥离顶层目录**之前**校验：拒绝绝对路径、盘符、`..`、Windows 保留名与非法字符。
 - 默认拒绝符号链接；启用时目标必须相对且不得逃逸。
 - 解压有总字节数（512 MiB）与条目数上限；归档文件本身上限 1 GiB。
-- 归档 SHA-256 在解压前校验；锁文件固定校验和。
-- HTTP 由系统 `curl` 执行；失败信息包含每个镜像的尝试结果。私有注册表可通过 `COORD_TOKEN` 传递 Bearer token（`publish`）。
+- 归档 SHA-256 在解压前校验；锁文件固定校验和。`[trust] require_checksum = true` 会拒绝没有校验和的注册表条目，而不是只警告。
+- `[trust] allow_insecure_http = false`（默认）拒绝非回环 `http://` 注册表 URL；`file://`、`https://`、`localhost`、`127.0.0.1`、`[::1]` 允许。
+- HTTP 由系统 `curl` 执行；失败信息包含每个镜像的尝试结果。私有注册表可通过 `COORD_TOKEN` 传递 Bearer token（`publish`）。包签名/信任链仍属未来工作。
 
 ### 8.11 CLI
 
@@ -1955,7 +1956,7 @@ coorc config list|get|set
 | `Result` / `Expect` | ✅ | 类型实参校验、独立类型、消费检查 |
 | 注解处理器、`line`、proxy、反射五层 | ✅/🚧 | Processor 基础、`line`、proxy class/annotation/runtime、`@Invocation`、`Reflector` 已可用；完整 descriptor API/运行期反射仍推进 |
 | `.coox`、多模块链接、标准库 | 🚧 | 相对 import、工程目录、`.coox` 读写、outline/hint、`@Test`、`coorc deps`、容器已可用；标准库其余 API 待做 |
-| 包管理器与镜像管理器 | ✅ | 清单、回溯解析、锁、vendor、file/HTTP 注册表、SHA-256、离线、镜像故障转移、pack/publish |
+| 包管理器与镜像管理器 | ✅ | 清单、回溯解析、锁、vendor、file/HTTP 注册表、SHA-256、`[trust]` 校验和/HTTPS 策略、离线、镜像故障转移、pack/publish |
 | 跨平台工具链（Windows/macOS/Linux/FreeBSD） | ✅ | 宿主探测、argv spawn、UTF-8 路径、CMake preset；Linux/macOS 已用 g++ 验证 |
 | 生成程序的跨平台契约（wmain/UTF-8 控制台/平台内建） | ✅ | `coord_e2e_platform` 覆盖 OS/路径/文件/环境内建 |
 | 局部 `T*`/`@Unique`/`@Share` 的 `ProxyPolicy` | ✅ | `Error`/`Skip`/`Abort`/`Default` 的直接解引用、成员访问、隐式转非空、局部 Optional 解构；收窄；`coord_e2e_optional_policies` / `_error` / `_implicit` |

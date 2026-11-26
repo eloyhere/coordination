@@ -238,7 +238,19 @@ priority = 10
 - `platform` 过滤支持 `windows`/`linux`/`macos`/`unix`/架构名与 `!` 取反；`optional = true` 仅在 `--all-optional` 时解析。
 - workspace `[workspace] members` 当前只解析、不递归安装。
 
-### 5.2 安装、锁与 vendor
+### 5.2 信任策略与安装
+
+`coordination.toml` 可声明信任策略：
+
+```toml
+[trust]
+require_checksum = true      # 拒绝没有 SHA-256 的注册表条目
+allow_insecure_http = false  # 拒绝非回环 http:// 注册表
+```
+
+回环 HTTP（`localhost`、`127.0.0.1`、`[::1]`）和 `file://` 始终允许。策略错误在下载前报告；校验和不匹配会删除缓存归档。
+
+### 5.3 安装、锁与 vendor
 
 ```bat
 coorc install
@@ -254,7 +266,7 @@ coorc build tests\fixtures\two_packages\app -o out\app.exe
 - `coorc build` 自动收集 `coord_modules/*`、清单中的路径依赖（递归）与当前包 `source` 下的 `.coo`，因此安装后无需改语言 `import`。
 - 增量 stamp 包含根清单、`coord.lock`、各 vendor 清单、文件数与最新 mtime，以及宿主目标三元组与编译器。
 
-### 5.3 注册表
+### 5.4 注册表
 
 注册表就是一棵目录树（本地目录或 HTTP(S) 根）：
 
@@ -267,7 +279,7 @@ health
 
 `coorc pack` 生成确定性 `.tar.gz`（条目排序、mtime 0、gzip stored 块）；`coorc publish` 写本地注册表或通过系统 `curl` PUT 到远程；凭据来自 `COORD_TOKEN`。归档 SHA-256 在解压前校验。
 
-### 5.4 镜像
+### 5.5 镜像
 
 - **registry** 是仓库端点；**mirror** 是同一 registry 的另一个端点，带 `priority`（越大越先尝试）。
 - 选择顺序：显式 `--mirror` → 项目配置 → 用户配置 → 内置目录；同一 registry 的镜像按 priority 降序尝试，失败自动切换。
@@ -282,7 +294,7 @@ coorc mirror test cn
 coorc config set mirror.timeout-ms 5000
 ```
 
-### 5.5 缓存
+### 5.6 缓存
 
 ```text
 <cache>/coord/

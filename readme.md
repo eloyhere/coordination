@@ -237,7 +237,19 @@ priority = 10
 - `platform` filters `windows`/`linux`/`macos`/`unix`/architecture names with `!` negation; `optional = true` resolves only with `--all-optional`.
 - `[workspace] members` is currently parsed but not installed recursively.
 
-### 5.2 Install, Lock and Vendor
+### 5.2 Trust Policies and Install
+
+`coordination.toml` may declare a trust policy:
+
+```toml
+[trust]
+require_checksum = true      # reject registry entries without SHA-256
+allow_insecure_http = false  # refuse non-loopback http:// registries
+```
+
+Loopback HTTP (`localhost`, `127.0.0.1`, `[::1]`) and `file://` registries are always allowed. Policy failures are reported before download; checksum mismatches remove the cached archive.
+
+### 5.3 Install, Lock and Vendor
 
 ```bat
 coorc install
@@ -253,7 +265,7 @@ coorc build tests\fixtures\two_packages\app -o out\app.exe
 - `coorc build` automatically collects `coord_modules/*`, manifest path dependencies (recursively) and `.coo` under the package `source`, so installing never requires changing language `import`s.
 - The incremental stamp covers the root manifest, `coord.lock`, vendor manifests, file counts and newest mtimes, plus the host target triple and compiler.
 
-### 5.3 Registries
+### 5.4 Registries
 
 A registry is a directory tree (local directory or HTTP(S) root):
 
@@ -266,7 +278,7 @@ health
 
 `coorc pack` emits a deterministic `.tar.gz` (sorted entries, mtime 0, gzip stored blocks); `coorc publish` writes a local registry or PUTs to a remote one through system `curl`; credentials come from `COORD_TOKEN`. Archive SHA-256 is verified before extraction.
 
-### 5.4 Mirrors
+### 5.5 Mirrors
 
 - **registry**: a repository endpoint; **mirror**: another endpoint for the same registry with a `priority` (higher tried first).
 - Selection order: explicit `--mirror` → project config → user config → built-in catalog; mirrors of one registry are tried by descending priority with automatic failover.
@@ -281,7 +293,7 @@ coorc mirror test cn
 coorc config set mirror.timeout-ms 5000
 ```
 
-### 5.5 Cache
+### 5.6 Cache
 
 ```text
 <cache>/coord/

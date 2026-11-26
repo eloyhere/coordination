@@ -435,6 +435,25 @@ std::string lowerAscii(std::string text) {
       }
     }
   }
+  if (const toml::Value* trust = document->get("trust");
+      trust != nullptr) {
+    if (!trust->isTable()) {
+      error = "[trust] must be a table";
+      return std::nullopt;
+    }
+    for (std::size_t i = 0; i < trust->keys().size(); ++i) {
+      const std::string& key = trust->keys()[i];
+      const toml::Value& value = trust->values()[i];
+      if (key == "require_checksum" && value.isBoolean()) {
+        manifest.requireChecksum = value.asBoolean();
+      } else if (key == "allow_insecure_http" && value.isBoolean()) {
+        manifest.allowInsecureHttp = value.asBoolean();
+      } else {
+        error = "unknown [trust] field '" + key + "'";
+        return std::nullopt;
+      }
+    }
+  }
   struct DependencyTable {
     const char* name;
     DependencyKind kind;

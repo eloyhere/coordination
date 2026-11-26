@@ -583,6 +583,8 @@ bool PackageManager::prepareRegistry(bool refresh, std::string& error) {
   registryOptions.cacheRoot = mirrors_.cacheRoot();
   registryOptions.preferredMirror = mirrors_.config().defaultMirror;
   registryOptions.verbose = options_.verbose;
+  registryOptions.requireChecksum = manifest_.requireChecksum;
+  registryOptions.allowInsecureHttp = manifest_.allowInsecureHttp;
   registryClient_ = std::make_unique<RegistryClient>(mirrors_, registryOptions);
   return true;
 }

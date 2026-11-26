@@ -54,6 +54,24 @@ std::string shortHash(std::string_view text) {
   return checksum::sha256Hex(text).substr(0, 16);
 }
 
+bool allowRegistryUrl(std::string_view url, bool allowInsecureHttp,
+                      std::string& error) {
+  if (url.rfind("http://", 0) != 0 || allowInsecureHttp) {
+    return true;
+  }
+  const std::string_view rest = url.substr(7);
+  const std::size_t slash = rest.find('/');
+  const std::string_view host = rest.substr(0, slash);
+  if (host == "localhost" || host == "127.0.0.1" || host == "[::1]" ||
+      host.rfind("localhost:", 0) == 0 ||
+      host.rfind("127.0.0.1:", 0) == 0 || host.rfind("[::1]:", 0) == 0) {
+    return true;
+  }
+  error = "insecure HTTP registry URL refused: " + std::string(url) +
+          "; use HTTPS or set [trust] allow_insecure_http = true";
+  return false;
+}
+
 std::optional<RegistryEntry> resolveRegistry(const MirrorManager& mirrors,
                                              std::string_view name,
                                              std::string& error) {
@@ -231,6 +249,11 @@ bool RegistryClient::fetchText(std::string_view registryName,
   std::vector<std::string> attempts;
   for (const MirrorEntry& candidate : candidates) {
     const std::string url = net::joinUrl(candidate.url, relative);
+    std::string policyError;
+    if (!allowRegistryUrl(url, options_.allowInsecureHttp, policyError)) {
+      attempts.push_back(candidate.name + " (" + url + "): " + policyError);
+      continue;
+    }
     const net::FetchResult result = net::fetch(url, transport);
     if (result.ok) {
       mirrors_.recordSuccess(candidate, result.latencyMs);
@@ -419,6 +442,12 @@ std::optional<PackageSource> RegistryClient::fetch(
     std::vector<std::string> attempts;
     for (const std::string& relative : relatives) {
       if (net::hasScheme(relative)) {
+        std::string policyError;
+        if (!allowRegistryUrl(relative, options_.allowInsecureHttp,
+                              policyError)) {
+          attempts.push_back(policyError);
+          continue;
+        }
         net::TransportOptions transport;
         transport.timeout = options_.timeout;
         const net::FetchResult result =
@@ -434,6 +463,13 @@ std::optional<PackageSource> RegistryClient::fetch(
       for (const MirrorEntry& candidate :
            mirrors_.candidates(registryName, options_.preferredMirror)) {
         const std::string url = net::joinUrl(candidate.url, relative);
+        std::string policyError;
+        if (!allowRegistryUrl(url, options_.allowInsecureHttp,
+                              policyError)) {
+          attempts.push_back(candidate.name + " (" + url + "): " +
+                             policyError);
+          continue;
+        }
         net::TransportOptions transport;
         transport.timeout = options_.timeout;
         const net::FetchResult result =
@@ -481,6 +517,15 @@ std::optional<PackageSource> RegistryClient::fetch(
     return std::nullopt;
   }
   if (checksum.empty()) {
+    if (options_.requireChecksum) {
+      std::error_code removeError;
+      std::filesystem::remove(archivePath, removeError);
+      error = "registry index has no checksum for '" +
+              std::string(packageName) + "@" +
+              version.version.toString() +
+              "'; [trust] require_checksum = true refuses unverified packages";
+      return std::nullopt;
+    }
     warnings_.push_back("registry index has no checksum for '" +
                         std::string(packageName) + "@" +
                         version.version.toString() + "'; pinned sha256:" +

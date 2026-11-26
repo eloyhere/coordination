@@ -16,7 +16,11 @@ file(MAKE_DIRECTORY
   "${WORK}/pkg/src"
   "${WORK}/registry/index"
   "${WORK}/registry/packages/math"
+  "${WORK}/registry/packages/unverified"
+  "${WORK}/unverified/src"
   "${WORK}/app/src"
+  "${WORK}/trusted/src"
+  "${WORK}/insecure/src"
   "${WORK}/cache")
 
 set(REGISTRY "${WORK}/registry")
@@ -60,11 +64,47 @@ version = "1.2.0"
 checksum = "sha256:@MATH_HASH@"
 dependencies = []
 ]=])
+
+# An index entry without a checksum, used by the require_checksum policy test.
+file(WRITE "${WORK}/unverified/coordination.toml" [=[
+[package]
+name = "unverified"
+version = "1.0.0"
+edition = "2026"
+source = "src"
+description = "package without an index checksum"
+]=])
+file(WRITE "${WORK}/unverified/src/lib.coo" [=[
+export integer value() {
+    return 1;
+}
+]=])
+execute_process(
+  COMMAND "${COORC}" pack --manifest "${WORK}/unverified/coordination.toml"
+          -o "${WORK}/registry/packages/unverified/1.0.0.tar.gz"
+  RESULT_VARIABLE unverified_pack_result
+  ERROR_VARIABLE unverified_pack_err)
+if(NOT unverified_pack_result EQUAL 0)
+  message(FATAL_ERROR "packing unverified failed\n${unverified_pack_err}")
+endif()
+file(WRITE "${WORK}/registry/index/unverified.toml" [=[
+name = "unverified"
+description = "package without an index checksum"
+[[version]]
+version = "1.0.0"
+dependencies = []
+]=])
+
 file(WRITE "${WORK}/registry/index.toml" [=[
 [[package]]
 name = "math"
 description = "math helpers"
 latest = "1.2.0"
+
+[[package]]
+name = "unverified"
+description = "package without an index checksum"
+latest = "1.0.0"
 ]=])
 
 file(WRITE "${WORK}/app/coordination.toml" [=[
@@ -318,11 +358,72 @@ foreach(required
   endif()
 endforeach()
 
+# Trust policy: an index entry without a checksum is refused when the manifest
+# requires checksums.
+file(WRITE "${WORK}/trusted/coordination.toml" [=[
+[package]
+name = "trusted"
+version = "0.1.0"
+source = "src"
+
+[dependencies]
+unverified = "1.0"
+
+[registries]
+official = "file://@REGISTRY@"
+
+[trust]
+require_checksum = true
+]=])
+fix_manifest("${WORK}/trusted/coordination.toml")
+file(WRITE "${WORK}/trusted/src/main.coo" "integer main() { return 0; }\n")
+execute_process(
+  COMMAND ${ENV_RUN} "${COORC}" install
+          --manifest "${WORK}/trusted/coordination.toml"
+  RESULT_VARIABLE trust_result
+  OUTPUT_VARIABLE trust_out
+  ERROR_VARIABLE trust_err)
+if(trust_result EQUAL 0)
+  message(FATAL_ERROR "install accepted an unverified package\n${trust_out}")
+endif()
+if(NOT "${trust_out}${trust_err}" MATCHES "require_checksum")
+  message(FATAL_ERROR "trust policy error not reported\n${trust_out}\n${trust_err}")
+endif()
+
+# Insecure HTTP registries are refused before any download.
+file(WRITE "${WORK}/insecure/coordination.toml" [=[
+[package]
+name = "insecure"
+version = "0.1.0"
+source = "src"
+
+[dependencies]
+math = "^1.0"
+
+[registries]
+official = "http://example.invalid/registry"
+]=])
+file(WRITE "${WORK}/insecure/src/main.coo" "integer main() { return 0; }\n")
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env
+          "COORD_CACHE_DIR=${WORK}/insecure-cache"
+          "COORD_CONFIG=${WORK}/insecure-config.toml"
+          "${COORC}" install
+          --manifest "${WORK}/insecure/coordination.toml"
+  RESULT_VARIABLE insecure_result
+  OUTPUT_VARIABLE insecure_out
+  ERROR_VARIABLE insecure_err)
+if(insecure_result EQUAL 0)
+  message(FATAL_ERROR "install accepted an insecure HTTP registry\n${insecure_out}")
+endif()
+if(NOT "${insecure_out}${insecure_err}" MATCHES "insecure HTTP")
+  message(FATAL_ERROR "insecure HTTP policy error not reported\n${insecure_out}\n${insecure_err}")
+endif()
+
 if(DEFINED BUILD)
   execute_process(
     COMMAND ${ENV_RUN} "${COORC}" build "${WORK}/app"
-            -o "${WORK}/app.exe"
-    RESULT_VARIABLE build_result
+            -o "${WORK}/app.exe"    RESULT_VARIABLE build_result
     OUTPUT_VARIABLE build_out
     ERROR_VARIABLE build_err)
   if(NOT build_result EQUAL 0)

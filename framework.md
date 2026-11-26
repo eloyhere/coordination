@@ -1721,8 +1721,9 @@ When `health` is absent, `index.toml` is probed; `mirror test` prints reachabili
 - Archive member names are validated **before** stripping the top-level directory: absolute paths, drive letters, `..`, Windows reserved names and illegal characters are rejected.
 - Symlinks are rejected by default; when enabled, targets must be relative and must not escape.
 - Extraction is bounded by total bytes (512 MiB) and entry count; the archive itself is capped at 1 GiB.
-- Archive SHA-256 is verified before extraction; the lockfile pins checksums.
-- HTTP is executed by system `curl`; failures report every mirror attempt. Private registries may receive a Bearer token via `COORD_TOKEN` (`publish`).
+- Archive SHA-256 is verified before extraction; the lockfile pins checksums. `[trust] require_checksum = true` refuses registry entries without a checksum instead of merely warning.
+- `[trust] allow_insecure_http = false` (default) refuses non-loopback `http://` registry URLs; `file://`, `https://`, `localhost`, `127.0.0.1` and `[::1]` are allowed.
+- HTTP is executed by system `curl`; failures report every mirror attempt. Private registries may receive a Bearer token via `COORD_TOKEN` (`publish`). Package signatures/trust chains remain future work.
 
 ### 8.11 CLI
 
@@ -1952,7 +1953,7 @@ Diagnostic format: `path:line:col: error[E2030]: message`, followed by the sourc
 | `Result` / `Expect` | ✅ | Type-argument validation, distinct type, consumption checks |
 | Annotation processors, `line`, proxy, five reflection layers | ✅/🚧 | Processor basics, `line`, proxy class/annotation/runtime, `@Invocation`, `Reflector` work; full descriptor/runtime reflection continues |
 | `.coox`, multi-module linking, standard library | 🚧 | Relative imports, project dirs, `.coox`, outline/hint, `@Test`, `coorc deps`, containers work; remaining library APIs pending |
-| Package manager and mirror manager | ✅ | Manifests, backtracking, lockfile, vendor, file/HTTP registries, SHA-256, offline, mirror failover, pack/publish |
+| Package manager and mirror manager | ✅ | Manifests, backtracking, lockfile, vendor, file/HTTP registries, SHA-256, `[trust]` checksum/HTTPS policy, offline, mirror failover, pack/publish |
 | Cross-platform toolchain (Windows/macOS/Linux/FreeBSD) | ✅ | Host discovery, argv spawn, UTF-8 paths, CMake presets; Linux/macOS verified with g++ |
 | Cross-platform generated programs (wmain/UTF-8 console/platform builtins) | ✅ | `coord_e2e_platform` covers OS/path/file/env builtins |
 | `ProxyPolicy` on local `T*`/`@Unique`/`@Share` | ✅ | `Error`/`Skip`/`Abort`/`Default` for direct dereference, member access, implicit non-null conversion and local Optional destructuring; narrowing; `coord_e2e_optional_policies` / `_error` / `_implicit` |
