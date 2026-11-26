@@ -1964,7 +1964,7 @@ coorc config list|get|set
 | `@Constructure` 类型化/命名字面量 | ✅ | `examples/constructure.coo`；负例 `constructure_error`（`E2076`）；`@Proxy` 类默认支持类型化/命名构造 |
 | `@Weak` C++ 映射 + weak API | ✅ | `std::weak_ptr<T>`；局部/字段/参数/返回值；`isPresent/isEmpty/lock/upgrade`；`coord_e2e_weak` |
 | 默认初始化 | ✅ | 局部变量、字段、数组和对象字面量临时值生成 `{}`；`coord_e2e_default_init` |
-| 整数运算检查 | ✅ | `+ - * / %`、`++/--`、`+= -= *= /= %=` 使用溢出/除零 helper，覆盖 64 位与 128 位；`<<`/`>>` 对 8/16/32/64 位使用范围/溢出 helper；`coord_e2e_division`、`coord_e2e_overflow`、`coord_e2e_compound`、`coord_e2e_shift` |
+| 整数运算检查 | ✅ | `+ - * / %`、`++/--`、`+= -= *= /= %=` 使用溢出/除零 helper，覆盖 64 位与 128 位；`<<`/`>>` 对 8/16/32/64/128 位使用范围/溢出 helper；`coord_e2e_division`、`coord_e2e_overflow`、`coord_e2e_compound`、`coord_e2e_shift` |
 | `[]` 边界检查 | ✅ | `Array`/固定数组与 `ArrayView` 走 `checkedIndex`/`checkedIndexView`，越界终止；裸指针索引仍为 unsafe；`coord_e2e_bounds` |
 | `@Destructure` 目标类方法 + ProxyHandler trap | ✅ | `coord_e2e_destructure_annotation`；逐绑定 hook |
 | 代码块保留（`@Retention(Compile/Runtime)` 块） | ✅ | `examples/retention_block.coo` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`；`Invocation`/`enum` 块报 `E2044` |

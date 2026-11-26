@@ -4,5 +4,7 @@ integer main() {
     print(64 >> 2);
     @Unsigned @Length(8) integer byte = 3;
     print(byte << 2);
+    @Unsigned @Length(128) integer wide = 1;
+    print(wide << 64);
     return 0;
 }

@@ -954,6 +954,6 @@ if(MSVC)
       -DCOORC=$<TARGET_FILE:coorc>
       -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/shift.coo
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_shift
-      -DEXPECTED=8|16|12
+      -DEXPECTED=8|16|12|18446744073709551616
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()
