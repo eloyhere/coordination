@@ -932,4 +932,12 @@ if(MSVC)
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_optional_fields
       -DEXPECTED=false|0|0|5|7|7
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_optional_return
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/optional_return.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_optional_return
+      -DEXPECTED=false|9|0|0|42
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()

@@ -92,6 +92,7 @@ struct Expr : Node {
   int radix = 0;
   bool weakValue = false;
   bool optionalField = false;
+  bool optionalCall = false;
 };
 
 // ---------------------------------------------------------------------------

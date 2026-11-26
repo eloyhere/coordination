@@ -1,0 +1,36 @@
+class Box {
+public:
+    integer value;
+
+    Box() {
+        value = 0;
+    }
+
+    Box(integer initial) {
+        value = initial;
+    }
+}
+
+@Optional(Skip)
+integer* maybeInteger() {
+    return null;
+}
+
+@Optional(Skip)
+Box* maybeBox() {
+    return null;
+}
+
+@Optional(Default(42))
+integer* fallbackInteger() {
+    return null;
+}
+
+integer main() {
+    print(maybeInteger().isPresent());
+    print(maybeInteger().orElse(9));
+    print(*maybeInteger());
+    print((*maybeBox()).value);
+    print(*fallbackInteger());
+    return 0;
+}

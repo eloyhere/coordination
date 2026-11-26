@@ -2514,6 +2514,34 @@ void CppEmitter::emitExpr(const Expr* expr) {
       }
       if (expr->op == "*" && expr->optionalAccess) {
         const auto emitSource = [&]() { emitExpr(expr->lhs.get()); };
+        if (expr->lhs != nullptr && expr->lhs->optionalCall) {
+          if (expr->proxyPolicy == ProxyPolicy::Abort) {
+            out_ << "coord_rt::optionalAbort(";
+            emitSource();
+            out_ << ", \"optional return value is null\")";
+            return;
+          }
+          if (expr->proxyPolicy == ProxyPolicy::Skip) {
+            out_ << "([&]() -> std::remove_reference_t<decltype(*";
+            emitSource();
+            out_ << ")> { auto&& __o = ";
+            emitSource();
+            out_ << "; return __o ? *__o : "
+                    "std::remove_reference_t<decltype(*__o)>{}; }())";
+            return;
+          }
+          if (expr->proxyPolicy == ProxyPolicy::Default &&
+              expr->optionalDefault != nullptr) {
+            out_ << "([&]() -> std::remove_reference_t<decltype(*";
+            emitSource();
+            out_ << ")> { auto&& __o = ";
+            emitSource();
+            out_ << "; return __o ? *__o : (";
+            emitExpr(expr->optionalDefault);
+            out_ << "); }())";
+            return;
+          }
+        }
         if (expr->proxyPolicy == ProxyPolicy::Abort) {
           out_ << "(coord_rt::optionalAbort(";
           emitSource();
@@ -3676,6 +3704,38 @@ void CppEmitter::emitExpr(const Expr* expr) {
         }
       }
       if (callee != nullptr && callee->kind == ExprKind::Member &&
+          callee->lhs != nullptr && callee->lhs->optionalCall) {
+        const std::string& name = callee->name;
+        if (name == "isPresent") {
+          out_ << "((";
+          emitExpr(callee->lhs.get());
+          out_ << ") != nullptr)";
+          return;
+        }
+        if (name == "isEmpty") {
+          out_ << "((";
+          emitExpr(callee->lhs.get());
+          out_ << ") == nullptr)";
+          return;
+        }
+        if (name == "get") {
+          out_ << "coord_rt::optionalAbort(";
+          emitExpr(callee->lhs.get());
+          out_ << ", \"optional return value is null\")";
+          return;
+        }
+        if (name == "orElse" && expr->args.size() == 1) {
+          out_ << "([&]() -> std::remove_reference_t<decltype(*";
+          emitExpr(callee->lhs.get());
+          out_ << ")> { auto&& __o = ";
+          emitExpr(callee->lhs.get());
+          out_ << "; return __o ? *__o : (";
+          emitExpr(expr->args[0].get());
+          out_ << "); }())";
+          return;
+        }
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Member &&
           callee->lhs != nullptr && callee->lhs->optionalField) {
         const std::string& name = callee->name;
         if (name == "isPresent") {
@@ -3846,6 +3906,36 @@ void CppEmitter::emitExpr(const Expr* expr) {
           expr->lhs != nullptr) {
         const std::string member = sanitize(expr->name);
         const auto emitSource = [&]() { emitExpr(expr->lhs.get()); };
+        if (expr->lhs->optionalCall) {
+          if (expr->proxyPolicy == ProxyPolicy::Abort) {
+            out_ << "(coord_rt::optionalAbort(";
+            emitSource();
+            out_ << ", \"optional return value is null\")." << member
+                 << ')';
+            return;
+          }
+          if (expr->proxyPolicy == ProxyPolicy::Skip) {
+            out_ << "([&]() -> std::remove_reference_t<decltype(*";
+            emitSource();
+            out_ << ")> { auto&& __o = ";
+            emitSource();
+            out_ << "; return __o ? *__o : "
+                    "std::remove_reference_t<decltype(*__o)>{}; }()).";
+            out_ << member;
+            return;
+          }
+          if (expr->proxyPolicy == ProxyPolicy::Default &&
+              expr->optionalDefault != nullptr) {
+            out_ << "([&]() -> std::remove_reference_t<decltype(*";
+            emitSource();
+            out_ << ")> { auto&& __o = ";
+            emitSource();
+            out_ << "; return __o ? *__o : (";
+            emitExpr(expr->optionalDefault);
+            out_ << "); }())." << member;
+            return;
+          }
+        }
         if (expr->proxyPolicy == ProxyPolicy::Abort) {
           out_ << "(coord_rt::optionalAbort(";
           emitSource();

@@ -636,6 +636,23 @@ bool Checker::checkOptionalDirectAccess(Expr* expr, std::string_view action) {
   if (expr == nullptr) {
     return false;
   }
+  if (expr->lhs != nullptr && expr->lhs->optionalCall) {
+    const Expr* call = expr->lhs.get();
+    if (call->proxyPolicy == ProxyPolicy::Error) {
+      diagnostics_.error(
+          expr->span, "E2048",
+          "un-narrowed @Optional return value is used by " +
+              std::string(action) +
+              "; configure @Optional(Skip|Abort|Default(expr)) or use "
+              "isPresent()/get()");
+      return false;
+    }
+    expr->optionalAccess = true;
+    expr->proxyPolicy = call->proxyPolicy;
+    expr->optionalDefault = call->optionalDefault;
+    expr->optionalSmart = call->optionalSmart;
+    return true;
+  }
   if (expr->lhs != nullptr && expr->lhs->optionalField) {
     const Expr* field = expr->lhs.get();
     const Expr* defaultExpr = field->optionalDefault;
@@ -1959,6 +1976,10 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
       decl.isShare = true;
     } else if (use.name == "Weak") {
       decl.isWeak = true;
+    } else if (use.name == "Optional") {
+      decl.isOptional = true;
+      decl.proxyPolicy = ProxyPolicy::Error;
+      parseOptionalPolicy(use, decl.proxyPolicy, decl.proxyDefault);
     }
   }
   if (decl.isUnique && decl.isShare) {
@@ -2361,6 +2382,10 @@ void Checker::checkFunction(Decl& decl) {
       decl.isShare = true;
     } else if (use.name == "Weak") {
       decl.isWeak = true;
+    } else if (use.name == "Optional") {
+      decl.isOptional = true;
+      decl.proxyPolicy = ProxyPolicy::Error;
+      parseOptionalPolicy(use, decl.proxyPolicy, decl.proxyDefault);
     }
   }
   if (decl.isUnique && decl.isShare) {
@@ -3188,6 +3213,12 @@ Type* Checker::checkCall(Expr* expr) {
     } else if (function->isResult) {
       returnType = makeResultType(returnType, false);
     }
+    if (function->isOptional) {
+      expr->optionalCall = true;
+      expr->proxyPolicy = function->proxyPolicy;
+      expr->optionalDefault = function->proxyDefault;
+      expr->optionalSmart = function->isUnique || function->isShare;
+    }
     expr->resolvedType = returnType;
     return returnType;
   }
@@ -3525,12 +3556,37 @@ Type* Checker::checkCall(Expr* expr) {
     } else if (function->isResult) {
       returnType = makeResultType(returnType, false);
     }
+    if (function->isOptional) {
+      expr->optionalCall = true;
+      expr->proxyPolicy = function->proxyPolicy;
+      expr->optionalDefault = function->proxyDefault;
+      expr->optionalSmart = function->isUnique || function->isShare;
+    }
     expr->resolvedType = returnType;
     return returnType;
   }
 
   if (callee->kind == ExprKind::Member) {
     Type* baseType = checkExpr(callee->lhs.get());
+    if (callee->lhs != nullptr && callee->lhs->optionalCall) {
+      Type* fieldType = callee->lhs->resolvedType;
+      Type* valueType =
+          fieldType != nullptr && fieldType->kind == TypeKind::Pointer
+              ? fieldType->pointee
+              : fieldType;
+      if (callee->name == "isPresent" || callee->name == "isEmpty") {
+        expr->resolvedType = boolType_;
+        return boolType_;
+      }
+      if (callee->name == "get") {
+        expr->resolvedType = valueType;
+        return valueType;
+      }
+      if (callee->name == "orElse" && expr->args.size() == 1) {
+        expr->resolvedType = valueType;
+        return valueType;
+      }
+    }
     if (callee->lhs != nullptr && callee->lhs->optionalField) {
       Type* fieldType = callee->lhs->resolvedType;
       Type* valueType =
@@ -4889,6 +4945,10 @@ void Checker::checkStmt(Stmt* stmt) {
                                "cannot return '" + actual->name +
                                    "' as '" + expected->name + "'");
           }
+        } else if (currentFunction_ != nullptr &&
+                   currentFunction_->isOptional && actual != nullptr &&
+                   actual->kind == TypeKind::Null) {
+          // Nullable return accepts null explicitly.
         } else {
           requireAssignable(actual, expected, stmt->span, "return statement");
         }
