@@ -758,6 +758,36 @@ void CppEmitter::emitPrelude() {
   out_ << "  target = checkedMod(target, value, message);\n";
   out_ << "  return target;\n";
   out_ << "}\n";
+  out_ << "template <class T>\n";
+  out_ << "T checkedShl(T value, std::int64_t amount, const char* message) {\n";
+  out_ << "  if (amount < 0 || amount >= std::numeric_limits<T>::digits) {\n";
+  out_ << "    std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "  }\n";
+  out_ << "  if constexpr (std::is_signed_v<T>) {\n";
+  out_ << "    if (value < 0) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "  }\n";
+  out_ << "  using U = std::make_unsigned_t<T>;\n";
+  out_ << "  const U original = static_cast<U>(value);\n";
+  out_ << "  const U shifted = static_cast<U>(original << amount);\n";
+  out_ << "  if (static_cast<U>(shifted >> amount) != original) {\n";
+  out_ << "    std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "  }\n";
+  out_ << "  if constexpr (std::is_signed_v<T>) {\n";
+  out_ << "    if (shifted > static_cast<U>(std::numeric_limits<T>::max())) {\n";
+  out_ << "      std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "    }\n";
+  out_ << "  }\n";
+  out_ << "  return static_cast<T>(shifted);\n";
+  out_ << "}\n";
+  out_ << "template <class T>\n";
+  out_ << "T checkedShr(T value, std::int64_t amount, const char* message) {\n";
+  out_ << "  if (amount < 0 || amount >= std::numeric_limits<T>::digits) {\n";
+  out_ << "    std::cerr << message << '\\n'; std::abort();\n";
+  out_ << "  }\n";
+  out_ << "  return static_cast<T>(value >> amount);\n";
+  out_ << "}\n";
   out_ << "inline void check(bool condition) {\n";
   out_ << "  if (!condition) {\n";
   out_ << "    std::cerr << \"assertion failed\\n\";\n";
@@ -2627,6 +2657,20 @@ void CppEmitter::emitExpr(const Expr* expr) {
         out_ << ", ";
         emitExpr(expr->rhs.get());
         out_ << ", \"integer division by zero\")";
+        return;
+      }
+      if ((expr->op == "<<" || expr->op == ">>") &&
+          expr->lhs != nullptr && expr->rhs != nullptr &&
+          expr->lhs->resolvedType != nullptr &&
+          expr->rhs->resolvedType != nullptr &&
+          expr->lhs->resolvedType->kind == TypeKind::Int &&
+          expr->rhs->resolvedType->kind == TypeKind::Int) {
+        out_ << (expr->op == "<<" ? "coord_rt::checkedShl("
+                                  : "coord_rt::checkedShr(");
+        emitExpr(expr->lhs.get());
+        out_ << ", ";
+        emitExpr(expr->rhs.get());
+        out_ << ", \"shift out of range\")";
         return;
       }
       if ((expr->op == "+" || expr->op == "-" || expr->op == "*") &&

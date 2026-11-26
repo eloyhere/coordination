@@ -948,4 +948,12 @@ if(MSVC)
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_compound
       -DEXPECTED=7|21|21|22|23|11|3|2
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_shift
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/shift.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_shift
+      -DEXPECTED=8|16|12
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()

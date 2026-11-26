@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**120 项 CTest**，Windows 全套 **120/120 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 当前基线：**121 项 CTest**，Windows 全套 **121/121 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **120 项**（1 个单元测试 + 119 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 注册 **121 项**（1 个单元测试 + 120 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。fuzzer 已发现并推动修复了解析器诊断无限增长的问题。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。

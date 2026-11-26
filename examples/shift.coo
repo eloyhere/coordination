@@ -1,0 +1,8 @@
+integer main() {
+    integer value = 1;
+    print(value << 3);
+    print(64 >> 2);
+    @Unsigned @Length(8) integer byte = 3;
+    print(byte << 2);
+    return 0;
+}
