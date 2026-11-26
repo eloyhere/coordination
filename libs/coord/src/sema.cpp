@@ -790,6 +790,16 @@ const MethodInfo* Checker::lookupMethod(Type* type, std::string_view name,
 }
 
 Type* Checker::resolveNamedType(TypeExpr* type, bool allowMeta) {
+  const auto checkContainerArgument = [&](const TypeExpr* argument,
+                                         const char* container) {
+    if (argument != nullptr && argument->kind == TypeExprKind::Ref) {
+      diagnostics_.error(
+          argument->span, "E2039",
+          "borrowed references cannot be stored in " +
+              std::string(container) +
+              "; store a value, pointer, or @Share/@Unique owner");
+    }
+  };
   std::string resolvedName = type->name;
   const std::size_t dot = resolvedName.find('.');
   if (dot != std::string::npos &&
@@ -797,23 +807,31 @@ Type* Checker::resolveNamedType(TypeExpr* type, bool allowMeta) {
     resolvedName = resolvedName.substr(dot + 1);
   }
   if (resolvedName == "Array" && type->args.size() == 1) {
+    checkContainerArgument(type->args[0].get(), "Array");
     return makeQueueType(resolveType(type->args[0].get(), allowMeta));
   }
   if (type->name == "ArrayView" && type->args.size() == 1) {
+    checkContainerArgument(type->args[0].get(), "ArrayView");
     return makeArrayViewType(resolveType(type->args[0].get(), allowMeta));
   }
   if (type->name == "OrderedMap" && type->args.size() == 2) {
+    checkContainerArgument(type->args[0].get(), "map keys");
+    checkContainerArgument(type->args[1].get(), "map values");
     return makeMapType(resolveType(type->args[0].get(), allowMeta),
                        resolveType(type->args[1].get(), allowMeta), false);
   }
   if (type->name == "UnorderedMap" && type->args.size() == 2) {
+    checkContainerArgument(type->args[0].get(), "map keys");
+    checkContainerArgument(type->args[1].get(), "map values");
     return makeMapType(resolveType(type->args[0].get(), allowMeta),
                        resolveType(type->args[1].get(), allowMeta), true);
   }
   if (type->name == "OrderedSet" && type->args.size() == 1) {
+    checkContainerArgument(type->args[0].get(), "set elements");
     return makeSetType(resolveType(type->args[0].get(), allowMeta), false);
   }
   if (type->name == "UnorderedSet" && type->args.size() == 1) {
+    checkContainerArgument(type->args[0].get(), "set elements");
     return makeSetType(resolveType(type->args[0].get(), allowMeta), true);
   }
   Type* found = nullptr;
@@ -2971,10 +2989,43 @@ Type* Checker::checkAssign(Expr* expr) {
       (void)field;
     }
   }
+  if (expr->lhs != nullptr && expr->lhs->kind == ExprKind::Name &&
+      expr->rhs != nullptr && expr->rhs->kind == ExprKind::Name &&
+      expr->lhs->name == expr->rhs->name) {
+    if (Variable* variable = lookupVariable(expr->lhs->name)) {
+      if (variable->isUnique) {
+        diagnostics_.error(expr->span, "E2045",
+                           "@Unique value '" + expr->lhs->name +
+                               "' cannot be assigned/moved to itself");
+      }
+    }
+  }
   Type* rhs = checkExpr(expr->rhs.get());
   if (!optional && expr->rhs != nullptr &&
       expr->rhs->kind == ExprKind::Name) {
     checkOptionalDirectAccess(expr->rhs.get(), "implicit conversion");
+  }
+  if (expr->lhs != nullptr && expr->lhs->kind == ExprKind::Member &&
+      expr->lhs->lhs != nullptr && expr->rhs != nullptr &&
+      expr->lhs->lhs->resolvedType != nullptr) {
+    const FieldInfo* field =
+        lookupField(expr->lhs->lhs->resolvedType, expr->lhs->name);
+    if (field != nullptr && field->decl != nullptr &&
+        field->decl->isShare) {
+      const bool selfName =
+          expr->rhs->kind == ExprKind::Name &&
+          expr->lhs->lhs->kind == ExprKind::Name &&
+          expr->rhs->name == expr->lhs->lhs->name;
+      const bool selfThis =
+          expr->rhs->kind == ExprKind::This &&
+          expr->lhs->lhs->kind == ExprKind::This;
+      if (selfName || selfThis) {
+        diagnostics_.warning(
+            expr->span, "W0005",
+            "self-cycle through @Share field '" + expr->lhs->name +
+                "'; use @Weak or restructure the ownership graph");
+      }
+    }
   }
   if (rhs != nullptr && rhs->kind == TypeKind::Null) {
     if (!optional) {

@@ -547,12 +547,12 @@ Dangling fundamentally means a **reference's scope outlives the referenced objec
 2. **`@Unique T`**: unique ownership, heap storage, move-only. Released when the scope/field dies; non-null by default, nullable as `@Optional @Unique T`. Member access auto-dereferences; `@Unique T y = x` moves (x becomes invalid, `E2045`) and copying is forbidden. Provides Java-Optional-style `isPresent()` / `isEmpty()` / `get()`; `get()` panics when empty; `isPresent()` is false after a move.
 3. **`@Share T`**: shared ownership, heap control block, atomic count, copyable. Copy +1, destroy -1; the last reference destroys the object; non-null by default, nullable as `@Optional @Share T`; may cross threads. Also provides `isPresent()` / `isEmpty()` / `get()`.
 4. **Plain `T`**: value/stack semantics; fields die with their object; no control block.
-5. **`&` borrow**: owns nothing, counts nothing, extends nothing; valid only within the current function/Block. `&` must not be returned, stored in fields/containers, passed across threads, or captured by a possibly-escaping closure; violation reports `E2039`. A `&` field is a hard compile error. Currently `return &x` and `T&` fields are checked; cross-thread/closure checks remain.
+5. **`&` borrow**: owns nothing, counts nothing, extends nothing; valid only within the current function/Block. `&` must not be returned, stored in fields/containers, passed across threads, or captured by a possibly-escaping closure; violation reports `E2039`. A `&` field or a container element type such as `Array<T&>` is a hard compile error. Currently `return &x`, `T&` fields and reference container elements are checked; cross-thread/closure checks remain. `@Unique x; x = x;` reports `E2045`; direct self-cycles through `@Share` fields emit `W0005`.
 6. **Borrow sources**: `&` may borrow plain values, `@Unique` and `@Share`; borrowing does not change the owner; a moved `@Unique` cannot be borrowed (`E2045`).
 7. **Parameters/returns**: a `@Unique` parameter transfers ownership by value; a `@Share` parameter increments the count; a `&` parameter only borrows and the callee must not store it. Returning `@Unique`/`@Share` transfers/shares ownership; returning `&` is forbidden.
 8. **`@Unique` → `@Share`**: `@Share T r = box;` moves the `@Unique` into a shared control block and invalidates `box`; the reverse is forbidden.
 9. **`const T&` to a temporary**: the temporary's lifetime extends to the end of the reference variable's Scope; owner rules are unchanged.
-10. **Cycles**: only `@Share` can form cycles; reference counting cannot reclaim them, runtime cycle detection warns `W0005`, and cyclic objects live until process exit (possible leak). `&` cannot be stored and is inherently acyclic.
+10. **Cycles**: only `@Share` can form cycles; reference counting cannot reclaim them. Direct self-cycles (`x.field = x` / `this.field = this` through a `@Share` field) are rejected with `W0005` at compile time; general indirect runtime cycle detection is still ⏳. `&` cannot be stored and is inherently acyclic.
 11. **Statics/globals**: lifetime is the process; they may be borrowed by `&`, but the borrow still must not escape.
 12. **Conservative checking (v0)**: `&` is used only within the current function — not returned, stored or passed across threads; no full lifetime parameterization.
 13. **`@Weak T`**: non-owning `std::weak_ptr<T>` view of an `@Share T` owner; default empty. It can be initialized/assigned from `@Share` or another `@Weak` value. `isPresent()`/`isEmpty()` test expiry; `lock()`/`upgrade()` return a nullable `@Share T` handle that supports `isPresent()/get()/orElse()`. Accessing `get()` after expiry aborts.
@@ -1945,7 +1945,7 @@ Diagnostic format: `path:line:col: error[E2030]: message`, followed by the sourc
 | `super.method()` / `super.field` / `: super(args)` / `: field(expr)` | ✅ | Covered by e2e |
 | Enum methods / `implements` | ✅ | Wrapper class + underlying integer |
 | Virtual dispatch through base references/pointers | ✅ | `examples/polymorphism.coo` |
-| `&` borrow / `@Unique`/`@Share` escape (JPA cascade) | 🚧 | Basic ownership/move checks landed; full borrow analysis ⏳ |
+| `&` borrow / `@Unique`/`@Share` escape (JPA cascade) | 🚧 | `E2039` return/field/container references, `E2045` self-move/use-after-move, `W0005` direct `@Share` self-cycle; full borrow/lifetime analysis ⏳ |
 | Meta-annotations `@Inherit/@Repeatable/@Target/@Meta/@Retention/@Documented` | ✅ | Validation + `@Inherit` effective lists |
 | Runtime/Enum retention tables / annotation comments | ✅ | `kRetainedAnnotations` / `k<Enum>Variants`; Invocation hooks P4 |
 | `integer` `@Length` 8/16/32/64/128 + `@Signed/@Unsigned` | ✅ | 128-bit via `coord_rt::UInt128` |

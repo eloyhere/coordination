@@ -2360,6 +2360,44 @@ integer main() {
   CHECK(generated.find("checkedPostInc(mutable_") != std::string::npos);
 }
 
+void testBorrowSafety() {
+  Harness cycle(R"(
+class Node {
+public:
+    @Optional @Share Node next = null;
+}
+
+integer main() {
+    Node node;
+    node.next = node;
+    return 0;
+}
+)");
+  CHECK(cycle.countCode("W0005") >= 1);
+
+  Harness container(R"(
+integer main() {
+    Array<integer&> values;
+    return 0;
+}
+)");
+  CHECK(container.countCode("E2039") >= 1);
+
+  Harness selfMove(R"(
+class Payload {
+public:
+    Payload() {}
+}
+
+integer main() {
+    @Unique Payload payload = Payload();
+    payload = payload;
+    return 0;
+}
+)");
+  CHECK(selfMove.countCode("E2045") >= 1);
+}
+
 void testDiagnosticLimit() {
   std::string source = "class Broken {\n";
   for (int i = 0; i < 2000; ++i) {
@@ -3175,6 +3213,7 @@ int main() {
   testMainSignature();
   testJsImportExport();
   testReferenceLocals();
+  testBorrowSafety();
   testDiagnosticLimit();
   testSwitchStatement();
   testMatch();
