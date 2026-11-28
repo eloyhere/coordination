@@ -1393,6 +1393,38 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2095
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_unsafe_ffi_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/unsafe_ffi_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_unsafe_ffi_error
+      -DEXPECT_SUBSTRING=E2096
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_unsafe_ffi_block
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/unsafe_ffi_block.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_unsafe_ffi_block
+      -DEXPECTED=ok
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_unsafe_pointer_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/unsafe_pointer_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_unsafe_pointer_error
+      -DEXPECT_SUBSTRING=E2096
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_unsafe_safe_override_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/unsafe_safe_override_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_unsafe_safe_override_error
+      -DEXPECT_SUBSTRING=E2096
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lock_capture_deep
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

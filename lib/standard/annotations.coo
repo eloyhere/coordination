@@ -289,3 +289,8 @@ annotation Radix {}
 annotation Lock {}
 @Target(method)
 annotation ReadOnly {}
+
+@Target(class, function, method, constructor, block)
+annotation Unsafe {}
+@Target(class, function, method, constructor, block)
+annotation Safe {}

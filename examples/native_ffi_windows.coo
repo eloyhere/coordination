@@ -1,6 +1,7 @@
 @Native("GetCurrentProcessId")
 integer nativePid();
 
+@Unsafe
 integer main() {
     if (nativePid() > 0) {
         print("ok");

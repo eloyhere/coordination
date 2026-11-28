@@ -1,0 +1,12 @@
+// An @Unsafe block inside a safe function may call @Native code.
+@Native("getpid")
+integer nativePid();
+
+integer main() {
+    @Unsafe {
+        if (nativePid() > 0) {
+            print("ok");
+        }
+    }
+    return 0;
+}

@@ -1,0 +1,18 @@
+// @Safe overrides an inherited @Unsafe class scope.
+@Unsafe
+class Worker {
+public:
+    @Safe
+    integer pid() {
+        return nativePid();
+    }
+}
+
+@Native("getpid")
+integer nativePid();
+
+integer main() {
+    Worker worker;
+    print(worker.pid());
+    return 0;
+}

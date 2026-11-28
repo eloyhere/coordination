@@ -1,11 +1,14 @@
+@Unsafe
 integer readValue(@Optional(Skip) integer* pointer) {
     return *pointer;
 }
 
+@Unsafe
 integer readFallback(@Optional(Default(41)) integer* pointer) {
     return *pointer + 1;
 }
 
+@Unsafe
 integer main() {
     print(readValue(null));
     print(readFallback(null));

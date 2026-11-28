@@ -1,0 +1,8 @@
+// Raw pointer dereference requires an @Unsafe scope.
+integer main() {
+    integer[3] values;
+    values[0] = 1;
+    integer* pointer = &values[0];
+    print(*pointer);
+    return 0;
+}

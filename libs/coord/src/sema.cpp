@@ -553,6 +553,7 @@ bool Checker::check(ModuleAst& module) {
   pushScope(Scope::Kind::Module);
   declareTopLevel(module);
   registerAnnotations(module);
+  moduleUnsafe_ = module.moduleUnsafe && !module.moduleSafe;
 
   for (const auto& decl : module.decls) {
     if (decl->kind == DeclKind::Interface) {
@@ -1733,6 +1734,16 @@ void Checker::checkClass(Decl& decl) {
   currentClass_ = type;
   currentClassDecl_ = &decl;
   pushScope(Scope::Kind::Class);
+  bool ownsUnsafe = false;
+  bool ownsSafe = false;
+  for (const AnnotationUse& use : decl.annotations) {
+    ownsUnsafe = ownsUnsafe || use.name == "Unsafe";
+    ownsSafe = ownsSafe || use.name == "Safe";
+  }
+  const bool savedClassUnsafe = classUnsafe_;
+  classUnsafe_ = ownsSafe ? false : (ownsUnsafe || moduleUnsafe_);
+  decl.isUnsafe = classUnsafe_;
+  decl.isSafe = ownsSafe;
 
   for (const auto& member : decl.members) {
     if (member->access == Access::Default) {
@@ -2011,6 +2022,7 @@ void Checker::checkClass(Decl& decl) {
   popScope();
   currentClass_ = savedClass;
   currentClassDecl_ = savedClassDecl;
+  classUnsafe_ = savedClassUnsafe;
 }
 
 void Checker::checkEnum(Decl& decl) {
@@ -2519,6 +2531,20 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
 
   decl.resolvedType = returnType;
 
+  bool ownUnsafeScope = false;
+  bool ownSafeScope = false;
+  for (const AnnotationUse& use : decl.annotations) {
+    ownUnsafeScope = ownUnsafeScope || use.name == "Unsafe";
+    ownSafeScope = ownSafeScope || use.name == "Safe";
+  }
+  const bool effectiveUnsafe =
+      ownSafeScope ? false
+                   : (ownUnsafeScope || classUnsafe_ || moduleUnsafe_);
+  decl.isUnsafe = effectiveUnsafe;
+  decl.isSafe = ownSafeScope;
+  const bool savedUnsafeScope = unsafeScope_;
+  unsafeScope_ = effectiveUnsafe;
+
   Type* savedReturn = currentReturnType_;
   Decl* savedFunction = currentFunction_;
   const bool savedDestructor = inDestructor_;
@@ -2528,6 +2554,7 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
   if (decl.body) {
     checkStmt(decl.body.get());
   }
+  unsafeScope_ = savedUnsafeScope;
   currentReturnType_ = savedReturn;
   currentFunction_ = savedFunction;
   inDestructor_ = savedDestructor;
@@ -2701,6 +2728,19 @@ void Checker::checkConstructorDecl(Decl& decl) {
   }
 
   decl.resolvedType = voidType_;
+  bool ownUnsafeScope = false;
+  bool ownSafeScope = false;
+  for (const AnnotationUse& use : decl.annotations) {
+    ownUnsafeScope = ownUnsafeScope || use.name == "Unsafe";
+    ownSafeScope = ownSafeScope || use.name == "Safe";
+  }
+  const bool effectiveUnsafe =
+      ownSafeScope ? false
+                   : (ownUnsafeScope || classUnsafe_ || moduleUnsafe_);
+  decl.isUnsafe = effectiveUnsafe;
+  decl.isSafe = ownSafeScope;
+  const bool savedUnsafeScope = unsafeScope_;
+  unsafeScope_ = effectiveUnsafe;
   Type* savedReturn = currentReturnType_;
   Decl* savedFunction = currentFunction_;
   currentReturnType_ = voidType_;
@@ -2708,6 +2748,7 @@ void Checker::checkConstructorDecl(Decl& decl) {
   if (decl.body) {
     checkStmt(decl.body.get());
   }
+  unsafeScope_ = savedUnsafeScope;
   currentReturnType_ = savedReturn;
   currentFunction_ = savedFunction;
 
@@ -3012,6 +3053,19 @@ void Checker::checkFunction(Decl& decl) {
                        "@Result main must return integer");
   }
 
+  bool ownUnsafeScope = false;
+  bool ownSafeScope = false;
+  for (const AnnotationUse& use : decl.annotations) {
+    ownUnsafeScope = ownUnsafeScope || use.name == "Unsafe";
+    ownSafeScope = ownSafeScope || use.name == "Safe";
+  }
+  const bool effectiveUnsafe =
+      ownSafeScope ? false : (ownUnsafeScope || moduleUnsafe_);
+  decl.isUnsafe = effectiveUnsafe;
+  decl.isSafe = ownSafeScope;
+  const bool savedUnsafeScope = unsafeScope_;
+  unsafeScope_ = effectiveUnsafe;
+
   Type* savedReturn = currentReturnType_;
   Decl* savedFunction = currentFunction_;
   const bool savedDestructor = inDestructor_;
@@ -3021,6 +3075,7 @@ void Checker::checkFunction(Decl& decl) {
   if (decl.body) {
     checkStmt(decl.body.get());
   }
+  unsafeScope_ = savedUnsafeScope;
   currentReturnType_ = savedReturn;
   currentFunction_ = savedFunction;
   inDestructor_ = savedDestructor;
@@ -3749,6 +3804,11 @@ Type* Checker::checkUnary(Expr* expr) {
   }
   if (expr->op == "*") {
     checkOptionalDirectAccess(expr, "dereference");
+    if (!unsafeScope_) {
+      diagnostics_.error(
+          expr->span, "E2096",
+          "raw pointer dereference requires an @Unsafe scope");
+    }
     if (operand->kind != TypeKind::Pointer) {
       diagnostics_.error(expr->span, "E2005",
                          "cannot dereference a non-pointer type");
@@ -4697,6 +4757,17 @@ Type* Checker::checkCall(Expr* expr) {
                              "function or handled explicitly");
     }
 
+    bool nativeDecl = function->isNative;
+    for (const AnnotationUse& use : function->annotations) {
+      nativeDecl = nativeDecl || use.name == "Native";
+    }
+    if ((nativeDecl || function->isUnsafe) && !unsafeScope_) {
+      diagnostics_.error(
+          expr->span, "E2096",
+          "calling @Unsafe/@Native function '" + callee->name +
+              "' requires an @Unsafe scope");
+    }
+
     pushTypeScope();
     bindGenericParams(function->generics, false);
     for (std::size_t i = 0; i < expr->args.size(); ++i) {
@@ -5321,6 +5392,14 @@ Type* Checker::checkCall(Expr* expr) {
                              " method '" + method->name + "'");
     }
     checkLockCall(callee->lhs.get(), method, expr->span);
+    if (method->decl != nullptr &&
+        (method->decl->isNative || method->decl->isUnsafe) &&
+        !unsafeScope_) {
+      diagnostics_.error(
+          expr->span, "E2096",
+          "calling @Unsafe/@Native method '" + method->name +
+              "' requires an @Unsafe scope");
+    }
     expr->resolvedType = method->returnType;
     return method->returnType;
   }
@@ -5637,7 +5716,14 @@ void Checker::checkStmt(Stmt* stmt) {
       if (stmt->hasLock) {
         validateLockBlock(stmt);
       }
+      const bool savedBlockUnsafe = unsafeScope_;
+      if (stmt->unsafeBlock) {
+        unsafeScope_ = true;
+      } else if (stmt->safeBlock) {
+        unsafeScope_ = false;
+      }
       checkBlock(stmt);
+      unsafeScope_ = savedBlockUnsafe;
       if (stmt->hasLock && !lockBlocks_.empty()) {
         lockBlocks_.pop_back();
       }

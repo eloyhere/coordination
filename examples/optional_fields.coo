@@ -18,6 +18,7 @@ public:
     @Optional(Default(Box(5))) @Unique Box fallback = null;
 }
 
+@Unsafe
 integer main() {
     Holder holder;
     print(holder.pointer.isPresent());

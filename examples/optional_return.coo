@@ -26,6 +26,7 @@ integer* fallbackInteger() {
     return null;
 }
 
+@Unsafe
 integer main() {
     print(maybeInteger().isPresent());
     print(maybeInteger().orElse(9));

@@ -4,6 +4,7 @@ integer nativeLength(string text);
 @Native("getenv")
 string nativeEnv(string name);
 
+@Unsafe
 integer main() {
     print(nativeLength("hello"));
     string path = nativeEnv("PATH");

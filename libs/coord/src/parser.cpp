@@ -357,6 +357,18 @@ std::unique_ptr<ModuleAst> Parser::parseModule(std::uint32_t fileId) {
   }
 
   while (!atEnd()) {
+    if (check(TokKind::At) && peek(1).kind == TokKind::Identifier &&
+        (peek(1).text == "Unsafe" || peek(1).text == "Safe")) {
+      const bool unsafeDirective = peek(1).text == "Unsafe";
+      const std::size_t start = pos_;
+      parseAnnotations();
+      if (match(TokKind::Semicolon)) {
+        module->moduleUnsafe = module->moduleUnsafe || unsafeDirective;
+        module->moduleSafe = module->moduleSafe || !unsafeDirective;
+        continue;
+      }
+      pos_ = start;
+    }
     std::vector<AnnotationUse> annotations = parseAnnotations();
     std::string topDoc = std::move(pendingDoc_);
     pendingDoc_.clear();
@@ -1749,6 +1761,19 @@ StmtPtr Parser::parseLockBlock() {
 }
 
 StmtPtr Parser::parseStatement() {
+  if (check(TokKind::At) && peek(1).kind == TokKind::Identifier &&
+      (peek(1).text == "Unsafe" || peek(1).text == "Safe") &&
+      peek(2).kind == TokKind::LBrace) {
+    const bool unsafeScope = peek(1).text == "Unsafe";
+    advance();
+    advance();
+    StmtPtr block = parseBlock();
+    if (block != nullptr) {
+      block->unsafeBlock = unsafeScope;
+      block->safeBlock = !unsafeScope;
+    }
+    return block;
+  }
   if (check(TokKind::At) && peek(1).kind == TokKind::Identifier &&
       peek(1).text == "Retention") {
     std::vector<AnnotationUse> annotations = parseAnnotations();

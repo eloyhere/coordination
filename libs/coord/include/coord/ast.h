@@ -235,6 +235,8 @@ struct Stmt : Node {  StmtKind kind = StmtKind::Block;
   bool isWeak = false;
   bool isLet = false;
   bool isMatch = false;
+  bool unsafeBlock = false;
+  bool safeBlock = false;
   /// `@Lock(Exclusive, mutex, [captures]) { ... }` block specification.
   enum class LockMode { None, Exclusive };
   enum class LockCaptureKind { Value, MutRef, ConstRef };
@@ -393,6 +395,8 @@ struct Decl : Node {
   bool synthesizedDestructor = false;
   bool isNative = false;
   std::string nativeSymbol;
+  bool isUnsafe = false;
+  bool isSafe = false;
   /// Copyability of a class: implicit for pure value classes, explicit through
   /// `@Copy(Deep|Shallow)`, and None when owning fields require an explicit
   /// annotation before the value may be copied.
@@ -434,6 +438,9 @@ struct ModuleAst {
   std::vector<std::string> exportedNames;
   std::map<std::string, std::vector<std::string>> importAliases;
   std::vector<DeclPtr> decls;
+  /// File-level `@Unsafe;` / `@Safe;` directives.
+  bool moduleUnsafe = false;
+  bool moduleSafe = false;
 };
 
 // ---------------------------------------------------------------------------

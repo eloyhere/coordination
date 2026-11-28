@@ -405,6 +405,9 @@ private:
   Type* currentReturnType_ = nullptr;
   bool inDestructor_ = false;
   int loopDepth_ = 0;
+  bool moduleUnsafe_ = false;
+  bool classUnsafe_ = false;
+  bool unsafeScope_ = false;
 
   std::vector<std::string> destroyedFields_;
 };
