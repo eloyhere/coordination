@@ -34,6 +34,14 @@ if(NOT DEFINED OBJEXT)
   endif()
 endif()
 
+# `cmake -P` does not populate CMAKE_EXECUTABLE_SUFFIX for the host, so the
+# harness spells the executable name out explicitly.
+if(WIN32)
+  set(COORD_EXE_SUFFIX ".exe")
+else()
+  set(COORD_EXE_SUFFIX "")
+endif()
+
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}")
 
@@ -110,7 +118,7 @@ endfunction()
 
 function(run_project project expected)
   execute_process(
-    COMMAND "${COORC}" run "${project}" -o "${project}/app${CMAKE_EXECUTABLE_SUFFIX}"
+    COMMAND "${COORC}" run "${project}" -o "${project}/app${COORD_EXE_SUFFIX}"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr)
@@ -150,7 +158,7 @@ if(MODE STREQUAL "c" OR MODE STREQUAL "both")
   file(WRITE "${c_project}/coordination.toml" "${manifest_content}")
   execute_process(
     COMMAND "${COORC}" build "${c_project}" --verbose -o
-            "${c_project}/verbose${CMAKE_EXECUTABLE_SUFFIX}"
+            "${c_project}/verbose${COORD_EXE_SUFFIX}"
     RESULT_VARIABLE verbose_result
     OUTPUT_VARIABLE verbose_out
     ERROR_VARIABLE verbose_err)

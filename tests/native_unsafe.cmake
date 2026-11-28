@@ -12,6 +12,10 @@
 if(NOT DEFINED COORC OR NOT DEFINED WORK OR NOT DEFINED CC)
   message(FATAL_ERROR "native_unsafe.cmake requires COORC, WORK and CC")
 endif()
+
+# The generated manifest below uses @NAME@ placeholders that string(REPLACE)
+# substitutes afterwards. CMP0053 NEW keeps them literal in script mode.
+cmake_policy(SET CMP0053 NEW)
 if(NOT DEFINED FLAVOR)
   set(FLAVOR "gnu")
 endif()
@@ -21,6 +25,13 @@ if(NOT DEFINED OBJEXT)
   else()
     set(OBJEXT ".o")
   endif()
+endif()
+
+# `cmake -P` does not populate CMAKE_EXECUTABLE_SUFFIX for the host.
+if(WIN32)
+  set(COORD_EXE_SUFFIX ".exe")
+else()
+  set(COORD_EXE_SUFFIX "")
 endif()
 
 file(REMOVE_RECURSE "${WORK}")
@@ -170,7 +181,7 @@ integer main() {
 }
 ")
 execute_process(
-  COMMAND "${COORC}" run "${project}" -o "${project}/app${CMAKE_EXECUTABLE_SUFFIX}"
+  COMMAND "${COORC}" run "${project}" -o "${project}/app${COORD_EXE_SUFFIX}"
   RESULT_VARIABLE run_result
   OUTPUT_VARIABLE run_out
   ERROR_VARIABLE run_err)

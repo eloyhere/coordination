@@ -1260,7 +1260,15 @@ The front end does not depend on package management; scanners do not depend on t
 
 ### 6.6 Test Status
 
-`ctest` on Windows registers **214 tests** (1 unit test plus 213 e2e); on Linux only **8** are currently registered (`coord_unit`, `coord_e2e_packages`, and the six native-bridge tests). The unit test covers lexing/parsing, Scope/RAII, compile-time evaluation, codegen, Optional/ownership, proxy/reflection, fix, lambda/match, threads/synchronization/copy, annotation processors, package graph, outline/hint and `@Test`. The e2e suite covers examples and fixtures: compile/run, negative cases, determinism/incremental builds, package manager/mirror/registry, annotation processors, Optional/`@Constructure`/`@Destructure`, block retention, fix/radix, lambda/match, function values/functional interfaces, thread/mutex/atomic/lock, copy, Safe/Unsafe and the native bridge. The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
+`ctest` registers **214 tests** (1 unit test plus 213 e2e) on every platform; `tests/CMakeLists.txt` no longer wraps the suite in a compiler guard. The suite is cross-platform by construction: `coorc` drives the host C++ compiler chosen by the driver (MSVC on Windows, `c++`/g++ on POSIX), the generated programs are portable C++20, and the harness normalizes the executable suffix, CRLF output and `file://` spellings instead of skipping tests. No e2e test is Windows-only or POSIX-only at present; a future OS-bound test must carry its own commented `if(WIN32)`/`if(UNIX)` guard.
+
+| OS | CTest registered | Passed | Notes |
+| --- | --- | --- | --- |
+| Windows x64 (MSVC 19.52 / VS 2022) | 214 | 214 | clean `out/build/coord-tests` build |
+| Linux (WSL Ubuntu 26.04, g++ 15.2) | 214 | 214 | full suite, `ctest -j 8` |
+| macOS | 214 expected | not run | same registration; no macOS host in this environment |
+
+The unit test covers lexing/parsing, Scope/RAII, compile-time evaluation, codegen, Optional/ownership, proxy/reflection, fix, lambda/match, threads/synchronization/copy, annotation processors, package graph, outline/hint and `@Test`. The e2e suite covers examples and fixtures: compile/run, negative cases, determinism/incremental builds, package manager/mirror/registry, annotation processors, Optional/`@Constructure`/`@Destructure`, block retention, fix/radix, lambda/match, function values/functional interfaces, thread/mutex/atomic/lock, copy, Safe/Unsafe and the native bridge. The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
 
 ## 7 Standard Library Design
 
@@ -2198,9 +2206,9 @@ Completed: access-section parsing with default `private`; field/method/construct
 
 ### 11.3 Long-Term Goals and Execution Plan (M3)
 
-**Goal**: complete the M3 minimum closed loop on the Windows 214-test baseline established after descriptor unification, the package manager, the annotation-processor hierarchy, the lambda/match/thread/synchronization/copy/safety slices, the static fixed-point slice and the project-configured native bridge slice.
+**Goal**: complete the M3 minimum closed loop on the 214-test cross-platform baseline established after descriptor unification, the package manager, the annotation-processor hierarchy, the lambda/match/thread/synchronization/copy/safety slices, the static fixed-point slice and the project-configured native bridge slice.
 
-**Baseline (2026-11-28)**: on Windows `ctest` registers **214 tests**, with **214/214 passing**; on Linux (WSL Ubuntu, g++ 15) only 8 are currently registered (`coord_unit`, `coord_e2e_packages` and the six native-bridge tests), all passing. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager, registry and the static fixed-point (`fix`/`@Power`/`@Radix`/`@Length`, including signed 128-bit raws) slice with target-annotation conversions and same-shape copies are in place.
+**Baseline (2026-11-28)**: on Windows and Linux (WSL Ubuntu 26.04, g++ 15.2) `ctest` registers **214 tests** and passes **214/214** on both; macOS registers the same 214 tests but was not exercised in this environment. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager, registry and the static fixed-point (`fix`/`@Power`/`@Radix`/`@Length`, including signed 128-bit raws) slice with target-annotation conversions and same-shape copies are in place.
 
 **Final acceptance**:
 

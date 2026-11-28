@@ -11,6 +11,19 @@ if(NOT DEFINED COORC OR NOT DEFINED WORK)
   message(FATAL_ERROR "package_manager.cmake requires COORC and WORK")
 endif()
 
+# The manifests below use @NAME@ placeholders that are substituted with
+# string(REPLACE). CMP0053 NEW keeps `@NAME@` as literal text in script mode;
+# without it CMake < 4 expands the placeholder before REPLACE sees it.
+cmake_policy(SET CMP0053 NEW)
+
+# The package manager itself is platform-neutral; only local file URIs and the
+# executable suffix need host-specific spelling.
+if(WIN32)
+  set(COORD_EXE_SUFFIX ".exe")
+else()
+  set(COORD_EXE_SUFFIX "")
+endif()
+
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY
   "${WORK}/pkg/src"
@@ -421,16 +434,20 @@ if(NOT "${insecure_out}${insecure_err}" MATCHES "insecure HTTP")
 endif()
 
 if(DEFINED BUILD)
+  # `app` is already the package directory; the built executable needs a
+  # distinct name (and the host suffix).
+  set(built_app "${WORK}/app-bin${COORD_EXE_SUFFIX}")
   execute_process(
     COMMAND ${ENV_RUN} "${COORC}" build "${WORK}/app"
-            -o "${WORK}/app.exe"    RESULT_VARIABLE build_result
+            -o "${built_app}"
+    RESULT_VARIABLE build_result
     OUTPUT_VARIABLE build_out
     ERROR_VARIABLE build_err)
   if(NOT build_result EQUAL 0)
     message(FATAL_ERROR "build with installed packages failed\n${build_out}\n${build_err}")
   endif()
   execute_process(
-    COMMAND "${WORK}/app.exe"
+    COMMAND "${built_app}"
     RESULT_VARIABLE run_result
     OUTPUT_VARIABLE run_out
     ERROR_VARIABLE run_err)

@@ -2,10 +2,16 @@ if(NOT DEFINED COORC OR NOT DEFINED SRC OR NOT DEFINED WORK)
   message(FATAL_ERROR "filter.cmake requires COORC, SRC and WORK")
 endif()
 
+if(WIN32)
+  set(COORD_EXE_SUFFIX ".exe")
+else()
+  set(COORD_EXE_SUFFIX "")
+endif()
+
 file(MAKE_DIRECTORY "${WORK}")
 execute_process(
   COMMAND "${COORC}" test "${SRC}" --filter comparison
-          -o "${WORK}/filtered.exe"
+          -o "${WORK}/filtered${COORD_EXE_SUFFIX}"
   RESULT_VARIABLE result
   OUTPUT_VARIABLE stdout
   ERROR_VARIABLE stderr)

@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**Windows 214 项 CTest，214/214 通过**；Linux（WSL Ubuntu，g++ 15）上当前只注册 8 项（`coord_unit`、`coord_e2e_packages` 与 6 个 native bridge 测试），同样全部通过。
+- 当前基线：**Windows 与 Linux 均为 214/214 项 CTest 通过**（两边注册同一套 214 项）；macOS 注册同一套测试，但本环境未运行。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -98,8 +98,18 @@ cmake --build out/build/linux-release
 ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
+各 OS 测试矩阵：
+
+| 操作系统 | 注册 CTest | 通过 | 说明 |
+| --- | --- | --- | --- |
+| Windows x64（MSVC 19.52 / VS 2022） | 214 | 214 | `out\build\coord-tests` clean build |
+| Linux（WSL Ubuntu 26.04，g++ 15.2） | 214 | 214 | 全量，`ctest -j 8` |
+| macOS | 预期 214 | 未运行 | 同一注册；本环境无 macOS |
+
+目前没有 Windows 专属或 POSIX 专属 e2e。宿主差异（可执行后缀、CRLF 输出、`file://` 路径）由脚本归一化吸收而不是跳过测试；将来若有平台专属测试，必须用带注释的 `if(WIN32)`/`if(UNIX)` 单独包裹。
+
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- Windows 上 `ctest` 注册 **214 项**（1 个单元测试 + 213 个 e2e）；Linux 上当前只注册 8 项。`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 在所有平台注册 **214 项**（1 个单元测试 + 213 个 e2e），注册不再使用一揽子编译器 guard。`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。

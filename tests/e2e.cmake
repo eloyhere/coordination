@@ -1,14 +1,24 @@
 # End-to-end test: coorc build -> executable -> run -> compare stdout.
 #
 # Required cache variables:
-#   COORC    - path to coorc.exe
+#   COORC    - path to the coorc executable
 #   SRC      - .coo source file
 #   WORK     - scratch directory
 #   EXPECTED - expected stdout lines joined with '|'
+#
+# The generated program is portable C++: only the executable name differs
+# between hosts (.exe on Windows, no suffix on POSIX).
 
 if(NOT DEFINED COORC OR NOT DEFINED SRC OR NOT DEFINED WORK)
   message(FATAL_ERROR "e2e.cmake requires COORC, SRC and WORK")
 endif()
+
+if(WIN32)
+  set(COORD_EXE_SUFFIX ".exe")
+else()
+  set(COORD_EXE_SUFFIX "")
+endif()
+set(APP "${WORK}/app${COORD_EXE_SUFFIX}")
 
 if(NOT DEFINED EXPECTED_EXIT)
   set(EXPECTED_EXIT 0)
@@ -26,7 +36,7 @@ endif()
 file(MAKE_DIRECTORY "${WORK}")
 
 execute_process(
-  COMMAND "${COORC}" ${COORC_FLAGS} build "${SRC}" -o "${WORK}/app.exe"
+  COMMAND "${COORC}" ${COORC_FLAGS} build "${SRC}" -o "${APP}"
   RESULT_VARIABLE coord_result
   OUTPUT_VARIABLE coord_stdout
   ERROR_VARIABLE coord_stderr)
@@ -36,7 +46,7 @@ if(NOT coord_result EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND "${WORK}/app.exe"
+  COMMAND "${APP}"
   WORKING_DIRECTORY "${WORK}"
   RESULT_VARIABLE run_result
   OUTPUT_VARIABLE run_stdout

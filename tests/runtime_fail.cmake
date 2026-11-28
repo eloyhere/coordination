@@ -1,7 +1,7 @@
 # Runtime-failure end-to-end test: coorc build -> executable -> run.
 #
 # Required cache variables:
-#   COORC    - path to coorc.exe
+#   COORC    - path to the coorc executable
 #   SRC      - .coo source file
 #   WORK     - scratch directory
 # Optional:
@@ -9,16 +9,24 @@
 #
 # The generated program must build, then exit non-zero (a checked fix overflow
 # or division by zero aborts); the harness never compares the exact abort code
-# because it differs between Windows and POSIX hosts.
+# because it differs between Windows and POSIX hosts. Only the executable name
+# is platform-specific.
 
 if(NOT DEFINED COORC OR NOT DEFINED SRC OR NOT DEFINED WORK)
   message(FATAL_ERROR "runtime_fail.cmake requires COORC, SRC and WORK")
 endif()
 
+if(WIN32)
+  set(COORD_EXE_SUFFIX ".exe")
+else()
+  set(COORD_EXE_SUFFIX "")
+endif()
+set(APP "${WORK}/app${COORD_EXE_SUFFIX}")
+
 file(MAKE_DIRECTORY "${WORK}")
 
 execute_process(
-  COMMAND "${COORC}" build "${SRC}" -o "${WORK}/app.exe"
+  COMMAND "${COORC}" build "${SRC}" -o "${APP}"
   RESULT_VARIABLE build_result
   OUTPUT_VARIABLE build_stdout
   ERROR_VARIABLE build_stderr)
@@ -28,7 +36,7 @@ if(NOT build_result EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND "${WORK}/app.exe"
+  COMMAND "${APP}"
   WORKING_DIRECTORY "${WORK}"
   RESULT_VARIABLE run_result
   OUTPUT_VARIABLE run_stdout

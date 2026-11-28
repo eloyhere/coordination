@@ -2,11 +2,18 @@ if(NOT DEFINED COORC OR NOT DEFINED WORK)
   message(FATAL_ERROR "incremental_coox.cmake requires COORC and WORK")
 endif()
 
+if(WIN32)
+  set(COORD_EXE_SUFFIX ".exe")
+else()
+  set(COORD_EXE_SUFFIX "")
+endif()
+set(APP "${WORK}/app${COORD_EXE_SUFFIX}")
+
 file(MAKE_DIRECTORY "${WORK}")
 file(WRITE "${WORK}/main.coo" "integer main() {\n  print(\"coox\");\n  return 0;\n}\n")
 
 execute_process(
-  COMMAND "${COORC}" build "${WORK}/main.coo" -o "${WORK}/app.exe" --incremental
+  COMMAND "${COORC}" build "${WORK}/main.coo" -o "${APP}" --incremental
   RESULT_VARIABLE first
   OUTPUT_VARIABLE firstOut
   ERROR_VARIABLE firstErr)
@@ -17,7 +24,7 @@ endif()
 file(WRITE "${WORK}/summary.coox" "// interface summary\n")
 
 execute_process(
-  COMMAND "${COORC}" build "${WORK}/main.coo" -o "${WORK}/app.exe" --incremental
+  COMMAND "${COORC}" build "${WORK}/main.coo" -o "${APP}" --incremental
   RESULT_VARIABLE second
   OUTPUT_VARIABLE secondOut
   ERROR_VARIABLE secondErr)
@@ -29,7 +36,7 @@ if("${secondOut}" MATCHES "up to date")
 endif()
 
 execute_process(
-  COMMAND "${COORC}" build "${WORK}/main.coo" -o "${WORK}/app.exe" --incremental
+  COMMAND "${COORC}" build "${WORK}/main.coo" -o "${APP}" --incremental
   RESULT_VARIABLE third
   OUTPUT_VARIABLE thirdOut
   ERROR_VARIABLE thirdErr)
