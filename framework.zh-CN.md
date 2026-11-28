@@ -2088,7 +2088,7 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器、lambda 闭包切片、match/if 表达式切片、方法引用切片、函数式接口切片与线程、Mutex、ScopedLock/Atomic/@Lock 与 ScopedThread/Atomic-ops 切片落地后的 186 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器以及 lambda/match/线程/同步/复制/安全等切片落地后的 190 项基线上，完成 M3 最小闭环。
 
 **基线（2026-11-28）**：`ctest` 注册 **190 项**，Windows 全套 **190/190 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
 

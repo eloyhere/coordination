@@ -2086,7 +2086,7 @@ Completed: access-section parsing with default `private`; field/method/construct
 
 ### 11.3 Long-Term Goals and Execution Plan (M3)
 
-**Goal**: complete the M3 minimum closed loop on the 186-test baseline established after descriptor unification, the package manager, the lambda closure slice, the match/if-expression slice, the method-reference slice, the functional-interface slice, the thread slice, the Mutex slice, the ScopedLock/Atomic/@Lock slice and the ScopedThread/Atomic-ops slice.
+**Goal**: complete the M3 minimum closed loop on the 190-test baseline established after descriptor unification, the package manager and the lambda/match/thread/synchronization/copy/safety slices.
 
 **Baseline (2026-11-28)**: `ctest` registers **190 tests**, with **190/190 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the newly added examples pass with g++. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager and registry are in place.
 
