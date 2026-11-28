@@ -1,0 +1,15 @@
+integer main() {
+    integer value = 2;
+    switch (value) {
+        case (1, 2, 3) {
+            print("small");
+        }
+        case (10, 20) {
+            print("large");
+        }
+        default() {
+            print("other");
+        }
+    }
+    return 0;
+}

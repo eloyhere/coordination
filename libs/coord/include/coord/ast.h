@@ -299,7 +299,7 @@ struct Stmt : Node {  StmtKind kind = StmtKind::Block;
   std::vector<std::size_t> constructureOrder;
   ExprPtr expr;
   std::vector<ExprPtr> initArgs;
-  std::vector<ExprPtr> switchValues;
+  std::vector<std::vector<ExprPtr>> switchCaseValues;
   std::vector<PatternPtr> matchPatterns;
   std::vector<StmtPtr> switchBodies;
   std::vector<DestructureBinding> destructureBindings;

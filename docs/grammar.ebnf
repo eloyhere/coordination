@@ -214,9 +214,9 @@ constructure-init = "{", [ constructure-entry,
 constructure-entry = [ type ], ( expression
                                | identifier, [ "=", expression ] ) ;
 
-(* Each switch case body is a block; `default()` is switch-only and last. *)
+(* Each switch case body is a block; a case may list several scalar values. *)
 switch-body      = "{", { switch-case }, "}" ;
-switch-case      = "case", "(", expression, ")", block
+switch-case      = "case", "(", expression, { ",", expression }, ")", block
                  | "default", "(", ")", block ;
 
 match-body       = "{", { match-case }, "}" ;

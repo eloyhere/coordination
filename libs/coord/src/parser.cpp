@@ -1562,8 +1562,13 @@ StmtPtr Parser::parseSwitch() {
         }
         break;
       }
-      stmt->switchValues.push_back(parseExpression());
+      std::vector<ExprPtr> values;
+      values.push_back(parseExpression());
+      while (match(TokKind::Comma)) {
+        values.push_back(parseExpression());
+      }
       expect(TokKind::RParen, "')' after a switch case value");
+      stmt->switchCaseValues.push_back(std::move(values));
     } else if (check(TokKind::Identifier) && current().text == "default") {
       advance();
       isDefault = true;
@@ -1578,7 +1583,7 @@ StmtPtr Parser::parseSwitch() {
         break;
       }
       expect(TokKind::RParen, "')' after 'default'");
-      stmt->switchValues.push_back(nullptr);
+      stmt->switchCaseValues.emplace_back();
     } else {
       error(current(), "expected 'case' or 'default' in switch");
       break;

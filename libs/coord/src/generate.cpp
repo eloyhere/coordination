@@ -4633,17 +4633,25 @@ void CppEmitter::emitStmt(const Stmt* stmt) {
       out_ << ";\n";
       bool first = true;
       for (std::size_t i = 0;
-           i < stmt->switchValues.size() && i < stmt->switchBodies.size();
+           i < stmt->switchCaseValues.size() &&
+           i < stmt->switchBodies.size();
            ++i) {
         indent();
-        if (stmt->switchValues[i] == nullptr) {
+        const auto& values = stmt->switchCaseValues[i];
+        if (values.empty()) {
           out_ << "else ";
         } else {
           if (!first) {
             out_ << "else ";
           }
-          out_ << "if (" << temporary << " == ";
-          emitExpr(stmt->switchValues[i].get());
+          out_ << "if (";
+          for (std::size_t j = 0; j < values.size(); ++j) {
+            if (j != 0) {
+              out_ << " || ";
+            }
+            out_ << temporary << " == ";
+            emitExpr(values[j].get());
+          }
           out_ << ") ";
         }
         out_ << "{\n";

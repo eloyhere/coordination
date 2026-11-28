@@ -724,6 +724,22 @@ add_test(NAME coord_e2e_switch_missing_brace_error
     -DEXPECT_SUBSTRING=must be a block
     -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+add_test(NAME coord_e2e_switch_multi_value
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/switch_multi_value.coo
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_switch_multi_value
+    -DEXPECTED=small
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+add_test(NAME coord_e2e_switch_multi_value_type_error
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/switch_multi_value_type_error.coo
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_switch_multi_value_type_error
+    -DEXPECT_SUBSTRING=E2005
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
 add_test(NAME coord_e2e_destructure
   COMMAND ${CMAKE_COMMAND}
     -DCOORC=$<TARGET_FILE:coorc>

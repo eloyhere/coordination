@@ -8040,23 +8040,25 @@ void Checker::checkStmt(Stmt* stmt) {
                            "character, boolean, or enum value");
       }
       bool sawDefault = false;
-      if (stmt->switchValues.size() != stmt->switchBodies.size()) {
+      if (stmt->switchCaseValues.size() != stmt->switchBodies.size()) {
         diagnostics_.error(stmt->span, "E2005",
                            "malformed switch branches");
       }
       for (std::size_t i = 0;
-           i < stmt->switchValues.size() && i < stmt->switchBodies.size();
+           i < stmt->switchCaseValues.size() && i < stmt->switchBodies.size();
            ++i) {
-        if (stmt->switchValues[i] == nullptr) {
+        if (stmt->switchCaseValues[i].empty()) {
           if (sawDefault) {
             diagnostics_.error(stmt->span, "E2005",
                                "duplicate default branch");
           }
           sawDefault = true;
         } else {
-          Type* caseType = checkExpr(stmt->switchValues[i].get());
-          requireAssignable(caseType, value, stmt->switchValues[i]->span,
-                            "switch case");
+          for (const auto& caseValue : stmt->switchCaseValues[i]) {
+            Type* caseType = checkExpr(caseValue.get());
+            requireAssignable(caseType, value, caseValue->span,
+                              "switch case");
+          }
         }
         checkStmt(stmt->switchBodies[i].get());
       }

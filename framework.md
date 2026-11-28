@@ -492,7 +492,7 @@ integer main() {
 }
 ```
 
-- `switch` accepts exactly one scalar value per `case`: `integer`, `boolean`, `string`, `character`, `fix`, `float` or `enumerate`. Arrays, ranges, iterables and comma-separated multi-value cases are not supported; use multiple branches or an explicit `if` chain when values share behavior. Every branch has its own scope, there is no fallthrough, `default()` must be last, the condition is evaluated once, and the backend emits an if/else chain.
+- `switch` accepts one or more comma-separated scalar values per `case`: `case (a)`, `case (a, b, c)`. Values must be `integer`, `boolean`, `string`, `character`, `fix`, `float` or `enumerate`, and all values in one case must be compatible with the subject type. A case matches when the subject equals any listed value, evaluated left to right. Arrays, ranges and arbitrary iterables are not supported. Every branch has its own scope, there is no fallthrough, `default()` must be last, the condition is evaluated once, and the backend emits an if/else chain.
 - `if` expressions produce a value: `if (condition) a else b` with expression branches and chained `else if`; the condition must be `boolean` and both branches must be assignable to a common type. Block branches are ⏳; use an `if` statement for side effects.
 - `match` supports enumerate variants (`Color.Red`), integer/string/character/boolean constants, the `_` wildcard, bindings (`x`), inclusive/exclusive ranges (`1..10`, `1..=10`), or-patterns (`1 | 2 | 3`) and guards (`x if x > 0`). Branches use `pattern => body` (block or expression); the legacy `case pattern:` form is accepted for compatibility.
 - Exhaustiveness is checked: an enumerate must cover every variant unless a wildcard/binding is present; a `boolean` must cover `true` and `false` unless a wildcard is present; every other scalar match requires `_`. Missing coverage reports `E2077`, an unknown enumerate variant `E2024`, and a binding over a non-scalar value `E2077`. Bindings are copies visible in the guard and body. Type patterns and class destructuring patterns are ⏳.
@@ -1268,13 +1268,13 @@ The front end does not depend on package management; scanners do not depend on t
 
 ### 6.6 Test Status
 
-`ctest` registers **217 tests** (1 unit test plus 216 e2e) on every platform; `tests/CMakeLists.txt` no longer wraps the suite in a compiler guard. The suite is cross-platform by construction: `coorc` drives the host C++ compiler chosen by the driver (MSVC on Windows, `c++`/g++ on POSIX), the generated programs are portable C++20, and the harness normalizes the executable suffix, CRLF output and `file://` spellings instead of skipping tests. No e2e test is Windows-only or POSIX-only at present; a future OS-bound test must carry its own commented `if(WIN32)`/`if(UNIX)` guard.
+`ctest` registers **220 tests** (1 unit test plus 219 e2e) on every platform; `tests/CMakeLists.txt` no longer wraps the suite in a compiler guard. The suite is cross-platform by construction: `coorc` drives the host C++ compiler chosen by the driver (MSVC on Windows, `c++`/g++ on POSIX), the generated programs are portable C++20, and the harness normalizes the executable suffix, CRLF output and `file://` spellings instead of skipping tests. No e2e test is Windows-only or POSIX-only at present; a future OS-bound test must carry its own commented `if(WIN32)`/`if(UNIX)` guard.
 
 | OS | CTest registered | Passed | Notes |
 | --- | --- | --- | --- |
-| Windows x64 (MSVC 19.52 / VS 2022) | 217 | 217 | clean `out/build/coord-tests` build |
-| Linux (WSL Ubuntu 26.04, g++ 15.2) | 217 | 217 | full suite, `ctest -j 8` |
-| macOS | 217 expected | not run | same registration; no macOS host in this environment |
+| Windows x64 (MSVC 19.52 / VS 2022) | 220 | 220 | clean `out/build/coord-tests` build |
+| Linux (WSL Ubuntu 26.04, g++ 15.2) | 220 | 220 | full suite, `ctest -j 8` |
+| macOS | 220 expected | not run | same registration; no macOS host in this environment |
 
 The unit test covers lexing/parsing, Scope/RAII, compile-time evaluation, codegen, Optional/ownership, proxy/reflection, fix, lambda/match, threads/synchronization/copy, annotation processors, package graph, outline/hint and `@Test`. The e2e suite covers examples and fixtures: compile/run, negative cases, determinism/incremental builds, package manager/mirror/registry, annotation processors, Optional/`@Constructure`/`@Destructure`, block retention, fix/radix, lambda/match, function values, thread/mutex/atomic/lock, copy, Safe/Unsafe and the native bridge. The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
 
@@ -2187,9 +2187,9 @@ Completed: access-section parsing with default `private`; field/method/construct
 
 ### 11.3 Long-Term Goals and Execution Plan (M3)
 
-**Goal**: complete the M3 minimum closed loop on the 217-test cross-platform baseline established after descriptor unification, the package manager, the annotation-processor hierarchy, the lambda/match/thread/synchronization/copy/safety slices, the static fixed-point slice and the project-configured native bridge slice.
+**Goal**: complete the M3 minimum closed loop on the 220-test cross-platform baseline established after descriptor unification, the package manager, the annotation-processor hierarchy, the lambda/match/thread/synchronization/copy/safety slices, the static fixed-point slice and the project-configured native bridge slice.
 
-**Baseline (2026-11-28)**: on Windows and Linux (WSL Ubuntu 26.04, g++ 15.2) `ctest` registers **217 tests** and passes **217/217** on both; macOS registers the same 217 tests but was not exercised in this environment. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager, registry and the static fixed-point (`fix`/`@Power`/`@Radix`/`@Length`, including signed 128-bit raws) slice with target-annotation conversions and same-shape copies are in place.
+**Baseline (2026-11-28)**: on Windows and Linux (WSL Ubuntu 26.04, g++ 15.2) `ctest` registers **220 tests** and passes **220/220** on both; macOS registers the same 220 tests but was not exercised in this environment. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager, registry and the static fixed-point (`fix`/`@Power`/`@Radix`/`@Length`, including signed 128-bit raws) slice with target-annotation conversions and same-shape copies are in place.
 
 **Final acceptance**:
 

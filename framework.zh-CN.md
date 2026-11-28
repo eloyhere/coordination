@@ -495,7 +495,7 @@ integer main() {
 }
 ```
 
-- `switch` 的每个 `case` 只接受一个标量值：`integer`、`boolean`、`string`、`character`、`fix`、`float` 或 `enumerate`。不支持数组、range、Iterable 和逗号分隔的多值 case；需要共享行为时使用多个分支或显式 `if` 链。每个分支独立作用域，无 fallthrough；`default()` 必须最后；条件只求值一次，后端生成 if/else 链。
+- `switch` 的每个 `case` 接受一个或多个逗号分隔的标量值：`case (a)`、`case (a, b, c)`。值必须是 `integer`、`boolean`、`string`、`character`、`fix`、`float` 或 `enumerate`，同一 case 内所有值必须与 subject 类型兼容。subject 等于任意一个值即匹配，按从左到右求值。不支持数组、range 和任意 Iterable。每个分支独立作用域，无 fallthrough；`default()` 必须最后；条件只求值一次，后端生成 if/else 链。
 - `if` 表达式产生值：`if (condition) a else b`，分支为表达式并支持 `else if` 链；条件必须是 `boolean`，两个分支必须可赋给共同类型。块分支 ⏳；有副作用时使用 `if` 语句。
 - `match` 支持枚举变体（`Color.Red`）、整数/字符串/字符/布尔常量、`_` 通配、绑定（`x`）、闭/开区间（`1..10`、`1..=10`）、或模式（`1 | 2 | 3`）与守卫（`x if x > 0`）。分支写作 `pattern => body`（块或表达式），同时兼容旧的 `case pattern:` 形式。
 - 穷尽性检查：枚举必须覆盖全部变体（除非有通配/绑定）；`boolean` 必须覆盖 `true` 与 `false`（除非有通配）；其它标量类型必须写 `_`。缺失覆盖报 `E2077`，未知枚举变体报 `E2024`，非标量值上的绑定报 `E2077`。绑定是副本，在守卫与分支体内可见。类型模式与类解构模式 ⏳。
@@ -1269,13 +1269,13 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 在所有平台注册 **217 项**（1 个单元测试 + 216 个 e2e）；`tests/CMakeLists.txt` 不再用一揽子编译器 guard。测试套件本身跨平台：`coorc` 调用 driver 选定的宿主编译器（Windows 为 MSVC，POSIX 为 `c++`/g++），生成程序是可移植 C++20；脚本只对可执行后缀、CRLF 输出与 `file://` 写法做归一化，不靠跳过测试。目前没有 Windows 专属或 POSIX 专属 e2e；将来若确有需要，必须用带注释的 `if(WIN32)`/`if(UNIX)` 单独包裹。
+`ctest` 在所有平台注册 **220 项**（1 个单元测试 + 219 个 e2e）；`tests/CMakeLists.txt` 不再用一揽子编译器 guard。测试套件本身跨平台：`coorc` 调用 driver 选定的宿主编译器（Windows 为 MSVC，POSIX 为 `c++`/g++），生成程序是可移植 C++20；脚本只对可执行后缀、CRLF 输出与 `file://` 写法做归一化，不靠跳过测试。目前没有 Windows 专属或 POSIX 专属 e2e；将来若确有需要，必须用带注释的 `if(WIN32)`/`if(UNIX)` 单独包裹。
 
 | 操作系统 | 注册 CTest | 通过 | 说明 |
 | --- | --- | --- | --- |
-| Windows x64（MSVC 19.52 / VS 2022） | 217 | 217 | `out/build/coord-tests` clean build |
-| Linux（WSL Ubuntu 26.04，g++ 15.2） | 217 | 217 | 全量，`ctest -j 8` |
-| macOS | 预期 217 | 未运行 | 同一注册；本环境无 macOS |
+| Windows x64（MSVC 19.52 / VS 2022） | 220 | 220 | `out/build/coord-tests` clean build |
+| Linux（WSL Ubuntu 26.04，g++ 15.2） | 220 | 220 | 全量，`ctest -j 8` |
+| macOS | 预期 220 | 未运行 | 同一注册；本环境无 macOS |
 
 单元测试覆盖词法/解析、Scope/RAII、编译期求值、代码生成、Optional/所有权、proxy/反射、`fix`、lambda/match、线程/同步/复制、注解处理器、包依赖图、outline/hint 与 `@Test`。e2e 覆盖示例与 fixtures：编译/运行、负例、确定性与增量、包管理器/镜像/注册表、注解处理器、Optional/`@Constructure`/`@Destructure`、代码块保留、`fix`/radix、lambda/match、函数值、thread/mutex/atomic/lock、copy、Safe/Unsafe 与 native bridge。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
@@ -2148,9 +2148,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器、注解处理器层级、lambda/match/线程/同步/复制/安全等切片、静态定点（`fix`/`@Power`/`@Radix`/`@Length`）以及项目配置 native bridge 切片落地后的 217 项跨平台基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器、注解处理器层级、lambda/match/线程/同步/复制/安全等切片、静态定点（`fix`/`@Power`/`@Radix`/`@Length`）以及项目配置 native bridge 切片落地后的 220 项跨平台基线上，完成 M3 最小闭环。
 
-**基线（2026-11-28）**：Windows 与 Linux（WSL Ubuntu 26.04，g++ 15.2）上 `ctest` 均注册 **217 项**，且均 **217/217 通过**；macOS 注册同一套 217 项，但本环境未运行。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表、静态定点（`fix`/`@Power`/`@Radix`/`@Length`，含有符号 128 位 raw）与目标注解转换、同形状复制已具备。
+**基线（2026-11-28）**：Windows 与 Linux（WSL Ubuntu 26.04，g++ 15.2）上 `ctest` 均注册 **220 项**，且均 **220/220 通过**；macOS 注册同一套 220 项，但本环境未运行。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表、静态定点（`fix`/`@Power`/`@Radix`/`@Length`，含有符号 128 位 raw）与目标注解转换、同形状复制已具备。
 
 **最终验收**：
 

@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**Windows 与 Linux 均为 217/217 项 CTest 通过**（两边注册同一套 217 项）；macOS 注册同一套测试，但本环境未运行。
+- 当前基线：**Windows 与 Linux 均为 220/220 项 CTest 通过**（两边注册同一套 220 项）；macOS 注册同一套测试，但本环境未运行。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -115,14 +115,14 @@ ctest --test-dir out/build/linux-release --output-on-failure
 
 | 操作系统 | 注册 CTest | 通过 | 说明 |
 | --- | --- | --- | --- |
-| Windows x64（MSVC 19.52 / VS 2022） | 217 | 217 | `out\build\coord-tests` clean build |
-| Linux（WSL Ubuntu 26.04，g++ 15.2） | 217 | 217 | 全量，`ctest -j 8` |
-| macOS | 预期 217 | 未运行 | 同一注册；本环境无 macOS |
+| Windows x64（MSVC 19.52 / VS 2022） | 220 | 220 | `out\build\coord-tests` clean build |
+| Linux（WSL Ubuntu 26.04，g++ 15.2） | 220 | 220 | 全量，`ctest -j 8` |
+| macOS | 预期 220 | 未运行 | 同一注册；本环境无 macOS |
 
 目前没有 Windows 专属或 POSIX 专属 e2e。宿主差异（可执行后缀、CRLF 输出、`file://` 路径）由脚本归一化吸收而不是跳过测试；将来若有平台专属测试，必须用带注释的 `if(WIN32)`/`if(UNIX)` 单独包裹。
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 在所有平台注册 **217 项**（1 个单元测试 + 216 个 e2e），注册不再使用一揽子编译器 guard。`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 在所有平台注册 **220 项**（1 个单元测试 + 219 个 e2e），注册不再使用一揽子编译器 guard。`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -244,7 +244,7 @@ coorc build . -o out\my_app.exe
 
 ## 6 跨平台
 
-Windows/Linux 运行完整 217 项测试（217/217）；macOS 注册同一套但本环境预期/未运行。详细矩阵见 [framework.zh-CN.md](framework.zh-CN.md) §6.6；宿主/target 三元组与编译器探测见 §6.5。
+Windows/Linux 运行完整 220 项测试（220/220）；macOS 注册同一套但本环境预期/未运行。详细矩阵见 [framework.zh-CN.md](framework.zh-CN.md) §6.6；宿主/target 三元组与编译器探测见 §6.5。
 
 - 生成程序使用 C++20，按平台使用 `wmain`/`main`；路径/文件 API 为 UTF-8；见 §9.5。
 - native 交叉编译由清单/toolchain 驱动；MSVC 不能交叉编译，交叉目标不能 `run`；见 §9.6。

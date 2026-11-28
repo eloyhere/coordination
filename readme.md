@@ -6,7 +6,7 @@ Coordination is a statically typed systems language with **no macros**: compile-
 
 - Source files `.coo`; module interfaces `.coox`; compiler `coorc`.
 - Package manifests `coordination.toml` / `coord.pkg`; lockfile `coord.lock`.
-- Current baseline: **217/217 CTest cases passing on Windows and Linux** (the same 217-test suite on both); macOS registers the same suite but was not exercised in this environment.
+- Current baseline: **220/220 CTest cases passing on Windows and Linux** (the same 220-test suite on both); macOS registers the same suite but was not exercised in this environment.
 - The language and toolchain are wrapping up M3; [framework.md](framework.md) / [framework.zh-CN.md](framework.zh-CN.md) are authoritative, while this document focuses on usage.
 
 ## 1 Run It in 30 Seconds
@@ -115,14 +115,14 @@ Test status by OS:
 
 | OS | CTest registered | Passed | Notes |
 | --- | --- | --- | --- |
-| Windows x64 (MSVC 19.52 / VS 2022) | 217 | 217 | clean `out\build\coord-tests` build |
-| Linux (WSL Ubuntu 26.04, g++ 15.2) | 217 | 217 | full suite, `ctest -j 8` |
-| macOS | 217 expected | not run | same registration; no macOS host here |
+| Windows x64 (MSVC 19.52 / VS 2022) | 220 | 220 | clean `out\build\coord-tests` build |
+| Linux (WSL Ubuntu 26.04, g++ 15.2) | 220 | 220 | full suite, `ctest -j 8` |
+| macOS | 220 expected | not run | same registration; no macOS host here |
 
 There are no Windows-only or POSIX-only e2e tests at present. The scripts absorb the host differences (executable suffix, CRLF output, `file://` paths) instead of skipping tests; a future OS-bound test must use its own commented `if(WIN32)`/`if(UNIX)` guard.
 
 - Windows uses presets derived from `windows-base` (Ninja + cl); Linux/macOS use `linux-release`/`macos-release`/`linux-debug`.
-- `ctest` registers **217 tests** on every platform (1 unit test plus 216 e2e); the registration has no blanket compiler guard. `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain. The native bridge slice adds `coord_e2e_native_config`, `coord_e2e_native_annotations`, `coord_e2e_native_c_functions`, `coord_e2e_native_cpp_class`, `coord_e2e_native_cross` and `coord_e2e_native_unsafe`.
+- `ctest` registers **220 tests** on every platform (1 unit test plus 219 e2e); the registration has no blanket compiler guard. `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain. The native bridge slice adds `coord_e2e_native_config`, `coord_e2e_native_annotations`, `coord_e2e_native_c_functions`, `coord_e2e_native_cpp_class`, `coord_e2e_native_cross` and `coord_e2e_native_unsafe`.
 - Native example projects under `examples/native` build their own objects first (`native/build.cmd` or `native/build.sh`) and then run `coorc run .`; the compiler and target come from their `coordination.toml`.
 - Sanitizers: `cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` builds with ASan + UBSan; `linux-sanitize` preset is provided. Run tests with `ASAN_OPTIONS=detect_leaks=0` when leak checks are not relevant.
 - Parser/compiler fuzzing: build with Clang and `-DCOORD_FUZZ=ON`; see [tests/fuzz/README.md](tests/fuzz/README.md). The parser fuzzer caught unbounded diagnostics; the compiler fuzzer exercises Sema/emitter and requires the `Checker` to outlive emission.
@@ -244,7 +244,7 @@ coorc build . -o out\my_app.exe
 
 ## 6 Cross-Platform
 
-Windows/Linux run the full 217-test suite (217/217); macOS registers the same suite but is expected/not run in this environment. The detailed matrix is [framework.md](framework.md) §6.6; host/target triples and compiler discovery are §6.5.
+Windows/Linux run the full 220-test suite (220/220); macOS registers the same suite but is expected/not run in this environment. The detailed matrix is [framework.md](framework.md) §6.6; host/target triples and compiler discovery are §6.5.
 
 - Generated programs use C++20 and `wmain`/`main` as appropriate; path/file APIs are UTF-8; see [framework.md](framework.md) §9.5.
 - Native cross-compilation is manifest/toolchain driven; MSVC cannot cross-compile and cross targets cannot `run`; see [framework.md](framework.md) §9.6.
