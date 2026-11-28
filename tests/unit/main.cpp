@@ -2411,6 +2411,31 @@ integer main() {
   CHECK(selfMove.countCode("E2045") >= 1);
 }
 
+void testNativeFFI() {
+  Harness body(R"(
+@Native("getpid")
+integer nativePid() {
+    return 0;
+}
+integer main() { return nativePid(); }
+)");
+  CHECK(body.countCode("E2078") >= 1);
+
+  Harness unsupported(R"(
+@Native("getpid")
+string nativePid();
+integer main() { return 0; }
+)");
+  CHECK(unsupported.countCode("E2078") >= 1);
+
+  Harness missingSymbol(R"(
+@Native()
+integer nativePid();
+integer main() { return nativePid(); }
+)");
+  CHECK(missingSymbol.countCode("E2078") >= 1);
+}
+
 void testDiagnosticLimit() {
   std::string source = "class Broken {\n";
   for (int i = 0; i < 2000; ++i) {
@@ -3233,6 +3258,7 @@ int main() {
   testJsImportExport();
   testReferenceLocals();
   testBorrowSafety();
+  testNativeFFI();
   testDiagnosticLimit();
   testSwitchStatement();
   testMatch();

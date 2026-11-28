@@ -2407,6 +2407,45 @@ void Checker::checkFunction(Decl& decl) {
       decl.isOptional = true;
       decl.proxyPolicy = ProxyPolicy::Error;
       parseOptionalPolicy(use, decl.proxyPolicy, decl.proxyDefault);
+    } else if (use.name == "Native") {
+      decl.isNative = true;
+      if (use.args.empty() || use.args[0] == nullptr ||
+          use.args[0]->kind != ExprKind::StringLit) {
+        diagnostics_.error(use.span, "E2078",
+                           "@Native requires a C symbol string, e.g. "
+                           "@Native(\"getpid\")");
+      } else {
+        decl.nativeSymbol = use.args[0]->stringValue;
+      }
+    }
+  }
+  if (decl.isNative) {
+    bool validSymbol = !decl.nativeSymbol.empty();
+    for (std::size_t i = 0; i < decl.nativeSymbol.size(); ++i) {
+      const char c = decl.nativeSymbol[i];
+      const bool alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+      const bool digit = c >= '0' && c <= '9';
+      if (!alpha && c != '_' && (i == 0 || !digit)) {
+        validSymbol = false;
+      }
+    }
+    if (!validSymbol) {
+      diagnostics_.error(decl.span, "E2078",
+                         "@Native symbol must be a C identifier");
+    }
+    if (decl.body != nullptr) {
+      diagnostics_.error(decl.span, "E2078",
+                         "@Native functions must not have a body");
+    }
+    if (!decl.generics.empty()) {
+      diagnostics_.error(decl.span, "E2078",
+                         "@Native functions cannot declare generics");
+    }
+    if (decl.isResult || decl.isExpect || decl.isTest ||
+        decl.isUnique || decl.isShare || decl.isWeak || decl.isOptional) {
+      diagnostics_.error(decl.span, "E2078",
+                         "@Native cannot be combined with "
+                         "@Result/@Expect/@Test/@Unique/@Share/@Weak/@Optional");
     }
   }
   if (decl.isUnique && decl.isShare) {
@@ -2516,6 +2555,26 @@ void Checker::checkFunction(Decl& decl) {
 
   decl.resolvedType = returnType;
   decl.length = resolveLength(decl.annotations, returnType, decl.span);
+  if (decl.isNative) {
+    const auto supported = [](Type* type) {
+      return type != nullptr &&
+             (type->kind == TypeKind::Int || type->kind == TypeKind::Bool ||
+              type->kind == TypeKind::Float || type->name == "void");
+    };
+    if (!supported(returnType)) {
+      diagnostics_.error(
+          decl.span, "E2078",
+          "@Native supports only integer/boolean/float/void signatures");
+    }
+    for (const Param& param : decl.params) {
+      Type* paramType = param.type ? param.type->resolved : nullptr;
+      if (!supported(paramType) || paramType->name == "void") {
+        diagnostics_.error(
+            param.span, "E2078",
+            "@Native parameters must be integer, boolean or float");
+      }
+    }
+  }
   if ((decl.isUnsigned || decl.isSigned) && returnType != nullptr &&
       returnType->name != "integer") {
     diagnostics_.error(decl.span, "E2054",

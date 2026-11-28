@@ -1162,7 +1162,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **123 项**：`coord_unit` 加 122 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 当前注册 **124 项**：`coord_unit` 加 123 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1220,31 +1220,24 @@ import string;              // string 扩展与 StringBuilder
 | 枚举变体 | PascalCase | `Red`、`Green` |
 | 内建类型 | 小写 | `integer`、`string`、`bool` |
 
-### 7.4 `@Native` 与编译期链接
+### 7.4 `@Native` FFI（v1 子集）
 
 ```coo
-@Native(header: "stdio.h", library: "c")
-class FILE;                              // 不透明句柄，无 class body
+@Native("getpid")
+integer nativePid();
 
-@Native(header: "unistd.h", library: "c")
-void test();                             // 无函数体
-
-@Native(header: "stdio.h", library: "c")
-FILE* fopen(const char* path, const char* mode);
-
-class Mutex {
-public:
-    @Native void lock();                 // 方法无函数体
-    @Native void unlock();
+integer main() {
+    print(nativePid());
+    return 0;
 }
 ```
 
-- `@Native` 可标 class / function / method / variable；被标声明**不引入新的 Scope**：函数/方法没有函数体，class 没有 class body，变量没有初始化器。
-- `@Native class` 是不透明句柄；只能通过指针/引用跨边界，不能按值复制，也不能在 Coo 内访问字段。
-- 注解参数：`header`（生成的 C++ 中 `#include`）、`library`（链接库）、可选 `symbol`（导出名与 Coo 名不同时）与 `abi: "c" | "c++"`（默认 `"c"`）。
-- **编译期链接**：`coorc build` 收集所有 `@Native(library: ...)`，把对应库传给宿主编译器/链接器（MSVC `/link ...`、POSIX `-l...`）；头文件写进生成的 C++ 翻译单元。没有运行期 `dlopen`/动态查找，也没有运行期 FFI 元数据。
-- 符号与 ABI 由宿主 C++ 编译器在构建时检查；ABI 不匹配是链接/编译错误。公开标准库 API 不直接暴露 `@Native` 类型，在 `internal` 包装层内转换。
-- 平台差异（`windows.h`、`pthread.h` 等）隔离在 `internal` 子模块，按目标平台选择不同 `.coo` 实现文件。
+- 当前实现只接受 `@Native("c_symbol")` 标注的**无函数体函数**；符号必须是 C 标识符。
+- 支持的签名：`integer`、`boolean`、`float`、`void` 参数与返回值；暂不支持 string、class、指针、回调或不透明句柄。
+- 代码生成一个 Coo 可见的包装函数，内部调用 `::c_symbol(...)`；C 符号必须已由生成翻译单元的平台头文件声明（Windows 的 `windows.h`、POSIX 的 `unistd.h`）。
+- `@Native` 不能与 `@Result`、`@Expect`、`@Test`、`@Unique`、`@Share`、`@Weak`、`@Optional` 或泛型组合（`E2078`）。
+- 这是**不安全边界**：程序员必须保证 C ABI 与签名匹配；没有运行期 `dlopen`、动态查找或 FFI 元数据。
+- 完整设计——`header`/`library` 参数、不透明 `@Native class`、native method、C++ ABI 选择、自动链接库——仍为 ⏳。
 
 ### 7.5 核心协议（utility）
 
@@ -1976,7 +1969,7 @@ coorc config list|get|set
 | 交叉编译 `--target`/`--sysroot` | 🚧 | 设计锁定，正在实现 |
 | workspace / feature / 签名 / git 依赖 | ⏳ | workspace `members` 只解析 |
 | lambda / `if` 表达式 / 完整模式匹配 | ⏳ | 语法与语义已定稿 |
-| `@Native` / FFI | ⏳ | 设计与声明语法已定 |
+| `@Native` / FFI | 🚧 | 无函数体的原始类型函数通过生成包装调用 C 符号；`coord_e2e_native_ffi`；string/class/指针/header/library ⏳ |
 | `@Copy` / `@Wrap` / `@FunctionalInterface` 语义 | ⏳ | 注解已声明 |
 | `Weak<T>` / 共享环检测 | ⏳ | 设计与映射已定 |
 | `is` / `new` / `delete` / `unsafe` / `extern` | ⏳ | 保留字，未实现 |
@@ -1989,9 +1982,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器落地后的 123 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器落地后的 124 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-26）**：`ctest` 注册 **123 项**，Windows 全套 **123/123 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
+**基线（2026-11-26）**：`ctest` 注册 **124 项**，Windows 全套 **124/124 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
 
 **最终验收**：
 

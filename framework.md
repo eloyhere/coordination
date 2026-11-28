@@ -1159,7 +1159,7 @@ The front end does not depend on package management; scanners do not depend on t
 
 ### 6.6 Test Status
 
-`ctest` currently registers **123 tests**: `coord_unit` plus 122 end-to-end tests. `coord_unit` covers lexing, parsing, generics, Scope, RAII, compile-time evaluation, codegen, interfaces, enums, pointers, Unicode/BOM, module scanning, access/inheritance, `super`, meta-annotations, Optional/null, converting constructors, Result/Expect, for-in, `@Signed/@Unsigned/@Length`, fixed arrays, array literals, ArrayView, OrderedMap, OrderedSet, UnorderedMap, UnorderedSet, 128-bit integers, Invocation/multi-handler/virtual dispatch, Processor-generated declarations, Proxy class/annotation/runtime call/field trap/state, reflector, runtime retention/value/member/type, descriptor pipeline, ownership/optional/fields/params/returns/initializer, main signatures, `.coox` reader, package graph, outline/hint and `@Test`. The e2e suite covers examples and fixtures (compile/run, negative cases, determinism, incremental builds, dependency cycles, two-package builds, and the full package-manager/mirror/registry flow); the newly landed coverage is `coord_e2e_optional_policies`, `coord_e2e_optional_error`, `coord_e2e_optional_implicit`, `coord_e2e_constructure`, `coord_e2e_constructure_error`, `coord_e2e_destructure_annotation`, `coord_e2e_proxy_construct_destructure`, `coord_e2e_platform` and `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`, `coord_e2e_default_init`, `coord_e2e_weak`, `coord_e2e_bounds`, `coord_e2e_optional_params`, `coord_e2e_optional_fields`, `coord_e2e_optional_return`, `coord_e2e_division`, `coord_e2e_overflow`, `coord_e2e_compound`, `coord_e2e_shift`, `coord_e2e_share_cycle`, `coord_e2e_share_cycle_ctor`. The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `COORD_SANITIZE=ON` builds the compiler with ASan/UBSan (including the `linux-sanitize` preset); `COORD_FUZZ=ON` builds Clang/libFuzzer parser and compiler harnesses under [`tests/fuzz`](tests/fuzz); the compiler harness keeps `Checker` alive through emission because `TypeExpr::resolved` points into checker-owned types. Diagnostics are capped at 256 stored entries, and the parser advances after member-recovery errors to avoid unbounded diagnostic growth. `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
+`ctest` currently registers **124 tests**: `coord_unit` plus 123 end-to-end tests. `coord_unit` covers lexing, parsing, generics, Scope, RAII, compile-time evaluation, codegen, interfaces, enums, pointers, Unicode/BOM, module scanning, access/inheritance, `super`, meta-annotations, Optional/null, converting constructors, Result/Expect, for-in, `@Signed/@Unsigned/@Length`, fixed arrays, array literals, ArrayView, OrderedMap, OrderedSet, UnorderedMap, UnorderedSet, 128-bit integers, Invocation/multi-handler/virtual dispatch, Processor-generated declarations, Proxy class/annotation/runtime call/field trap/state, reflector, runtime retention/value/member/type, descriptor pipeline, ownership/optional/fields/params/returns/initializer, main signatures, `.coox` reader, package graph, outline/hint and `@Test`. The e2e suite covers examples and fixtures (compile/run, negative cases, determinism, incremental builds, dependency cycles, two-package builds, and the full package-manager/mirror/registry flow); the newly landed coverage is `coord_e2e_optional_policies`, `coord_e2e_optional_error`, `coord_e2e_optional_implicit`, `coord_e2e_constructure`, `coord_e2e_constructure_error`, `coord_e2e_destructure_annotation`, `coord_e2e_proxy_construct_destructure`, `coord_e2e_platform` and `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`, `coord_e2e_default_init`, `coord_e2e_weak`, `coord_e2e_bounds`, `coord_e2e_optional_params`, `coord_e2e_optional_fields`, `coord_e2e_optional_return`, `coord_e2e_division`, `coord_e2e_overflow`, `coord_e2e_compound`, `coord_e2e_shift`, `coord_e2e_share_cycle`, `coord_e2e_share_cycle_ctor`. The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `COORD_SANITIZE=ON` builds the compiler with ASan/UBSan (including the `linux-sanitize` preset); `COORD_FUZZ=ON` builds Clang/libFuzzer parser and compiler harnesses under [`tests/fuzz`](tests/fuzz); the compiler harness keeps `Checker` alive through emission because `TypeExpr::resolved` points into checker-owned types. Diagnostics are capped at 256 stored entries, and the parser advances after member-recovery errors to avoid unbounded diagnostic growth. `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
 
 ## 7 Standard Library Design
 
@@ -1217,31 +1217,24 @@ Names automatically available in every module (everything else needs an explicit
 | Enum variants | PascalCase | `Red`, `Green` |
 | Built-in types | lowercase | `integer`, `string`, `bool` |
 
-### 7.4 `@Native` and Compile-Time Linking
+### 7.4 `@Native` FFI (v1 subset)
 
 ```coo
-@Native(header: "stdio.h", library: "c")
-class FILE;                              // opaque handle, no class body
+@Native("getpid")
+integer nativePid();
 
-@Native(header: "unistd.h", library: "c")
-void test();                             // no function body
-
-@Native(header: "stdio.h", library: "c")
-FILE* fopen(const char* path, const char* mode);
-
-class Mutex {
-public:
-    @Native void lock();                 // method without a body
-    @Native void unlock();
+integer main() {
+    print(nativePid());
+    return 0;
 }
 ```
 
-- `@Native` annotates class / function / method / variable; the declaration **introduces no new Scope**: no function/method body, no class body, no variable initializer.
-- A `@Native class` is an opaque handle: only pointer/reference crossing, never by-value copy, and its fields are inaccessible from Coo.
-- Annotation arguments: `header` (`#include` in generated C++), `library` (linked library), optional `symbol` (when the export name differs) and `abi: "c" | "c++"` (default `"c"`).
-- **Compile-time linking**: `coorc build` collects every `@Native(library: ...)` and passes the libraries to the host compiler/linker (MSVC `/link ...`, POSIX `-l...`); headers go into the generated C++ TU. There is no runtime `dlopen`, dynamic lookup or FFI metadata.
-- Symbols and ABI are checked by the host C++ compiler at build time; an ABI mismatch is a link/compile error. Public standard-library APIs never expose `@Native` types directly; conversion happens in `internal` wrappers.
-- Platform differences (`windows.h`, `pthread.h`, etc.) are isolated in `internal` submodules selected per target platform.
+- Current implementation accepts `@Native("c_symbol")` on a **body-less function**; the symbol must be a C identifier.
+- Supported signatures: `integer`, `boolean`, `float`, `void` parameters and return values. No strings, classes, pointers, callbacks or opaque handles yet.
+- The emitter produces a Coord-visible wrapper that calls `::c_symbol(...)`; the C symbol must already be declared by the generated translation unit's platform headers (`windows.h` on Windows, `unistd.h` on POSIX).
+- `@Native` cannot be combined with `@Result`, `@Expect`, `@Test`, `@Unique`, `@Share`, `@Weak`, `@Optional` or generics (`E2078`).
+- This is an **unsafe boundary**: the programmer must ensure the C ABI and signature match. There is no runtime `dlopen`, dynamic lookup or FFI metadata.
+- Full design — `header`/`library` arguments, opaque `@Native class`, native methods, C++ ABI selection, automatic library linking — remains ⏳.
 
 ### 7.5 Core Protocols (utility)
 
@@ -1974,7 +1967,7 @@ Diagnostic format: `path:line:col: error[E2030]: message`, followed by the sourc
 | Cross-compilation `--target`/`--sysroot` | 🚧 | Design locked, implementation in progress |
 | workspace / features / signatures / git dependencies | ⏳ | Workspace `members` parsed only |
 | lambda / `if` expressions / full pattern matching | ⏳ | Grammar and semantics finalized |
-| `@Native` / FFI | ⏳ | Design and declaration syntax finalized |
+| `@Native` / FFI | 🚧 | Body-less primitive functions call a C symbol through a generated wrapper; `coord_e2e_native_ffi`; strings/classes/pointers/headers/libraries ⏳ |
 | `@Copy` / `@Wrap` / `@FunctionalInterface` semantics | ⏳ | Annotations declared |
 | `Weak<T>` / shared-cycle detection | ⏳ | Design and mapping finalized |
 | `is` / `new` / `delete` / `unsafe` / `extern` | ⏳ | Reserved, not implemented |
@@ -1987,9 +1980,9 @@ Completed: access-section parsing with default `private`; field/method/construct
 
 ### 11.3 Long-Term Goals and Execution Plan (M3)
 
-**Goal**: complete the M3 minimum closed loop on the 123-test baseline established after descriptor unification and the package manager.
+**Goal**: complete the M3 minimum closed loop on the 124-test baseline established after descriptor unification and the package manager.
 
-**Baseline (2026-11-26)**: `ctest` registers **123 tests**, with **123/123 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the newly added examples pass with g++. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager and registry are in place.
+**Baseline (2026-11-26)**: `ctest` registers **124 tests**, with **124/124 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the newly added examples pass with g++. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager and registry are in place.
 
 **Final acceptance**:
 

@@ -974,4 +974,22 @@ if(MSVC)
       -DEXPECTED=done
       -DEXPECT_STDERR=W0005
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  if(WIN32)
+    add_test(NAME coord_e2e_native_ffi
+      COMMAND ${CMAKE_COMMAND}
+        -DCOORC=$<TARGET_FILE:coorc>
+        -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native_ffi_windows.coo
+        -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_ffi
+        -DEXPECTED=ok
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+  else()
+    add_test(NAME coord_e2e_native_ffi
+      COMMAND ${CMAKE_COMMAND}
+        -DCOORC=$<TARGET_FILE:coorc>
+        -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native_ffi_posix.coo
+        -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_ffi
+        -DEXPECTED=ok
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+  endif()
 endif()

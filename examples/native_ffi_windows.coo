@@ -1,0 +1,11 @@
+@Native("GetCurrentProcessId")
+integer nativePid();
+
+integer main() {
+    if (nativePid() > 0) {
+        print("ok");
+    } else {
+        print("bad");
+    }
+    return 0;
+}

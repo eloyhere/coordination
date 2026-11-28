@@ -419,6 +419,8 @@ void CppEmitter::emitPrelude() {
   out_ << "#define NOMINMAX\n";
   out_ << "#endif\n";
   out_ << "#include <windows.h>\n";
+  out_ << "#else\n";
+  out_ << "#include <unistd.h>\n";
   out_ << "#endif\n\n";
   out_ << "namespace coord_rt {\n";
   out_ << "template <class T>\n";
@@ -1913,7 +1915,35 @@ void CppEmitter::emitInterface(const Decl& decl) {
   out_ << "};\n\n";
 }
 
+void CppEmitter::emitNativeFunction(const Decl& decl) {
+  emitReturnType(decl);
+  out_ << ' ' << sanitize(decl.name);
+  emitParams(decl.params);
+  out_ << " {\n";
+  const bool returnsVoid =
+      decl.type == nullptr || decl.type->name == "void" ||
+      (decl.type->resolved != nullptr &&
+       decl.type->resolved->name == "void");
+  if (!returnsVoid) {
+    out_ << "  return ";
+  } else {
+    out_ << "  ";
+  }
+  out_ << "::" << decl.nativeSymbol << '(';
+  for (std::size_t i = 0; i < decl.params.size(); ++i) {
+    if (i != 0) {
+      out_ << ", ";
+    }
+    out_ << sanitize(decl.params[i].name);
+  }
+  out_ << ");\n}\n";
+}
+
 void CppEmitter::emitFunction(const Decl& decl) {
+  if (decl.isNative) {
+    emitNativeFunction(decl);
+    return;
+  }
   emitAnnotations(decl.annotations);
   fields_.clear();
   typeParams_.clear();

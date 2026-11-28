@@ -302,6 +302,8 @@ struct Decl : Node {
   Access access = Access::Default;
   bool hasUserDestructor = false;
   bool synthesizedDestructor = false;
+  bool isNative = false;
+  std::string nativeSymbol;
 
   std::vector<AnnotationUse> annotations;
   std::vector<std::string> inheritedAnnotationNames;

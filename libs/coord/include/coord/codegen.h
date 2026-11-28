@@ -34,6 +34,7 @@ private:
   void emitEnum(const Decl& decl);
   void emitInterface(const Decl& decl);
   void emitFunction(const Decl& decl);
+  void emitNativeFunction(const Decl& decl);
   void emitConst(const Decl& decl);
   void emitMainWrapper();
   void emitTestRunner();
