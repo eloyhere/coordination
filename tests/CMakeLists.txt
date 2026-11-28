@@ -1161,6 +1161,30 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2090
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_mutex
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/mutex.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_mutex
+      -DEXPECTED=2
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_mutex_copy_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/mutex_copy_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_mutex_copy_error
+      -DEXPECT_SUBSTRING=E2091
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_mutex_assign_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/mutex_assign_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_mutex_assign_error
+      -DEXPECT_SUBSTRING=E2091
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lambda_escape
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

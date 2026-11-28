@@ -286,6 +286,19 @@ void Checker::initializeBuiltins() {
   addThreadMethod("join", voidType_);
   addThreadMethod("detach", voidType_);
   addThreadMethod("joinable", boolType_);
+
+  mutexType_ = makeType(TypeKind::Mutex, "Mutex", classType_);
+  const auto addMutexMethod = [&](const char* name, Type* returnType) {
+    MethodInfo method;
+    method.name = name;
+    method.returnType = returnType;
+    method.owner = mutexType_;
+    method.access = Access::Public;
+    mutexType_->methods.push_back(method);
+  };
+  addMutexMethod("lock", voidType_);
+  addMutexMethod("unlock", voidType_);
+  addMutexMethod("tryLock", boolType_);
 }
 
 Type* Checker::makeType(TypeKind kind, std::string name, Type* base) {
@@ -3607,6 +3620,10 @@ Type* Checker::checkAssign(Expr* expr) {
                        "Thread values cannot be assigned in v0; join/detach "
                        "the current thread instead");
   }
+  if (lhs != nullptr && lhs->kind == TypeKind::Mutex) {
+    diagnostics_.error(expr->span, "E2091",
+                       "Mutex values cannot be assigned or copied");
+  }
   bool optional = false;
   if (expr->lhs->kind == ExprKind::Name) {
     if (Variable* variable = lookupVariable(expr->lhs->name)) {
@@ -5512,6 +5529,13 @@ void Checker::checkStmt(Stmt* stmt) {
             stmt->span, "E2090",
             "Thread values are move-only: construct the thread in place with "
             "Thread(entry) instead of copying another thread");
+      }
+      if (type != nullptr && type->kind == TypeKind::Mutex &&
+          stmt->expr != nullptr) {
+        diagnostics_.error(
+            stmt->span, "E2091",
+            "Mutex values cannot be copied; declare the mutex in place or "
+            "keep it as a class field");
       }
       declareVariable(stmt->name, type, stmt->isConst, nullptr, stmt->span, stmt->isOptional, stmt->proxyPolicy, stmt->optionalDefault.get());
       if (Variable* declared = lookupVariable(stmt->name)) {

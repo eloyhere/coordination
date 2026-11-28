@@ -38,6 +38,7 @@ enum class TypeKind {
   SharePtr,
   Pointer,
   Thread,
+  Mutex,
   Array,
   Queue,
   ArrayView,
@@ -352,6 +353,7 @@ private:
   Type* reflectorType_ = nullptr;
   Type* proxyType_ = nullptr;
   Type* threadType_ = nullptr;
+  Type* mutexType_ = nullptr;
 
   std::unordered_map<std::string, Decl*> typeDecls_;
   std::unordered_map<std::string, std::vector<Decl*>> functions_;

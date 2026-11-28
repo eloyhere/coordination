@@ -1,0 +1,36 @@
+// Mutex v0: manual lock/unlock around shared mutable state. Two threads own a
+// copy of the @Share counter handle and both increment it under the same lock.
+class Counter {
+public:
+    Mutex mutex;
+    integer value;
+
+    Counter() {
+        value = 0;
+    }
+
+    void add(integer amount) {
+        mutex.lock();
+        value = value + amount;
+        mutex.unlock();
+    }
+
+    integer get() {
+        mutex.lock();
+        integer result = value;
+        mutex.unlock();
+        return result;
+    }
+}
+
+integer main() {
+    @Share Counter counter = Counter();
+
+    Thread first = Thread([counter](): void -> { counter.add(1); });
+    Thread second = Thread([counter](): void -> { counter.add(1); });
+    first.join();
+    second.join();
+
+    print(counter.get());
+    return 0;
+}

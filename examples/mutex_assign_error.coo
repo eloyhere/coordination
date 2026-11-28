@@ -1,0 +1,7 @@
+// Mutex values cannot be assigned.
+integer main() {
+    Mutex first;
+    Mutex second;
+    first = second;
+    return 0;
+}

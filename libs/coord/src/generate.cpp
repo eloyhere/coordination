@@ -214,6 +214,9 @@ std::string CppEmitter::cppTypeName(const Type* type) const {
   if (type->kind == TypeKind::Thread) {
     return "std::thread";
   }
+  if (type->kind == TypeKind::Mutex) {
+    return "std::mutex";
+  }
   const std::string& name = type->name;
   if (name == "integer") {
     return "std::int64_t";
@@ -310,6 +313,7 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
           {"character", "char32_t"},
           {"boolean", "bool"},
           {"Thread", "std::thread"},
+          {"Mutex", "std::mutex"},
           {"Enumeration", "std::int64_t"},
           {"char", "char32_t"},
           {"string", "std::string"},
@@ -494,6 +498,7 @@ void CppEmitter::emitPrelude() {
   out_ << "#include <fstream>\n";
   out_ << "#include <chrono>\n";
   out_ << "#include <thread>\n";
+  out_ << "#include <mutex>\n";
   out_ << "#include <cstdio>\n";
   out_ << "#include <utility>\n";
   out_ << "#if defined(_WIN32)\n";
@@ -4520,6 +4525,14 @@ void CppEmitter::emitExpr(const Expr* expr) {
           out_ << ')';
           return;
         }
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Member &&
+          callee->lhs != nullptr && callee->lhs->resolvedType != nullptr &&
+          callee->lhs->resolvedType->kind == TypeKind::Mutex &&
+          callee->name == "tryLock") {
+        emitExpr(callee->lhs.get());
+        out_ << ".try_lock()";
+        return;
       }
       if (callee != nullptr && callee->kind == ExprKind::Member &&
           callee->lhs != nullptr && callee->lhs->resolvedType != nullptr &&

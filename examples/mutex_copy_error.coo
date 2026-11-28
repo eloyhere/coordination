@@ -1,0 +1,6 @@
+// Mutex values cannot be copied.
+integer main() {
+    Mutex first;
+    Mutex second = first;
+    return 0;
+}
