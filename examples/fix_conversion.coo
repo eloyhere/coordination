@@ -1,0 +1,18 @@
+@Power(4) fix convert(fix value) {
+    return value;
+}
+
+integer main() {
+    @Power(2) fix price = 1.5;
+    @Power(4) fix fine = price;
+    print(fine);
+
+    @Radix(2) @Power(4) fix binary = price;
+    print(binary);
+
+    @Length(16) @Power(2) fix wide = price;
+    print(wide);
+
+    print(convert(2));
+    return 0;
+}

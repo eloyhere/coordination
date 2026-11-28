@@ -1407,14 +1407,151 @@ integer main() {
   coord::CppEmitter emitter(*harness.module, {}, output);
   emitter.emit();
   const std::string generated = output.str();
-  CHECK(generated.find("coord_rt::Fix<2, 10> price") != std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<2, 10, 64> price") !=
+        std::string::npos);
   CHECK(generated.find("fromRaw(1999LL)") != std::string::npos);
-  CHECK(generated.find("coord_rt::Fix<2, 10> cents") != std::string::npos);
-  CHECK(generated.find("coord_rt::Fix<2, 10> ratio") != std::string::npos);
-  CHECK(generated.find("coord_rt::Fix<0, 10> whole") != std::string::npos);
-  CHECK(generated.find("coord_rt::Fix<4, 10> product") != std::string::npos);
-  CHECK(generated.find("coord_rt::Fix<2, 10> sum") != std::string::npos);
-  CHECK(generated.find("coord_rt::Fix<3, 10> aligned") != std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<2, 10, 64> cents") !=
+        std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<2, 10, 64> ratio") !=
+        std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<0, 10, 64> whole") !=
+        std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<4, 10, 64> product") !=
+        std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<2, 10, 64> sum") !=
+        std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<3, 10, 64> aligned") !=
+        std::string::npos);
+
+  Harness conversion(R"(
+@Power(4) fix convert(fix x) {
+  return x;
+}
+
+integer main() {
+  @Power(2) fix price = 1.5;
+  @Power(4) fix fine = price;
+  @Radix(2) @Power(4) fix binary = price;
+  @Length(16) @Power(2) fix wide = price;
+  @Length(8) @Power(2) fix small = 1.25;
+  print(convert(2));
+  print(fine);
+  print(binary);
+  print(wide);
+  print(small);
+  return 0;
+}
+)");
+  CHECK(!conversion.diagnostics.hasErrors());
+  std::ostringstream conversionOutput;
+  coord::CppEmitter conversionEmitter(*conversion.module, {},
+                                      conversionOutput);
+  conversionEmitter.emit();
+  const std::string conversionText = conversionOutput.str();
+  CHECK(conversionText.find("coord_rt::Fix<4, 10, 64> fine") !=
+        std::string::npos);
+  CHECK(conversionText.find("coord_rt::Fix<4, 2, 64> binary") !=
+        std::string::npos);
+  CHECK(conversionText.find("coord_rt::Fix<2, 10, 16> wide") !=
+        std::string::npos);
+  CHECK(conversionText.find("coord_rt::Fix<2, 10, 8> small") !=
+        std::string::npos);
+
+  Harness division(R"(
+@Power(4) fix divide(@Power(2) fix x) {
+  return x / 3;
+}
+
+integer main() {
+  @Power(2) fix one = 1.0;
+  @Power(2) fix three = 3.0;
+  @Power(2) fix low = one / 3;
+  @Power(4) fix high = one / 3;
+  @Power(4) fix pair = one / three;
+  print(divide(one));
+  print(low);
+  print(high);
+  print(pair);
+  return 0;
+}
+)");
+  CHECK(!division.diagnostics.hasErrors());
+  std::ostringstream divisionOutput;
+  coord::CppEmitter divisionEmitter(*division.module, {}, divisionOutput);
+  divisionEmitter.emit();
+  const std::string divisionText = divisionOutput.str();
+  CHECK(divisionText.find("fixDivideIntTo<4, 10, 64>") !=
+        std::string::npos);
+  CHECK(divisionText.find("fixDivideTo<4, 10, 64>") !=
+        std::string::npos);
+
+  Harness widths(R"(
+integer main() {
+  @Length(8) @Power(2) fix a = 1.0;
+  @Length(8) @Power(2) fix b = 1.0;
+  @Length(16) @Power(2) fix sum = a + b;
+  @Length(16) @Power(2) fix c = 1.0;
+  @Length(16) @Power(2) fix d = 1.0;
+  @Length(32) @Power(4) fix product = c * d;
+  @Length(8) @Power(2) fix shifted = a << 1;
+  print(sum);
+  print(product);
+  print(shifted);
+  return 0;
+}
+)");
+  CHECK(!widths.diagnostics.hasErrors());
+  std::ostringstream widthsOutput;
+  coord::CppEmitter widthsEmitter(*widths.module, {}, widthsOutput);
+  widthsEmitter.emit();
+  const std::string widthsText = widthsOutput.str();
+  CHECK(widthsText.find("coord_rt::Fix<2, 10, 16> sum") !=
+        std::string::npos);
+  CHECK(widthsText.find("coord_rt::Fix<4, 10, 32> product") !=
+        std::string::npos);
+  CHECK(widthsText.find("coord_rt::Fix<2, 10, 8> shifted") !=
+        std::string::npos);
+
+  Harness wideProduct(R"(
+integer main() {
+  @Power(10) fix a = 1.5;
+  @Power(10) fix b = 1.5;
+  @Power(10) fix product = a * b;
+  print(product);
+  return 0;
+}
+)");
+  CHECK(!wideProduct.diagnostics.hasErrors());
+  std::ostringstream wideOutput;
+  coord::CppEmitter wideEmitter(*wideProduct.module, {}, wideOutput);
+  wideEmitter.emit();
+  CHECK(wideOutput.str().find("fixMultiplyTo<10, 10, 64>") !=
+        std::string::npos);
+
+  Harness operators(R"(
+integer main() {
+  @Power(2) fix a = 1.5;
+  @Power(2) fix b = 0.4;
+  print(a + b);
+  print(a - b);
+  print(a * b);
+  print(a / b);
+  print(a % b);
+  print(-a);
+  print(a & b);
+  print(a | b);
+  print(a ^ b);
+  print(~a);
+  print(a << 1);
+  print(a >> 1);
+  print(a++);
+  print(++a);
+  print(a--);
+  print(--a);
+  return 0;
+}
+)");
+  CHECK(!operators.diagnostics.hasErrors());
 
   Harness negativePower(R"(
 integer main() {
@@ -1428,7 +1565,7 @@ integer main() {
   coord::CppEmitter negativeEmitter(*negativePower.module, {},
                                     negativeOutput);
   negativeEmitter.emit();
-  CHECK(negativeOutput.str().find("coord_rt::Fix<-2, 10>") !=
+  CHECK(negativeOutput.str().find("coord_rt::Fix<-2, 10, 64>") !=
         std::string::npos);
 
   Harness radixThree(R"(
@@ -1444,7 +1581,7 @@ integer main() {
   std::ostringstream radixOutput;
   coord::CppEmitter radixEmitter(*radixThree.module, {}, radixOutput);
   radixEmitter.emit();
-  CHECK(radixOutput.str().find("coord_rt::Fix<2, 3> third") !=
+  CHECK(radixOutput.str().find("coord_rt::Fix<2, 3, 64> third") !=
         std::string::npos);
 
   Harness radixZero(R"(
@@ -1473,7 +1610,7 @@ integer main() {
 
   Harness fixLength(R"(
 integer main() {
-  @Length(32) @Power(2) fix narrow = 1.5;
+  @Length(128) @Power(2) fix narrow = 1.5;
   return 0;
 }
 )");
@@ -1487,16 +1624,6 @@ integer main() {
 )");
   CHECK(missingPower.countCode("E2103") >= 1);
 
-  Harness division(R"(
-integer main() {
-  @Power(2) fix a = 1.0;
-  @Power(2) fix b = 4.0;
-  print(a / b);
-  return 0;
-}
-)");
-  CHECK(division.countCode("E2104") >= 1);
-
   Harness integerTruncation(R"(
 integer main() {
   integer value = 1.5;
@@ -1505,15 +1632,34 @@ integer main() {
 )");
   CHECK(integerTruncation.countCode("E2105") >= 1);
 
+  Harness missingTarget(R"(
+integer main() {
+  @Power(2) fix source = 1.5;
+  fix target = source;
+  return 0;
+}
+)");
+  CHECK(missingTarget.countCode("E2109") >= 1);
+
   Harness mixedRadix(R"(
 integer main() {
   @Power(2) @Radix(2) fix binary = 1.5;
-  @Power(2) @Radix(10) fix ten = 1.5;
-  print(binary + ten);
+  @Power(2) @Radix(10) fix decimal = 1.5;
+  print(binary + decimal);
   return 0;
 }
 )");
   CHECK(mixedRadix.countCode("E2108") >= 1);
+
+  Harness bitShape(R"(
+integer main() {
+  @Length(8) @Power(2) fix small = 1.0;
+  @Length(16) @Power(2) fix wide = 1.0;
+  print(small & wide);
+  return 0;
+}
+)");
+  CHECK(bitShape.countCode("E2111") >= 1);
 
   Harness fixFloatMix(R"(
 integer main() {

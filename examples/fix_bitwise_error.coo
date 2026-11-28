@@ -1,0 +1,6 @@
+integer main() {
+    @Length(8) @Power(2) fix small = 1.0;
+    @Length(16) @Power(2) fix wide = 1.0;
+    print(small & wide);
+    return 0;
+}

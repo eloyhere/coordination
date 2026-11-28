@@ -1,0 +1,7 @@
+integer main() {
+    @Power(10) fix a = 1.5;
+    @Power(10) fix b = 1.5;
+    @Power(10) fix product = a * b;
+    print(product);
+    return 0;
+}

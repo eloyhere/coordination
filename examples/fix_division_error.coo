@@ -1,6 +1,0 @@
-integer main() {
-    @Power(2) fix a = 1.00;
-    @Power(2) fix b = 4.00;
-    print(a / b);
-    return 0;
-}

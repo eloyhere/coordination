@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**199 项 CTest**，Windows 全套 **199/199 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 当前基线：**205 项 CTest**，Windows 全套 **205/205 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **199 项**（1 个单元测试 + 198 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 注册 **205 项**（1 个单元测试 + 204 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -478,22 +478,33 @@ integer main() {
 ### 7.4 数字进制与静态定点
 
 ```coo
+@Power(4) fix convert(fix value) {
+    return value;                    // 返回目标 @Power(4) 触发转换
+}
+
 integer main() {
-    @Power(2) fix price = 19.99;      // raw 1999，打印 19.99
-    @Power(2) integer cents = 19.99;  // integer + @Power 提升为 fix
-    @Power(2) @Radix(2) fix half = 0.5; // 以 2 进制打印 0.1
-    @Radix(2)
-    integer flags = 10;               // 仅影响整数字面量写法
-    print(price);
-    print(cents);
-    print(half);
+    @Power(2) fix price = 1.5;
+    @Power(4) fix fine = price;      // 目标注解加宽 power
+    @Radix(2) @Power(4) fix q = price; // 目标注解改变 radix
+    @Length(16) @Power(2) fix wide = price;
+    @Power(2) fix one = 1.0;
+    @Power(2) fix low = one / 3;     // 自然 power 下为 0.33
+    @Power(4) fix high = one / 3;    // 0.3333：目标注解覆盖精度
+    print(fine);
+    print(q);                        // 以 2 进制打印 1.1
+    print(wide);
+    print(convert(2));
+    print(low);                      // 0.33
+    print(high);                     // 0.3333
     return 0;
 }
 ```
 
-- `fix` 是静态定点数：`raw = semantic × radix^power`，表示为 `coord_rt::Fix<Power, Radix>`，只有一个 64 位 raw 整数（无运行期 scale）。默认 `@Length(64) @Radix(10) @Power(0)`。
+- `fix` 是静态定点数：`raw = semantic × radix^power`，表示为 `coord_rt::Fix<Power, Radix, Length>`，只有一个 8/16/32/64 位 raw 整数（无运行期 scale）。默认 `@Length(64) @Radix(10) @Power(0)`。
 - `@Power` 作用于 `integer` 或 `float` 声明时提升为 `fix`；`@Radix` 单独不提升。小数字面量初始化 `fix` 必须显式给出 `@Power`（否则 `E2103`），编译期精确编码，超过目标 scale 时按 half away from zero 舍入。
-- 同一 radix 下 `+`/`-` 对齐到更细的 power，`*` 的 power 相加；比较与 `print` 可用，`toInteger()`/`toFloat()` 是显式转出。`@Length` 结果宽度规则（`max(len1,len2)+1`、`len1+len2`、64×64→128 中间值）以及 `fix` 的除法/取余/位运算/移位在 11B 前报 `E2104`/`E2102`。
+- fix→fix 转换由目标类型注解驱动：给目标变量/字段/参数/返回值加 `@Length`/`@Radix`/`@Power`（`@Power(4) fix fine = price;`、`@Radix(2) @Power(4) fix q = price;`、`@Length(16) ...`）。目标无这些注解时报 `E2109`。不提供 `toRadix`/`toScale` 方法；`toInteger()`/`toFloat()` 只用于跨 storage 边界。
+- 所有运算符可用：`+ - * / %`、一元 `-`、`++/--`、比较、`& | ^ ~ << >>`。算术/比较按语义（`+`/`-` 对齐更细 power，`*` power 相加，`/` 自然 `max(power1,power2)` 且显式目标可覆盖，`%` 符号跟随被除数）；位运算/移位按 raw，要求 radix/power/length 完全一致（`E2111`）。
+- `@Length` 支持 8/16/32/64，并实现结果宽度加宽（`+`/`-`：`max(len1,len2)+1`，`*`：`len1+len2`）。带显式注解的 `*` 目标使用 64×64→128 乘积中间值，可安全转换到更窄的目标 scale；`@Length(128)` 仍推迟（`E2102`）。
 - `print` 按该类型的 radix（2–36）输出语义值并去掉无意义尾零。
 - `@Radix` 接受任意整数 `>= 2`；`0`、`1` 与负数报 `E2100`。作用于 `integer` 时只改变生成 C++ 的字面量写法（2/8/16 进制：`0XFF`、`0B1010`、C++ 八进制 `0100`），其他进制退回十进制；运行期打印整数不变。
 

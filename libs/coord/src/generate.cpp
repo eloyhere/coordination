@@ -234,7 +234,8 @@ std::string CppEmitter::cppTypeName(const Type* type) const {
   }
   if (type->kind == TypeKind::Fix) {
     return "coord_rt::Fix<" + std::to_string(type->power) + ", " +
-           std::to_string(type->radix) + ">";
+           std::to_string(type->radix) + ", " + std::to_string(type->length) +
+           ">";
   }
   const std::string& name = type->name;
   if (name == "integer") {
@@ -250,7 +251,7 @@ std::string CppEmitter::cppTypeName(const Type* type) const {
     return "std::string";
   }
   if (name == "fix") {
-    return "coord_rt::Fix<0, 10>";
+    return "coord_rt::Fix<0, 10, 64>";
   }
   if (name == "float") {
     return "double";
@@ -322,7 +323,7 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
           {"usize", "std::size_t"},
           {"f32", "float"},
           {"f64", "double"},
-          {"fix", "coord_rt::Fix<0, 10>"},
+          {"fix", "coord_rt::Fix<0, 10, 64>"},
           {"float", "double"},
           {"record", "coord_rt::Record"},
           {"Record", "coord_rt::Record"},
@@ -331,7 +332,7 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
           {"Character", "char32_t"},
           {"Boolean", "bool"},
           {"Float", "double"},
-          {"Fix", "coord_rt::Fix<0, 10>"},
+          {"Fix", "coord_rt::Fix<0, 10, 64>"},
           {"integer", "std::int64_t"},
           {"character", "char32_t"},
           {"boolean", "bool"},
@@ -512,6 +513,9 @@ void CppEmitter::emitPrelude() {
   out_ << "#include <utility>\n";
   out_ << "#include <cstdint>\n";
   out_ << "#include <cmath>\n";
+  out_ << "#if defined(_MSC_VER)\n";
+  out_ << "#include <intrin.h>\n";
+  out_ << "#endif\n";
   out_ << "#include <iostream>\n";
   out_ << "#include <string>\n";
   out_ << "#include <cstring>\n";
@@ -1114,6 +1118,21 @@ constexpr std::int64_t fixIPow(std::int64_t base, std::int64_t exponent) {
   for (std::int64_t i = 0; i < exponent; ++i) result *= base;
   return result;
 }
+constexpr std::int64_t fixMax(std::int64_t a, std::int64_t b) {
+  return a > b ? a : b;
+}
+constexpr int fixNextLength(int bits) {
+  if (bits <= 8) return 8;
+  if (bits <= 16) return 16;
+  if (bits <= 32) return 32;
+  return 64;
+}
+constexpr int fixAddLength(int left, int right) {
+  return fixNextLength(static_cast<int>(fixMax(left, right)) + 1);
+}
+constexpr int fixMulLength(int left, int right) {
+  return fixNextLength(left + right);
+}
 [[noreturn]] inline void fixOverflow() {
   std::cerr << "fix overflow\n";
   std::abort();
@@ -1161,6 +1180,65 @@ inline std::int64_t fixMulChecked(std::int64_t a, std::int64_t b) {
   }
   return static_cast<std::int64_t>(product);
 }
+inline std::int64_t fixMulWideRounded(std::int64_t a, std::int64_t b,
+                                      std::int64_t divisor) {
+  if (divisor == 0) fixOverflow();
+  const bool negative = ((a < 0) != (b < 0)) != (divisor < 0);
+  const long double approximate =
+      static_cast<long double>(a) * static_cast<long double>(b) /
+      static_cast<long double>(divisor);
+  if (!std::isfinite(static_cast<double>(approximate)) ||
+      approximate > 9223372036854775807.0L ||
+      approximate < -9223372036854775808.0L) {
+    fixOverflow();
+  }
+#if defined(__SIZEOF_INT128__)
+  __int128 product = static_cast<__int128>(a) * static_cast<__int128>(b);
+  __int128 quotient = product / divisor;
+  const __int128 remainder = product % divisor;
+  if (remainder != 0) {
+    const __int128 twice =
+        remainder < 0 ? -remainder * 2 : remainder * 2;
+    const __int128 absDivisor =
+        divisor < 0 ? -static_cast<__int128>(divisor) : divisor;
+    if (twice >= absDivisor) {
+      if (negative) {
+        --quotient;
+      } else {
+        ++quotient;
+      }
+    }
+  }
+  if (quotient > std::numeric_limits<std::int64_t>::max() ||
+      quotient < std::numeric_limits<std::int64_t>::min()) {
+    fixOverflow();
+  }
+  return static_cast<std::int64_t>(quotient);
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
+  std::int64_t high = 0;
+  const std::int64_t low = _mul128(a, b, &high);
+  std::int64_t remainder = 0;
+  std::int64_t quotient = _div128(high, low, divisor, &remainder);
+  if (remainder != 0) {
+    const std::uint64_t magnitude = fixAbsU(remainder);
+    const std::uint64_t absDivisor = fixAbsU(divisor);
+    if (magnitude >= absDivisor - magnitude) {
+      quotient += negative ? -1 : 1;
+    }
+  }
+  return quotient;
+#else
+  const long double scaled =
+      static_cast<long double>(a) * static_cast<long double>(b) /
+      static_cast<long double>(divisor);
+  if (!std::isfinite(static_cast<double>(scaled)) ||
+      scaled > 9223372036854775807.0L ||
+      scaled < -9223372036854775808.0L) {
+    fixOverflow();
+  }
+  return static_cast<std::int64_t>(std::llroundl(scaled));
+#endif
+}
 inline std::int64_t fixTruncDiv(std::int64_t value, std::int64_t divisor) {
   if (divisor == 0) fixOverflow();
   const bool negative = (value < 0) != (divisor < 0);
@@ -1201,20 +1279,137 @@ inline std::int64_t fixRoundDiv(std::int64_t value, std::int64_t divisor) {
   }
   return static_cast<std::int64_t>(quotient);
 }
-inline std::int64_t fixRescale(std::int64_t raw, std::int64_t fromPower,
-                               std::int64_t toPower, std::int64_t radix) {
+inline long double fixScaleLD(std::int64_t radix, std::int64_t power) {
+  long double result = 1.0L;
+  const std::int64_t magnitude = power < 0 ? -power : power;
+  for (std::int64_t i = 0; i < magnitude; ++i) {
+    result *= static_cast<long double>(radix);
+  }
+  return power < 0 ? 1.0L / result : result;
+}
+inline std::int64_t fixRescaleRaw(std::int64_t raw, std::int64_t fromPower,
+                                  std::int64_t toPower,
+                                  std::int64_t radix) {
   if (fromPower == toPower) return raw;
-  const bool up = toPower > fromPower;
-  const std::int64_t steps = up ? toPower - fromPower : fromPower - toPower;
-  std::int64_t factor = 1;
-  for (std::int64_t i = 0; i < steps; ++i) {
-    if (factor >
-        std::numeric_limits<std::int64_t>::max() / radix) {
+  const std::int64_t delta = toPower - fromPower;
+  if (delta > 0) {
+    std::int64_t factor = 1;
+    bool exact = true;
+    for (std::int64_t i = 0; i < delta; ++i) {
+      if (factor >
+          std::numeric_limits<std::int64_t>::max() / radix) {
+        exact = false;
+        break;
+      }
+      factor *= radix;
+    }
+    if (exact &&
+        (raw == 0 ||
+         (raw > 0
+              ? raw <= std::numeric_limits<std::int64_t>::max() / factor
+              : raw >= std::numeric_limits<std::int64_t>::min() / factor))) {
+      return raw * factor;
+    }
+  } else {
+    std::int64_t factor = 1;
+    bool exact = true;
+    for (std::int64_t i = 0; i < -delta; ++i) {
+      if (factor >
+          std::numeric_limits<std::int64_t>::max() / radix) {
+        exact = false;
+        break;
+      }
+      factor *= radix;
+    }
+    if (exact) return fixRoundDiv(raw, factor);
+  }
+  const long double scaled =
+      static_cast<long double>(raw) * fixScaleLD(radix, delta);
+  if (!std::isfinite(static_cast<double>(scaled)) ||
+      scaled > 9223372036854775807.0L ||
+      scaled < -9223372036854775808.0L) {
+    fixOverflow();
+  }
+  return static_cast<std::int64_t>(std::llroundl(scaled));
+}
+inline std::int64_t fixConvertRaw(std::int64_t raw, std::int64_t fromPower,
+                                  std::int64_t fromRadix, std::int64_t toPower,
+                                  std::int64_t toRadix) {
+  std::int64_t value = 0;
+  if (fromRadix == toRadix) {
+    value = fixRescaleRaw(raw, fromPower, toPower, fromRadix);
+  } else {
+    const long double scaled = static_cast<long double>(raw) *
+                               fixScaleLD(toRadix, toPower) /
+                               fixScaleLD(fromRadix, fromPower);
+    if (!std::isfinite(static_cast<double>(scaled)) ||
+        scaled > 9223372036854775807.0L ||
+        scaled < -9223372036854775808.0L) {
       fixOverflow();
     }
-    factor *= radix;
+    value = static_cast<std::int64_t>(std::llroundl(scaled));
   }
-  return up ? fixMulChecked(raw, factor) : fixRoundDiv(raw, factor);
+  return value;
+}
+inline std::int64_t fixDivideRaw(std::int64_t a, std::int64_t b,
+                                 std::int64_t powerA, std::int64_t powerB,
+                                 std::int64_t targetPower,
+                                 std::int64_t radix) {
+  if (b == 0) {
+    std::cerr << "fix division by zero\n";
+    std::abort();
+  }
+  const std::int64_t delta = powerB + targetPower - powerA;
+  if (delta >= 0) {
+    std::int64_t factor = 1;
+    bool exact = true;
+    for (std::int64_t i = 0; i < delta; ++i) {
+      if (factor >
+          std::numeric_limits<std::int64_t>::max() / radix) {
+        exact = false;
+        break;
+      }
+      factor *= radix;
+    }
+    if (exact &&
+        (a == 0 ||
+         (a > 0
+              ? a <= std::numeric_limits<std::int64_t>::max() / factor
+              : a >= std::numeric_limits<std::int64_t>::min() / factor))) {
+      return fixRoundDiv(a * factor, b);
+    }
+  } else {
+    std::int64_t factor = 1;
+    bool exact = true;
+    for (std::int64_t i = 0; i < -delta; ++i) {
+      if (factor >
+          std::numeric_limits<std::int64_t>::max() / radix) {
+        exact = false;
+        break;
+      }
+      factor *= radix;
+    }
+    if (exact &&
+        (b == 0 ||
+         (b > 0
+              ? b <= std::numeric_limits<std::int64_t>::max() / factor
+              : b >= std::numeric_limits<std::int64_t>::min() / factor))) {
+      return fixRoundDiv(a, b * factor);
+    }
+  }
+  const long double scaled =
+      static_cast<long double>(a) * fixScaleLD(radix, delta) /
+      static_cast<long double>(b);
+  if (!std::isfinite(static_cast<double>(scaled)) ||
+      scaled > 9223372036854775807.0L ||
+      scaled < -9223372036854775808.0L) {
+    fixOverflow();
+  }
+  return static_cast<std::int64_t>(std::llroundl(scaled));
+}
+inline std::uint64_t fixMaskFor(int length) {
+  return length >= 64 ? ~static_cast<std::uint64_t>(0)
+                      : (static_cast<std::uint64_t>(1) << length) - 1;
 }
 inline std::string fixBaseDigits(std::uint64_t value, std::uint64_t base) {
   if (value == 0) return "0";
@@ -1227,27 +1422,87 @@ inline std::string fixBaseDigits(std::uint64_t value, std::uint64_t base) {
   std::reverse(digits.begin(), digits.end());
   return digits;
 }
-template <std::int64_t Power, std::int64_t Radix>
+inline std::uint64_t fixToBits(std::int64_t value, int length) {
+  return static_cast<std::uint64_t>(value) & fixMaskFor(length);
+}
+inline std::int64_t fixFromBits(std::uint64_t bits, int length) {
+  if (length < 64) {
+    const std::uint64_t mask = fixMaskFor(length);
+    const std::uint64_t sign = static_cast<std::uint64_t>(1) << (length - 1);
+    bits &= mask;
+    if ((bits & sign) != 0) bits |= ~mask;
+  }
+  return static_cast<std::int64_t>(bits);
+}
+constexpr std::int64_t fixIncrementRaw(std::int64_t power,
+                                       std::int64_t radix) {
+  if (power >= 0) return fixIPow(radix, power);
+  const long double scaled =
+      1.0L / static_cast<long double>(fixIPow(radix, -power));
+  const long double rounded = scaled >= 0.0L ? scaled + 0.5L : scaled - 0.5L;
+  return static_cast<std::int64_t>(rounded);
+}
+template <int Length>
+struct FixRaw;
+template <>
+struct FixRaw<8> {
+  using type = std::int8_t;
+  static constexpr std::int64_t minimum = -128;
+  static constexpr std::int64_t maximum = 127;
+};
+template <>
+struct FixRaw<16> {
+  using type = std::int16_t;
+  static constexpr std::int64_t minimum = -32768;
+  static constexpr std::int64_t maximum = 32767;
+};
+template <>
+struct FixRaw<32> {
+  using type = std::int32_t;
+  static constexpr std::int64_t minimum = -2147483648LL;
+  static constexpr std::int64_t maximum = 2147483647LL;
+};
+template <>
+struct FixRaw<64> {
+  using type = std::int64_t;
+  static constexpr std::int64_t minimum =
+      std::numeric_limits<std::int64_t>::min();
+  static constexpr std::int64_t maximum =
+      std::numeric_limits<std::int64_t>::max();
+};
+template <std::int64_t Power, std::int64_t Radix, int Length>
 struct Fix {
   static_assert(Radix >= 2, "fix radix must be >= 2");
+  static_assert(Length == 8 || Length == 16 || Length == 32 || Length == 64,
+                "fix length must be 8, 16, 32 or 64");
   static_assert(Power >= -63 && Power <= 63,
                 "fix power must fit a 64-bit scale");
+  using Raw = typename FixRaw<Length>::type;
   static constexpr std::int64_t power = Power;
   static constexpr std::int64_t radix = Radix;
+  static constexpr int length = Length;
   static constexpr std::int64_t absPower = Power < 0 ? -Power : Power;
   static constexpr std::int64_t scale = fixIPow(Radix, absPower);
   static constexpr std::int64_t numerator = Power < 0 ? 1 : scale;
   static constexpr std::int64_t denominator = Power < 0 ? scale : 1;
-  std::int64_t raw = 0;
+  static constexpr std::int64_t rawMinimum = FixRaw<Length>::minimum;
+  static constexpr std::int64_t rawMaximum = FixRaw<Length>::maximum;
+  Raw raw = 0;
   Fix() = default;
   static constexpr Fix fromRaw(std::int64_t value) {
+    if (value < rawMinimum || value > rawMaximum) fixOverflow();
     Fix result;
-    result.raw = value;
+    result.raw = static_cast<Raw>(value);
     return result;
   }
   static Fix fromInteger(std::int64_t value) {
-    if (Power >= 0) return fromRaw(fixMulChecked(value, numerator));
-    return fromRaw(fixRoundDiv(value, denominator));
+    std::int64_t rawValue = 0;
+    if (Power >= 0) {
+      rawValue = fixMulChecked(value, numerator);
+    } else {
+      rawValue = fixRoundDiv(value, denominator);
+    }
+    return fromRaw(rawValue);
   }
   static Fix fromDouble(double value) {
     const long double scaled =
@@ -1261,164 +1516,411 @@ struct Fix {
     }
     return fromRaw(static_cast<std::int64_t>(std::llroundl(scaled)));
   }
+  template <std::int64_t Power2, std::int64_t Radix2, int Length2>
+  Fix(const Fix<Power2, Radix2, Length2>& other) {
+    const std::int64_t value =
+        fixConvertRaw(other.rawValue(), Power2, Radix2, Power, Radix);
+    if (value < rawMinimum || value > rawMaximum) fixOverflow();
+    raw = static_cast<Raw>(value);
+  }
   Fix(std::int64_t value) : raw(fromInteger(value).raw) {}
   Fix& operator=(std::int64_t value) {
     raw = fromInteger(value).raw;
     return *this;
   }
+  std::int64_t rawValue() const { return static_cast<std::int64_t>(raw); }
   std::int64_t toInteger() const {
-    if (Power >= 0) return fixTruncDiv(raw, numerator);
-    return fixMulChecked(raw, denominator);
+    if (Power >= 0) return fixTruncDiv(rawValue(), numerator);
+    return fixMulChecked(rawValue(), denominator);
   }
   double toFloat() const {
-    return static_cast<double>(raw) *
+    return static_cast<double>(rawValue()) *
            (static_cast<double>(denominator) /
             static_cast<double>(numerator));
   }
-  template <std::int64_t FromPower>
-  static std::int64_t alignFrom(std::int64_t value) {
-    return fixRescale(value, FromPower, Power, Radix);
-  }
 };
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-Fix<(P1 > P2 ? P1 : P2), R> operator+(const Fix<P1, R>& a,
-                                      const Fix<P2, R>& b) {
-  using Result = Fix<(P1 > P2 ? P1 : P2), R>;
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+Fix<(P1 > P2 ? P1 : P2), R, fixAddLength(L1, L2)> operator+(
+    const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
+  using Result = Fix<(P1 > P2 ? P1 : P2), R, fixAddLength(L1, L2)>;
+  const std::int64_t alignedA =
+      fixRescaleRaw(a.rawValue(), P1, Result::power, R);
+  const std::int64_t alignedB =
+      fixRescaleRaw(b.rawValue(), P2, Result::power, R);
+  return Result::fromRaw(fixAddChecked(alignedA, alignedB));
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+Fix<(P1 > P2 ? P1 : P2), R, fixAddLength(L1, L2)> operator-(
+    const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
+  using Result = Fix<(P1 > P2 ? P1 : P2), R, fixAddLength(L1, L2)>;
+  const std::int64_t alignedA =
+      fixRescaleRaw(a.rawValue(), P1, Result::power, R);
+  const std::int64_t alignedB =
+      fixRescaleRaw(b.rawValue(), P2, Result::power, R);
+  return Result::fromRaw(fixSubChecked(alignedA, alignedB));
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+Fix<(P1 > P2 ? P1 : P2), R, (L1 > L2 ? L1 : L2)> operator/(
+    const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
+  using Result = Fix<(P1 > P2 ? P1 : P2), R, (L1 > L2 ? L1 : L2)>;
   return Result::fromRaw(
-      fixAddChecked(Result::template alignFrom<P1>(a.raw),
-                    Result::template alignFrom<P2>(b.raw)));
+      fixDivideRaw(a.rawValue(), b.rawValue(), P1, P2, Result::power, R));
 }
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-Fix<(P1 > P2 ? P1 : P2), R> operator-(const Fix<P1, R>& a,
-                                      const Fix<P2, R>& b) {
-  using Result = Fix<(P1 > P2 ? P1 : P2), R>;
-  return Result::fromRaw(
-      fixSubChecked(Result::template alignFrom<P1>(a.raw),
-                    Result::template alignFrom<P2>(b.raw)));
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+Fix<(P1 > P2 ? P1 : P2), R, (L1 > L2 ? L1 : L2)> operator%(
+    const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
+  using Result = Fix<(P1 > P2 ? P1 : P2), R, (L1 > L2 ? L1 : L2)>;
+  if (b.rawValue() == 0) {
+    std::cerr << "fix remainder by zero\n";
+    std::abort();
+  }
+  const std::int64_t alignedA =
+      fixRescaleRaw(a.rawValue(), P1, Result::power, R);
+  const std::int64_t alignedB =
+      fixRescaleRaw(b.rawValue(), P2, Result::power, R);
+  return Result::fromRaw(alignedA % alignedB);
 }
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-bool operator==(const Fix<P1, R>& a, const Fix<P2, R>& b) {
-  using Result = Fix<(P1 > P2 ? P1 : P2), R>;
-  return Result::template alignFrom<P1>(a.raw) ==
-         Result::template alignFrom<P2>(b.raw);
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+Fix<(P1 + P2), R, fixMulLength(L1, L2)> operator*(
+    const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
+  return Fix<(P1 + P2), R, fixMulLength(L1, L2)>::fromRaw(
+      fixMulChecked(a.rawValue(), b.rawValue()));
 }
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-bool operator!=(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+bool operator==(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
+  const std::int64_t power = P1 > P2 ? P1 : P2;
+  return fixRescaleRaw(a.rawValue(), P1, power, R) ==
+         fixRescaleRaw(b.rawValue(), P2, power, R);
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+bool operator!=(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   return !(a == b);
 }
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-bool operator<(const Fix<P1, R>& a, const Fix<P2, R>& b) {
-  using Result = Fix<(P1 > P2 ? P1 : P2), R>;
-  return Result::template alignFrom<P1>(a.raw) <
-         Result::template alignFrom<P2>(b.raw);
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+bool operator<(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
+  const std::int64_t power = P1 > P2 ? P1 : P2;
+  return fixRescaleRaw(a.rawValue(), P1, power, R) <
+         fixRescaleRaw(b.rawValue(), P2, power, R);
 }
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-bool operator<=(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+bool operator<=(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   return !(b < a);
 }
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-bool operator>(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+bool operator>(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   return b < a;
 }
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-bool operator>=(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
+bool operator>=(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   return !(a < b);
 }
-template <std::int64_t P1, std::int64_t P2, std::int64_t R>
-Fix<P1 + P2, R> operator*(const Fix<P1, R>& a, const Fix<P2, R>& b) {
-  return Fix<P1 + P2, R>::fromRaw(fixMulChecked(a.raw, b.raw));
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator+(const Fix<P, R, L>& a, std::int64_t b) {
+  return Fix<P, R, L>::fromRaw(
+      fixAddChecked(a.rawValue(), Fix<P, R, L>::fromInteger(b).rawValue()));
 }
-template <std::int64_t P, std::int64_t R>
-Fix<P, R> operator+(const Fix<P, R>& a, std::int64_t b) {
-  return Fix<P, R>::fromRaw(
-      fixAddChecked(a.raw, Fix<P, R>::fromInteger(b).raw));
-}
-template <std::int64_t P, std::int64_t R>
-Fix<P, R> operator+(std::int64_t a, const Fix<P, R>& b) {
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator+(std::int64_t a, const Fix<P, R, L>& b) {
   return b + a;
 }
-template <std::int64_t P, std::int64_t R>
-Fix<P, R> operator-(const Fix<P, R>& a, std::int64_t b) {
-  return Fix<P, R>::fromRaw(
-      fixSubChecked(a.raw, Fix<P, R>::fromInteger(b).raw));
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator-(const Fix<P, R, L>& a, std::int64_t b) {
+  return Fix<P, R, L>::fromRaw(
+      fixSubChecked(a.rawValue(), Fix<P, R, L>::fromInteger(b).rawValue()));
 }
-template <std::int64_t P, std::int64_t R>
-Fix<P, R> operator-(std::int64_t a, const Fix<P, R>& b) {
-  return Fix<P, R>::fromRaw(
-      fixSubChecked(Fix<P, R>::fromInteger(a).raw, b.raw));
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator-(std::int64_t a, const Fix<P, R, L>& b) {
+  return Fix<P, R, L>::fromRaw(
+      fixSubChecked(Fix<P, R, L>::fromInteger(a).rawValue(), b.rawValue()));
 }
-template <std::int64_t P, std::int64_t R>
-Fix<P, R> operator*(const Fix<P, R>& a, std::int64_t b) {
-  return Fix<P, R>::fromRaw(fixMulChecked(a.raw, b));
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator*(const Fix<P, R, L>& a, std::int64_t b) {
+  return Fix<P, R, L>::fromRaw(fixMulChecked(a.rawValue(), b));
 }
-template <std::int64_t P, std::int64_t R>
-Fix<P, R> operator*(std::int64_t a, const Fix<P, R>& b) {
-  return Fix<P, R>::fromRaw(fixMulChecked(a, b.raw));
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator*(std::int64_t a, const Fix<P, R, L>& b) {
+  return Fix<P, R, L>::fromRaw(fixMulChecked(a, b.rawValue()));
 }
-template <std::int64_t P, std::int64_t R>
-Fix<P, R> operator-(const Fix<P, R>& a) {
-  return Fix<P, R>::fromRaw(fixNegChecked(a.raw));
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator/(const Fix<P, R, L>& a, std::int64_t b) {
+  return Fix<P, R, L>::fromRaw(
+      fixDivideRaw(a.rawValue(), b, P, 0, P, R));
 }
-template <std::int64_t P, std::int64_t R>
-bool operator==(const Fix<P, R>& a, std::int64_t b) {
-  return a.raw == Fix<P, R>::fromInteger(b).raw;
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator/(std::int64_t a, const Fix<P, R, L>& b) {
+  return Fix<P, R, L>::fromRaw(
+      fixDivideRaw(a, b.rawValue(), 0, P, P, R));
 }
-template <std::int64_t P, std::int64_t R>
-bool operator==(std::int64_t a, const Fix<P, R>& b) {
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator%(const Fix<P, R, L>& a, std::int64_t b) {
+  const std::int64_t divisor = Fix<P, R, L>::fromInteger(b).rawValue();
+  if (divisor == 0) {
+    std::cerr << "fix remainder by zero\n";
+    std::abort();
+  }
+  return Fix<P, R, L>::fromRaw(a.rawValue() % divisor);
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator-(const Fix<P, R, L>& a) {
+  return Fix<P, R, L>::fromRaw(fixNegChecked(a.rawValue()));
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator+(const Fix<P, R, L>& a) {
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator~(const Fix<P, R, L>& a) {
+  const std::uint64_t bits =
+      (~fixToBits(a.rawValue(), L)) & fixMaskFor(L);
+  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator&(const Fix<P, R, L>& a, const Fix<P, R, L>& b) {
+  const std::uint64_t bits =
+      fixToBits(a.rawValue(), L) & fixToBits(b.rawValue(), L);
+  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator|(const Fix<P, R, L>& a, const Fix<P, R, L>& b) {
+  const std::uint64_t bits =
+      fixToBits(a.rawValue(), L) | fixToBits(b.rawValue(), L);
+  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator^(const Fix<P, R, L>& a, const Fix<P, R, L>& b) {
+  const std::uint64_t bits =
+      fixToBits(a.rawValue(), L) ^ fixToBits(b.rawValue(), L);
+  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator<<(const Fix<P, R, L>& a, std::int64_t count) {
+  if (count < 0 || count >= L) fixOverflow();
+  const std::uint64_t bits =
+      (fixToBits(a.rawValue(), L) << count) & fixMaskFor(L);
+  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator>>(const Fix<P, R, L>& a, std::int64_t count) {
+  if (count < 0) fixOverflow();
+  const std::int64_t value = a.rawValue();
+  if (count >= 64) return Fix<P, R, L>::fromRaw(value < 0 ? -1 : 0);
+  return Fix<P, R, L>::fromRaw(value >> count);
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L>& operator++(Fix<P, R, L>& value) {
+  const std::int64_t step = fixIncrementRaw(P, R);
+  value = Fix<P, R, L>::fromRaw(fixAddChecked(value.rawValue(), step));
+  return value;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator++(Fix<P, R, L>& value, int) {
+  Fix<P, R, L> previous = value;
+  ++value;
+  return previous;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L>& operator--(Fix<P, R, L>& value) {
+  const std::int64_t step = fixIncrementRaw(P, R);
+  value = Fix<P, R, L>::fromRaw(fixSubChecked(value.rawValue(), step));
+  return value;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L> operator--(Fix<P, R, L>& value, int) {
+  Fix<P, R, L> previous = value;
+  --value;
+  return previous;
+}
+template <std::int64_t P, std::int64_t R, int L, class U>
+Fix<P, R, L>& operator+=(Fix<P, R, L>& a, const U& b) {
+  a = Fix<P, R, L>(a + b);
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L, class U>
+Fix<P, R, L>& operator-=(Fix<P, R, L>& a, const U& b) {
+  a = Fix<P, R, L>(a - b);
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L, class U>
+Fix<P, R, L>& operator*=(Fix<P, R, L>& a, const U& b) {
+  a = Fix<P, R, L>(a * b);
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L, class U>
+Fix<P, R, L>& operator/=(Fix<P, R, L>& a, const U& b) {
+  a = Fix<P, R, L>(a / b);
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L, class U>
+Fix<P, R, L>& operator%=(Fix<P, R, L>& a, const U& b) {
+  a = Fix<P, R, L>(a % b);
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L>& operator&=(Fix<P, R, L>& a, const Fix<P, R, L>& b) {
+  a = a & b;
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L>& operator|=(Fix<P, R, L>& a, const Fix<P, R, L>& b) {
+  a = a | b;
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L>& operator^=(Fix<P, R, L>& a, const Fix<P, R, L>& b) {
+  a = a ^ b;
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L>& operator<<=(Fix<P, R, L>& a, std::int64_t count) {
+  a = a << count;
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L>
+Fix<P, R, L>& operator>>=(Fix<P, R, L>& a, std::int64_t count) {
+  a = a >> count;
+  return a;
+}
+template <std::int64_t P, std::int64_t R, int L>
+bool operator==(const Fix<P, R, L>& a, std::int64_t b) {
+  return a.rawValue() == Fix<P, R, L>::fromInteger(b).rawValue();
+}
+template <std::int64_t P, std::int64_t R, int L>
+bool operator==(std::int64_t a, const Fix<P, R, L>& b) {
   return b == a;
 }
-template <std::int64_t P, std::int64_t R>
-bool operator!=(const Fix<P, R>& a, std::int64_t b) {
+template <std::int64_t P, std::int64_t R, int L>
+bool operator!=(const Fix<P, R, L>& a, std::int64_t b) {
   return !(a == b);
 }
-template <std::int64_t P, std::int64_t R>
-bool operator!=(std::int64_t a, const Fix<P, R>& b) {
+template <std::int64_t P, std::int64_t R, int L>
+bool operator!=(std::int64_t a, const Fix<P, R, L>& b) {
   return !(b == a);
 }
-template <std::int64_t P, std::int64_t R>
-bool operator<(const Fix<P, R>& a, std::int64_t b) {
-  return a.raw < Fix<P, R>::fromInteger(b).raw;
+template <std::int64_t P, std::int64_t R, int L>
+bool operator<(const Fix<P, R, L>& a, std::int64_t b) {
+  return a.rawValue() < Fix<P, R, L>::fromInteger(b).rawValue();
 }
-template <std::int64_t P, std::int64_t R>
-bool operator<(std::int64_t a, const Fix<P, R>& b) {
-  return Fix<P, R>::fromInteger(a).raw < b.raw;
+template <std::int64_t P, std::int64_t R, int L>
+bool operator<(std::int64_t a, const Fix<P, R, L>& b) {
+  return Fix<P, R, L>::fromInteger(a).rawValue() < b.rawValue();
 }
-template <std::int64_t P, std::int64_t R>
-bool operator<=(const Fix<P, R>& a, std::int64_t b) {
+template <std::int64_t P, std::int64_t R, int L>
+bool operator<=(const Fix<P, R, L>& a, std::int64_t b) {
   return !(b < a);
 }
-template <std::int64_t P, std::int64_t R>
-bool operator<=(std::int64_t a, const Fix<P, R>& b) {
+template <std::int64_t P, std::int64_t R, int L>
+bool operator<=(std::int64_t a, const Fix<P, R, L>& b) {
   return !(b < a);
 }
-template <std::int64_t P, std::int64_t R>
-bool operator>(const Fix<P, R>& a, std::int64_t b) {
+template <std::int64_t P, std::int64_t R, int L>
+bool operator>(const Fix<P, R, L>& a, std::int64_t b) {
   return b < a;
 }
-template <std::int64_t P, std::int64_t R>
-bool operator>(std::int64_t a, const Fix<P, R>& b) {
+template <std::int64_t P, std::int64_t R, int L>
+bool operator>(std::int64_t a, const Fix<P, R, L>& b) {
   return b < a;
 }
-template <std::int64_t P, std::int64_t R>
-bool operator>=(const Fix<P, R>& a, std::int64_t b) {
+template <std::int64_t P, std::int64_t R, int L>
+bool operator>=(const Fix<P, R, L>& a, std::int64_t b) {
   return !(a < b);
 }
-template <std::int64_t P, std::int64_t R>
-bool operator>=(std::int64_t a, const Fix<P, R>& b) {
+template <std::int64_t P, std::int64_t R, int L>
+bool operator>=(std::int64_t a, const Fix<P, R, L>& b) {
   return !(a < b);
 }
-template <std::int64_t Power, std::int64_t Radix>
-void print(const Fix<Power, Radix>& value) {
+template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
+          std::int64_t P1, int L1, std::int64_t P2, int L2>
+Fix<TargetPower, TargetRadix, TargetLength> fixDivideTo(
+    const Fix<P1, TargetRadix, L1>& a, const Fix<P2, TargetRadix, L2>& b) {
+  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(
+      fixDivideRaw(a.rawValue(), b.rawValue(), P1, P2, TargetPower,
+                   TargetRadix));
+}
+template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
+          std::int64_t P1, int L1>
+Fix<TargetPower, TargetRadix, TargetLength> fixDivideIntTo(
+    const Fix<P1, TargetRadix, L1>& a, std::int64_t b) {
+  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(
+      fixDivideRaw(a.rawValue(), b, P1, 0, TargetPower, TargetRadix));
+}
+template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
+          std::int64_t P2, int L2>
+Fix<TargetPower, TargetRadix, TargetLength> fixIntDivideTo(
+    std::int64_t a, const Fix<P2, TargetRadix, L2>& b) {
+  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(
+      fixDivideRaw(a, b.rawValue(), 0, P2, TargetPower, TargetRadix));
+}
+inline std::int64_t fixPowerDivisor(std::int64_t radix,
+                                    std::int64_t exponent) {
+  std::int64_t factor = 1;
+  for (std::int64_t i = 0; i < exponent; ++i) {
+    if (factor > std::numeric_limits<std::int64_t>::max() / radix) {
+      fixOverflow();
+    }
+    factor *= radix;
+  }
+  return factor;
+}
+inline std::int64_t fixLongDoubleToRaw(long double scaled) {
+  if (!std::isfinite(static_cast<double>(scaled)) ||
+      scaled > 9223372036854775807.0L ||
+      scaled < -9223372036854775808.0L) {
+    fixOverflow();
+  }
+  return static_cast<std::int64_t>(std::llroundl(scaled));
+}
+template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
+          std::int64_t P1, int L1, std::int64_t P2, int L2>
+Fix<TargetPower, TargetRadix, TargetLength> fixMultiplyTo(
+    const Fix<P1, TargetRadix, L1>& a, const Fix<P2, TargetRadix, L2>& b) {
+  const std::int64_t naturalPower = P1 + P2;
+  std::int64_t value = 0;
+  if (TargetPower <= naturalPower) {
+    const std::int64_t divisor =
+        fixPowerDivisor(TargetRadix, naturalPower - TargetPower);
+    value = fixMulWideRounded(a.rawValue(), b.rawValue(), divisor);
+  } else {
+    value = fixLongDoubleToRaw(
+        static_cast<long double>(a.rawValue()) * b.rawValue() *
+        fixScaleLD(TargetRadix, TargetPower - naturalPower));
+  }
+  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(value);
+}
+template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
+          std::int64_t P1, int L1>
+Fix<TargetPower, TargetRadix, TargetLength> fixMultiplyIntTo(
+    const Fix<P1, TargetRadix, L1>& a, std::int64_t b) {
+  std::int64_t value = 0;
+  if (TargetPower <= P1) {
+    const std::int64_t divisor = fixPowerDivisor(TargetRadix, P1 - TargetPower);
+    value = fixMulWideRounded(a.rawValue(), b, divisor);
+  } else {
+    value = fixLongDoubleToRaw(
+        static_cast<long double>(a.rawValue()) * b *
+        fixScaleLD(TargetRadix, TargetPower - P1));
+  }
+  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(value);
+}
+template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
+          std::int64_t P2, int L2>
+Fix<TargetPower, TargetRadix, TargetLength> fixIntMultiplyTo(
+    std::int64_t a, const Fix<P2, TargetRadix, L2>& b) {
+  return fixMultiplyIntTo<TargetPower, TargetRadix, TargetLength>(
+      b, a);
+}
+template <std::int64_t Power, std::int64_t Radix, int Length>
+void print(const Fix<Power, Radix, Length>& value) {
   static_assert(Radix >= 2 && Radix <= 36,
                 "fix print supports radix 2..36");
   const std::uint64_t base = static_cast<std::uint64_t>(Radix);
-  const bool negative = value.raw < 0;
-  const std::uint64_t magnitude = fixAbsU(value.raw);
+  const std::int64_t raw = value.rawValue();
+  const bool negative = raw < 0;
+  const std::uint64_t magnitude = fixAbsU(raw);
   std::string whole;
   std::string fraction;
   if (Power >= 0) {
     const std::uint64_t denominator =
-        static_cast<std::uint64_t>(Fix<Power, Radix>::scale);
+        static_cast<std::uint64_t>(Fix<Power, Radix, Length>::scale);
     whole = fixBaseDigits(magnitude / denominator, base);
     std::uint64_t remainder = magnitude % denominator;
     const char* alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -1432,7 +1934,7 @@ void print(const Fix<Power, Radix>& value) {
     }
   } else {
     const std::uint64_t factor =
-        static_cast<std::uint64_t>(Fix<Power, Radix>::scale);
+        static_cast<std::uint64_t>(Fix<Power, Radix, Length>::scale);
     if (magnitude > std::numeric_limits<std::uint64_t>::max() / factor) {
       fixOverflow();
     }
@@ -1444,6 +1946,8 @@ void print(const Fix<Power, Radix>& value) {
   std::cout << '\n';
 }
 )COORD";
+
+
   out_ << "struct Record {};\n";
 
   out_ << "template <class T>\n";
@@ -3324,7 +3828,8 @@ void CppEmitter::emitExpr(const Expr* expr) {
       if (expr->fixLiteral && expr->resolvedType != nullptr &&
           expr->resolvedType->kind == TypeKind::Fix) {
         out_ << "coord_rt::Fix<" << expr->resolvedType->power << ", "
-             << expr->resolvedType->radix << ">::fromRaw(" << expr->fixRaw
+             << expr->resolvedType->radix << ", "
+             << expr->resolvedType->length << ">::fromRaw(" << expr->fixRaw
              << "LL)";
         return;
       }
@@ -3475,6 +3980,32 @@ void CppEmitter::emitExpr(const Expr* expr) {
       out_ << ')';
       return;
     case ExprKind::Binary:
+      if ((expr->op == "/" || expr->op == "*") &&
+          expr->fixTarget != nullptr && expr->lhs != nullptr &&
+          expr->rhs != nullptr && expr->lhs->resolvedType != nullptr &&
+          expr->rhs->resolvedType != nullptr) {
+        const Type* target = expr->fixTarget;
+        const bool lhsFix = expr->lhs->resolvedType->kind == TypeKind::Fix;
+        const bool rhsFix = expr->rhs->resolvedType->kind == TypeKind::Fix;
+        if (expr->op == "/") {
+          out_ << (lhsFix && rhsFix
+                       ? "coord_rt::fixDivideTo<"
+                       : lhsFix ? "coord_rt::fixDivideIntTo<"
+                                : "coord_rt::fixIntDivideTo<");
+        } else {
+          out_ << (lhsFix && rhsFix
+                       ? "coord_rt::fixMultiplyTo<"
+                       : lhsFix ? "coord_rt::fixMultiplyIntTo<"
+                                : "coord_rt::fixIntMultiplyTo<");
+        }
+        out_ << target->power << ", " << target->radix << ", "
+             << target->length << ">(";
+        emitExpr(expr->lhs.get());
+        out_ << ", ";
+        emitExpr(expr->rhs.get());
+        out_ << ')';
+        return;
+      }
       if ((expr->op == "/" || expr->op == "%") &&
           expr->lhs != nullptr && expr->rhs != nullptr &&
           expr->lhs->resolvedType != nullptr &&

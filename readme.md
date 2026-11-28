@@ -6,7 +6,7 @@ Coordination is a statically typed systems language with **no macros**: compile-
 
 - Source files `.coo`; module interfaces `.coox`; compiler `coorc`.
 - Package manifests `coordination.toml` / `coord.pkg`; lockfile `coord.lock`.
-- Current baseline: **199 CTest cases**, with **199/199 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
+- Current baseline: **205 CTest cases**, with **205/205 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
 - The language and toolchain are wrapping up M3; [framework.md](framework.md) / [framework.zh-CN.md](framework.zh-CN.md) are authoritative, while this document focuses on usage.
 
 ## 1 Run It in 30 Seconds
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows uses presets derived from `windows-base` (Ninja + cl); Linux/macOS use `linux-release`/`macos-release`/`linux-debug`.
-- `ctest` registers **199 tests** (1 unit test plus 198 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
+- `ctest` registers **205 tests** (1 unit test plus 204 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
 - Sanitizers: `cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` builds with ASan + UBSan; `linux-sanitize` preset is provided. Run tests with `ASAN_OPTIONS=detect_leaks=0` when leak checks are not relevant.
 - Parser/compiler fuzzing: build with Clang and `-DCOORD_FUZZ=ON`; see [tests/fuzz/README.md](tests/fuzz/README.md). The parser fuzzer caught unbounded diagnostics; the compiler fuzzer exercises Sema/emitter and requires the `Checker` to outlive emission.
 - Always `--clean-first` after header changes; keep generated C++ for inspection with `coorc --emit-cpp out\x.cpp file.coo`.
@@ -477,22 +477,33 @@ integer main() {
 ### 7.4 Numeric Radix and Static Fixed Point
 
 ```coo
+@Power(4) fix convert(fix value) {
+    return value;                    // return target @Power(4) converts
+}
+
 integer main() {
-    @Power(2) fix price = 19.99;      // raw 1999, prints 19.99
-    @Power(2) integer cents = 19.99;  // integer + @Power promotes to fix
-    @Power(2) @Radix(2) fix half = 0.5; // prints 0.1 in base 2
-    @Radix(2)
-    integer flags = 10;               // integer literal spelling only
-    print(price);
-    print(cents);
-    print(half);
+    @Power(2) fix price = 1.5;
+    @Power(4) fix fine = price;      // target annotation widens power
+    @Radix(2) @Power(4) fix q = price; // target annotation changes radix
+    @Length(16) @Power(2) fix wide = price;
+    @Power(2) fix one = 1.0;
+    @Power(2) fix low = one / 3;     // 0.33 at the natural power
+    @Power(4) fix high = one / 3;    // 0.3333: target overrides precision
+    print(fine);
+    print(q);                        // 1.1 in base 2
+    print(wide);
+    print(convert(2));
+    print(low);                      // 0.33
+    print(high);                     // 0.3333
     return 0;
 }
 ```
 
-- `fix` is static fixed point: `raw = semantic × radix^power`, represented as `coord_rt::Fix<Power, Radix>` with one 64-bit raw integer (no runtime scale). Defaults are `@Length(64) @Radix(10) @Power(0)`.
+- `fix` is static fixed point: `raw = semantic × radix^power`, represented as `coord_rt::Fix<Power, Radix, Length>` with one 8/16/32/64-bit raw integer (no runtime scale). Defaults are `@Length(64) @Radix(10) @Power(0)`.
 - `@Power` on an `integer` or `float` declaration promotes it to `fix`; `@Radix` alone does not. A fractional literal needs an explicit `@Power` to initialize a `fix` (otherwise `E2103`); it is encoded exactly at compile time, rounding half away from zero beyond the target scale.
-- `+`/`-` align to the finer power within one radix, `*` adds powers, comparisons and `print` work, and `toInteger()`/`toFloat()` are the explicit conversions out of `fix`. `@Length` result-width rules (`max(len1,len2)+1`, `len1+len2`, 64×64→128 intermediates) and division/remainder/bitwise/shift on `fix` report `E2104`/`E2102` until slice 11B.
+- Fix-to-fix conversion is target-driven: annotate the destination variable/field/parameter/return type (`@Power(4) fix fine = price;`, `@Radix(2) @Power(4) fix q = price;`, `@Length(16) ...`). A target without `@Length`/`@Radix`/`@Power` reports `E2109`. There are no `toRadix`/`toScale` methods; `toInteger()`/`toFloat()` only cross the fix storage boundary.
+- All operators work: `+ - * / %`, unary `-`, `++/--`, comparisons, `& | ^ ~ << >>`. Arithmetic/comparison is semantic (`+`/`-` align to the finer power, `*` adds powers, `/` uses `max(power1,power2)` and an explicit target can override it, `%` keeps the dividend sign); bitwise/shift operates on `raw` and requires identical radix/power/length (`E2111`).
+- `@Length` supports 8/16/32/64 with result-width widening (`+`/`-`: `max(len1,len2)+1`, `*`: `len1+len2`). An explicitly annotated `*` target uses a 64×64→128 product intermediate so a narrower target scale can be produced; `@Length(128)` remains deferred (`E2102`).
 - `print` renders the semantic value in the type's radix (2–36) and drops trailing zero digits.
 - `@Radix` accepts any integer `>= 2`; `0`, `1` and negatives report `E2100`. For `integer` it only changes generated C++ literal spelling for bases 2/8/16 (`0XFF`, `0B1010`, C++ octal `0100`); other bases spell decimal, and runtime `print` of an integer is unchanged.
 

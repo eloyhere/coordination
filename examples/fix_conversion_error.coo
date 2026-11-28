@@ -1,0 +1,6 @@
+integer main() {
+    @Power(2) fix price = 1.5;
+    fix converted = price;
+    print(converted);
+    return 0;
+}

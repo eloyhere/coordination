@@ -1,0 +1,15 @@
+integer main() {
+    @Length(8) @Power(2) fix a = 1.25;
+    @Length(8) @Power(2) fix b = 0.75;
+    @Length(16) @Power(2) fix sum = a + b;
+    print(sum);
+
+    @Length(16) @Power(2) fix c = 1.5;
+    @Length(16) @Power(2) fix d = 2.0;
+    @Length(32) @Power(4) fix product = c * d;
+    print(product);
+
+    @Length(32) @Power(2) fix wide = a;
+    print(wide);
+    return 0;
+}

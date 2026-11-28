@@ -1,5 +1,5 @@
 integer main() {
-    @Length(32) @Power(2) fix narrow = 1.5;
-    print(narrow);
+    @Length(128) @Power(2) fix wide = 1.5;
+    print(wide);
     return 0;
 }

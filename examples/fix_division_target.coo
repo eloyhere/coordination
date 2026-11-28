@@ -1,0 +1,8 @@
+integer main() {
+    @Power(2) fix one = 1.0;
+    @Power(2) fix low = one / 3;
+    @Power(4) fix high = one / 3;
+    print(low);
+    print(high);
+    return 0;
+}

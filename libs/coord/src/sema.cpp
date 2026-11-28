@@ -41,10 +41,13 @@ bool numericLike(const Type* type) {
 /// Copies validated numeric metadata from a type expression onto the enclosing
 /// declaration/statement fields used by the C++ backend for integer spelling.
 void copyNumericMetadata(const TypeExpr* expr, int& length, int& radix,
-                         int& power, bool& hasPower) {
+                         int& power, bool& hasLength, bool& hasRadix,
+                         bool& hasPower) {
   if (expr == nullptr) {
     return;
   }
+  hasLength = hasLength || expr->hasNumericLength;
+  hasRadix = hasRadix || expr->hasNumericRadix;
   if (expr->hasNumericLength && expr->numericLength > 0) {
     length = expr->numericLength;
   }
@@ -80,6 +83,28 @@ bool multiplyChecked(std::uint64_t& value, std::uint64_t factor) {
   }
   value *= factor;
   return true;
+}
+
+/// Signed raw range of a fix storage width. Length is one of 8/16/32/64.
+void fixRawRange(int length, std::int64_t& minimum, std::int64_t& maximum) {
+  switch (length) {
+    case 8:
+      minimum = -128;
+      maximum = 127;
+      return;
+    case 16:
+      minimum = -32768;
+      maximum = 32767;
+      return;
+    case 32:
+      minimum = -2147483648LL;
+      maximum = 2147483647LL;
+      return;
+    default:
+      minimum = std::numeric_limits<std::int64_t>::min();
+      maximum = std::numeric_limits<std::int64_t>::max();
+      return;
+  }
 }
 
 /// Encodes a fractional literal (e.g. "19.99", "1.5e-2") as the raw
@@ -1342,11 +1367,12 @@ Type* Checker::resolveNumericType(TypeExpr* type, Type* base) {
       radix != 0 ? radix : (base->kind == TypeKind::Fix ? base->radix : 10);
   const int targetPower =
       type->hasNumericPower ? power : (base->kind == TypeKind::Fix ? base->power : 0);
-  if (targetLength != 64) {
+  if (targetLength != 8 && targetLength != 16 && targetLength != 32 &&
+      targetLength != 64) {
     diagnostics_.error(type->span, "E2102",
                        "@Length(" + std::to_string(targetLength) +
-                           ") for fix is not implemented in this slice; only a "
-                           "64-bit raw is supported");
+                           ") for fix is not supported; fix raw widths are "
+                           "8, 16, 32 or 64");
     return base;
   }
   if (targetRadix < 2) {
@@ -1365,6 +1391,83 @@ Type* Checker::resolveNumericType(TypeExpr* type, Type* base) {
     return base;
   }
   return makeFixType(targetLength, targetRadix, targetPower);
+}
+
+int Checker::nextFixLength(int bits) {
+  if (bits <= 8) {
+    return 8;
+  }
+  if (bits <= 16) {
+    return 16;
+  }
+  if (bits <= 32) {
+    return 32;
+  }
+  return 64;
+}
+
+int Checker::fixAddLength(int left, int right) {
+  const int wider = left > right ? left : right;
+  return nextFixLength(wider + 1);
+}
+
+int Checker::fixMulLength(int left, int right) {
+  return nextFixLength(left + right);
+}
+
+bool Checker::fixPowerScaleFits(int radix, int power) {
+  if (radix < 2) {
+    return false;
+  }
+  const unsigned exponent = static_cast<unsigned>(
+      power < 0 ? -static_cast<long long>(power) : power);
+  std::uint64_t scale = 0;
+  return fixScale(static_cast<unsigned>(radix), exponent, scale);
+}
+
+void Checker::checkFixTargetConversion(Type* from, Type* to,
+                                       bool targetExplicit, Span span,
+                                       const std::string& context) {
+  if (from == nullptr || to == nullptr ||
+      from->kind != TypeKind::Fix || to->kind != TypeKind::Fix ||
+      from == to) {
+    return;
+  }
+  if (!targetExplicit) {
+    diagnostics_.error(
+        span, "E2109",
+        "fix conversion in " + context +
+            " requires an explicit @Length/@Radix/@Power on the target type "
+            "(e.g. @Power(4) fix value = source;)");
+  }
+}
+
+void Checker::applyFixTargetContext(Expr* value, Type* target,
+                                    bool targetExplicit, Span span) {
+  if (value == nullptr || target == nullptr ||
+      target->kind != TypeKind::Fix) {
+    return;
+  }
+  Type* natural = value->resolvedType;
+  if (natural == nullptr || natural->kind != TypeKind::Fix) {
+    return;
+  }
+  if (value->kind == ExprKind::Binary &&
+      (value->op == "/" || value->op == "*")) {
+    if (natural != target) {
+      checkFixTargetConversion(natural, target, targetExplicit, span,
+                               value->op == "/" ? "division"
+                                                : "multiplication");
+      if (!targetExplicit) {
+        return;
+      }
+      value->fixTarget = target;
+      value->resolvedType = target;
+    }
+    return;
+  }
+  checkFixTargetConversion(natural, target, targetExplicit, span,
+                           "assignment");
 }
 
 bool Checker::coerceFractionLiteral(Expr* expr, Type* target,
@@ -1400,6 +1503,17 @@ bool Checker::coerceFractionLiteral(Expr* expr, Type* target,
   }
   literal->fixRaw = raw;
   literal->fixLiteral = true;
+  std::int64_t minimum = 0;
+  std::int64_t maximum = 0;
+  fixRawRange(target->length, minimum, maximum);
+  if (raw < minimum || raw > maximum) {
+    diagnostics_.error(literal->span, "E2105",
+                       "fractional literal '" + literal->fractionText +
+                           "' does not fit the target @Length(" +
+                           std::to_string(target->length) + ") fix raw");
+    literal->fixLiteral = false;
+    return false;
+  }
   literal->resolvedType = target;
   expr->resolvedType = target;
   return true;
@@ -1439,30 +1553,32 @@ bool Checker::hasFractionLiteralOperand(const Expr* expr) {
   return expr != nullptr && isFractionLiteral(expr->lhs.get());
 }
 
-bool Checker::targetHasFixPower(const Expr* target) {
+bool Checker::targetHasFixAnnotations(const Expr* target) {
   if (target == nullptr) {
     return false;
   }
   if (target->kind == ExprKind::Name) {
     if (const Variable* variable = lookupVariable(target->name)) {
-      return variable->hasFixPower;
+      return variable->hasFixAnnotations;
     }
     if (currentClass_ != nullptr) {
       if (const FieldInfo* field = lookupField(currentClass_, target->name)) {
         if (field->type != nullptr && field->type->kind == TypeKind::Fix) {
-          return field->hasFixPower;
+          return field->hasFixAnnotations;
         }
       }
     }
     const auto constant = consts_.find(target->name);
     if (constant != consts_.end() && constant->second != nullptr) {
-      return constant->second->hasPower;
+      return constant->second->hasPower ||
+             constant->second->hasLength ||
+             constant->second->hasRadix;
     }
   }
   if (target->kind == ExprKind::Member && target->lhs != nullptr) {
     Type* baseType = target->lhs->resolvedType;
     if (const FieldInfo* field = lookupField(baseType, target->name)) {
-      return field->hasFixPower;
+      return field->hasFixAnnotations;
     }
   }
   return false;
@@ -2290,7 +2406,8 @@ void Checker::checkClass(Decl& decl) {
     }
     Type* fieldType = resolveType(member->type.get(), false);
     copyNumericMetadata(member->type.get(), member->length, member->radix,
-                        member->power, member->hasPower);
+                        member->power, member->hasLength, member->hasRadix,
+                        member->hasPower);
     if ((member->isUnique || member->isShare) && fieldType != nullptr &&
         fieldType->kind != TypeKind::Class &&
         fieldType->kind != TypeKind::Interface) {
@@ -2345,11 +2462,21 @@ void Checker::checkClass(Decl& decl) {
       continue;
     }
     if (member->init) {
+      Type* savedExpected = expectedFixTarget_;
+      if (fieldType != nullptr && fieldType->kind == TypeKind::Fix &&
+          (member->hasLength || member->hasRadix || member->hasPower)) {
+        expectedFixTarget_ = fieldType;
+      }
       Type* initType = checkExpr(member->init.get());
+      expectedFixTarget_ = savedExpected;
       bool coercedFixLiteral = false;
       if (fieldType != nullptr && fieldType->kind == TypeKind::Fix) {
         coercedFixLiteral = coerceFractionLiteral(
             member->init.get(), fieldType, member->hasPower, member->span);
+        applyFixTargetContext(
+            member->init.get(), fieldType,
+            member->hasLength || member->hasRadix || member->hasPower,
+            member->span);
         checkIntegerLiteralTarget(member->init.get(), fieldType,
                                   member->span);
       }
@@ -2365,7 +2492,8 @@ void Checker::checkClass(Decl& decl) {
     }
     type->fields.push_back(
         FieldInfo{member->name, fieldType, member.get(), member->access, type,
-                  member->hasPower});
+                  member->hasPower || member->hasLength ||
+                      member->hasRadix});
     member->resolvedType = fieldType;
     if (type->base != nullptr) {
       const FieldInfo* hidden = lookupField(type->base, member->name);
@@ -2955,7 +3083,7 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
   }
   decl.length = resolveLength(decl.annotations, returnType, decl.span);
   copyNumericMetadata(decl.type.get(), decl.length, decl.radix, decl.power,
-                      decl.hasPower);
+                      decl.hasLength, decl.hasRadix, decl.hasPower);
   if ((decl.isUnsigned || decl.isSigned) && returnType != nullptr &&
       returnType->name != "integer") {
     diagnostics_.error(decl.span, "E2054",
@@ -2996,7 +3124,7 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
-      declared->hasFixPower = param.hasPower;
+      declared->hasFixAnnotations = param.hasPower || param.hasLength || param.hasRadix;
       if (paramType != nullptr && paramType->kind == TypeKind::Function) {
         // A function-typed parameter is only guaranteed to live for the
         // duration of the call; it must not be returned or stored.
@@ -3071,7 +3199,7 @@ void Checker::checkConstructorDecl(Decl& decl) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
-      declared->hasFixPower = param.hasPower;
+      declared->hasFixAnnotations = param.hasPower || param.hasLength || param.hasRadix;
       if (paramType != nullptr && paramType->kind == TypeKind::Function) {
         // A function-typed parameter is only guaranteed to live for the
         // duration of the call; it must not be returned or stored.
@@ -3457,7 +3585,7 @@ void Checker::checkFunction(Decl& decl) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
-      declared->hasFixPower = param.hasPower;
+      declared->hasFixAnnotations = param.hasPower || param.hasLength || param.hasRadix;
       if (paramType != nullptr && paramType->kind == TypeKind::Function) {
         // A function-typed parameter is only guaranteed to live for the
         // duration of the call; it must not be returned or stored.
@@ -3469,7 +3597,7 @@ void Checker::checkFunction(Decl& decl) {
   decl.resolvedType = returnType;
   decl.length = resolveLength(decl.annotations, returnType, decl.span);
   copyNumericMetadata(decl.type.get(), decl.length, decl.radix, decl.power,
-                      decl.hasPower);
+                      decl.hasLength, decl.hasRadix, decl.hasPower);
   if (decl.isNative) {
     const auto supported = [](Type* type) {
       return type != nullptr &&
@@ -3569,13 +3697,22 @@ void Checker::checkConst(Decl& decl) {
   validateAnnotations(decl.annotations, "variable", decl.span, true);
   Type* declared = decl.type ? resolveType(decl.type.get(), true) : nullptr;
   copyNumericMetadata(decl.type.get(), decl.length, decl.radix, decl.power,
-                      decl.hasPower);
+                      decl.hasLength, decl.hasRadix, decl.hasPower);
+  Type* savedExpected = expectedFixTarget_;
+  if (declared != nullptr && declared->kind == TypeKind::Fix &&
+      (decl.hasLength || decl.hasRadix || decl.hasPower)) {
+    expectedFixTarget_ = declared;
+  }
   Type* initType = decl.init ? checkExpr(decl.init.get()) : errorType_;
+  expectedFixTarget_ = savedExpected;
   if (declared == nullptr) {
     declared = initType;
   } else if (decl.init) {
     const bool coercedFixLiteral = coerceFractionLiteral(
         decl.init.get(), declared, decl.hasPower, decl.span);
+    applyFixTargetContext(decl.init.get(), declared,
+                          decl.hasLength || decl.hasRadix || decl.hasPower,
+                          decl.span);
     checkIntegerLiteralTarget(decl.init.get(), declared, decl.span);
     requireAssignable(coercedFixLiteral ? declared : initType, declared,
                       decl.span, "constant initializer");
@@ -3656,7 +3793,10 @@ bool Checker::assignable(Type* from, Type* to) const {
     return from->kind == TypeKind::Int || from->kind == TypeKind::Float;
   }
   if (to->kind == TypeKind::Fix) {
-    return from->kind == TypeKind::Int;
+    // fix -> fix conversions are checked contextually by
+    // checkFixTargetConversion so that the target must carry an explicit
+    // @Length/@Radix/@Power annotation.
+    return from->kind == TypeKind::Int || from->kind == TypeKind::Fix;
   }
   return false;
 }
@@ -4137,6 +4277,11 @@ Type* Checker::checkExpr(Expr* expr) {
   if (expr == nullptr) {
     return errorType_;
   }
+  if (expr->kind != ExprKind::Binary) {
+    // Only a direct binary initializer consumes an explicit fix target; do not
+    // leak it into nested expressions under a unary/conditional node.
+    expectedFixTarget_ = nullptr;
+  }
   switch (expr->kind) {
     case ExprKind::Lambda:
       diagnostics_.error(expr->span, "E2079",
@@ -4265,12 +4410,14 @@ Type* Checker::checkExpr(Expr* expr) {
       Type* target = checkExpr(expr->lhs.get());
       checkCaptureMutation(expr->lhs.get(), expr->span);
       checkLockWrite(expr->lhs.get(), expr->span);
-      if (target != nullptr && !target->isInteger()) {
-        diagnostics_.error(expr->span, "E2005",
-                           "operator '++' requires an integer lvalue");
+      if (target != nullptr && target->kind != TypeKind::Int &&
+          target->kind != TypeKind::Fix) {
+        diagnostics_.error(
+            expr->span, "E2005",
+            "operator '++' requires an integer or fix lvalue");
       }
-      expr->resolvedType = intType_;
-      return intType_;
+      expr->resolvedType = target != nullptr ? target : intType_;
+      return expr->resolvedType;
     }
   }
   return errorType_;
@@ -4310,18 +4457,13 @@ Type* Checker::checkUnary(Expr* expr) {
     expr->resolvedType = errorType_;
     return errorType_;
   }
-  if (operand->kind == TypeKind::Fix && expr->op == "~") {
-    diagnostics_.error(expr->span, "E2104",
-                       "bitwise '~' is not defined for fix; convert to "
-                       "integer explicitly (11B)");
-    expr->resolvedType = errorType_;
-    return errorType_;
-  }
   expr->resolvedType = operand;
   return operand;
 }
 
 Type* Checker::checkBinary(Expr* expr) {
+  Type* expectedFix = expectedFixTarget_;
+  expectedFixTarget_ = nullptr;
   Type* lhs = checkExpr(expr->lhs.get());
   std::vector<std::pair<std::string, bool>> undo;
   if (expr->op == "&&") {
@@ -4329,6 +4471,18 @@ Type* Checker::checkBinary(Expr* expr) {
   }
   Type* rhs = checkExpr(expr->rhs.get());
   restoreOptionalNarrowing(undo);
+
+  // A fractional literal has no fixed-point shape of its own; when the other
+  // operand is fix, encode the literal directly into that shape.
+  if (lhs != nullptr && lhs->kind == TypeKind::Fix &&
+      isFractionLiteral(expr->rhs.get())) {
+    coerceFractionLiteral(expr->rhs.get(), lhs, true, expr->rhs->span);
+    rhs = checkExpr(expr->rhs.get());
+  } else if (rhs != nullptr && rhs->kind == TypeKind::Fix &&
+             isFractionLiteral(expr->lhs.get())) {
+    coerceFractionLiteral(expr->lhs.get(), rhs, true, expr->lhs->span);
+    lhs = checkExpr(expr->lhs.get());
+  }
 
   const bool lhsFix = lhs != nullptr && lhs->kind == TypeKind::Fix;
   const bool rhsFix = rhs != nullptr && rhs->kind == TypeKind::Fix;
@@ -4352,19 +4506,19 @@ Type* Checker::checkBinary(Expr* expr) {
       return boolType_;
     }
     if (lhsFix || rhsFix) {
-      if ((lhsFix && rhsFloat) || (rhsFix && lhsFloat) ||
-          (lhsFix && rhs != nullptr && !rhsFix && !rhsInt) ||
-          (rhsFix && lhs != nullptr && !lhsFix && !lhsInt)) {
+      if ((lhsFix && !rhsFix && !rhsInt) ||
+          (rhsFix && !lhsFix && !lhsInt)) {
         diagnostics_.error(
             expr->span, "E2108",
             "cannot compare 'fix' with '" +
                 (lhsFix ? (rhs != nullptr ? rhs->name : "<error>")
                         : (lhs != nullptr ? lhs->name : "<error>")) +
-                "'; convert explicitly (fix <-> float/integer are explicit)");
+                "'; fix and float/integer conversions are explicit through the "
+                "target type");
       } else if (lhsFix && rhsFix && lhs->radix != rhs->radix) {
         diagnostics_.error(expr->span, "E2108",
                            "cannot compare fix values with different @Radix; "
-                           "convert explicitly");
+                           "convert through an annotated target");
       }
       expr->resolvedType = boolType_;
       return boolType_;
@@ -4383,11 +4537,22 @@ Type* Checker::checkBinary(Expr* expr) {
 
   if (expr->op == "&" || expr->op == "|" || expr->op == "^") {
     if (lhsFix || rhsFix) {
-      diagnostics_.error(expr->span, "E2104",
-                         "bitwise operators are not defined for fix; convert to "
-                         "integer explicitly (11B)");
-      expr->resolvedType = errorType_;
-      return errorType_;
+      if (!lhsFix || !rhsFix) {
+        diagnostics_.error(expr->span, "E2111",
+                           "bitwise fix operands must both be fix values");
+        expr->resolvedType = errorType_;
+        return errorType_;
+      }
+      if (lhs->radix != rhs->radix || lhs->power != rhs->power ||
+          lhs->length != rhs->length) {
+        diagnostics_.error(expr->span, "E2111",
+                           "bitwise fix operands must share @Radix, @Power and "
+                           "@Length");
+        expr->resolvedType = errorType_;
+        return errorType_;
+      }
+      expr->resolvedType = lhs;
+      return lhs;
     }
     if (lhs != nullptr && rhs != nullptr &&
         (lhs->kind == TypeKind::Float || rhs->kind == TypeKind::Float)) {
@@ -4406,14 +4571,16 @@ Type* Checker::checkBinary(Expr* expr) {
 
   if (expr->op == "<<" || expr->op == ">>") {
     if (lhsFix) {
-      diagnostics_.error(expr->span, "E2104",
-                         "fix shift is not implemented; shift a raw integer "
-                         "explicitly (11B)");
-      expr->resolvedType = errorType_;
-      return errorType_;
+      if (!rhsInt) {
+        diagnostics_.error(expr->span, "E2005",
+                           "fix shift count must be an integer");
+        expr->resolvedType = errorType_;
+        return errorType_;
+      }
+      expr->resolvedType = lhs;
+      return lhs;
     }
-    const bool integerShift = lhsInt && rhsInt;
-    if (!integerShift) {
+    if (!(lhsInt && rhsInt)) {
       diagnostics_.error(expr->span, "E2005",
                          "operator '" + expr->op +
                              "' requires integer operands");
@@ -4433,8 +4600,8 @@ Type* Checker::checkBinary(Expr* expr) {
   }
 
   if (lhsFix || rhsFix) {
-    if ((lhsFix && rhsFloat) || (rhsFix && lhsFloat) ||
-        (lhsFix && !rhsFix && !rhsInt) || (rhsFix && !lhsFix && !lhsInt)) {
+    if ((lhsFix && !rhsFix && !rhsInt) ||
+        (rhsFix && !lhsFix && !lhsInt)) {
       diagnostics_.error(
           expr->span, "E2005",
           "operator '" + expr->op +
@@ -4443,58 +4610,68 @@ Type* Checker::checkBinary(Expr* expr) {
       expr->resolvedType = errorType_;
       return errorType_;
     }
-    Type* fixOperand = lhsFix ? lhs : rhs;
     if (lhsFix && rhsFix && lhs->radix != rhs->radix) {
       diagnostics_.error(expr->span, "E2108",
-                         "fix operands must share @Radix; convert explicitly");
+                         "fix operands must share @Radix; convert through an "
+                         "annotated target");
       expr->resolvedType = errorType_;
       return errorType_;
     }
-    if (expr->op == "/") {
-      diagnostics_.error(
-          expr->span, "E2104",
-          "fix division requires an explicit target @Power and is deferred to "
-          "slice 11B");
-      expr->resolvedType = errorType_;
-      return errorType_;
+    if ((expr->op == "*" || expr->op == "/") && expectedFix != nullptr &&
+        expectedFix->kind == TypeKind::Fix) {
+      if (expectedFix->radix != (lhsFix ? lhs->radix : rhs->radix)) {
+        diagnostics_.error(expr->span, "E2108",
+                           "the target fix @Radix must match the operands");
+        expr->resolvedType = errorType_;
+        return errorType_;
+      }
+      expr->fixTarget = expectedFix;
+      expr->resolvedType = expectedFix;
+      return expectedFix;
     }
-    if (expr->op == "%") {
-      diagnostics_.error(expr->span, "E2104",
-                         "fix remainder is deferred to slice 11B");
-      expr->resolvedType = errorType_;
-      return errorType_;
-    }
+    Type* fixOperand = lhsFix ? lhs : rhs;
     int power = fixOperand->power;
-    if (expr->op == "*") {
-      if (lhsFix && rhsFix) {
-        const long long sum = static_cast<long long>(lhs->power) + rhs->power;
-        std::uint64_t scale = 0;
-        const unsigned exponent =
-            static_cast<unsigned>(sum < 0 ? -sum : sum);
+    int length = fixOperand->length;
+    if (lhsFix && rhsFix) {
+      if (expr->op == "+" || expr->op == "-") {
+        power = std::max(lhs->power, rhs->power);
+        length = fixAddLength(lhs->length, rhs->length);
+      } else if (expr->op == "*") {
+        const long long sum =
+            static_cast<long long>(lhs->power) + rhs->power;
         if (sum < std::numeric_limits<int>::min() ||
             sum > std::numeric_limits<int>::max() ||
-            !fixScale(static_cast<unsigned>(fixOperand->radix), exponent,
-                      scale)) {
+            !fixPowerScaleFits(fixOperand->radix, static_cast<int>(sum))) {
           diagnostics_.error(expr->span, "E2102",
-                             "the natural product @Power does not fit a 64-bit "
-                             "raw");
+                             "the natural product @Power does not fit a "
+                             "64-bit raw scale");
           expr->resolvedType = errorType_;
           return errorType_;
         }
         power = static_cast<int>(sum);
+        length = fixMulLength(lhs->length, rhs->length);
+      } else if (expr->op == "/") {
+        power = std::max(lhs->power, rhs->power);
+        length = lhs->length > rhs->length ? lhs->length : rhs->length;
+      } else if (expr->op == "%") {
+        power = std::max(lhs->power, rhs->power);
+        length = lhs->length > rhs->length ? lhs->length : rhs->length;
+      } else {
+        diagnostics_.error(expr->span, "E2005",
+                           "operator '" + expr->op +
+                               "' is not defined for fix");
+        expr->resolvedType = errorType_;
+        return errorType_;
       }
-    } else if (expr->op != "+" && expr->op != "-") {
+    } else if (expr->op != "+" && expr->op != "-" && expr->op != "*" &&
+               expr->op != "/" && expr->op != "%") {
       diagnostics_.error(expr->span, "E2005",
                          "operator '" + expr->op +
                              "' is not defined for fix");
       expr->resolvedType = errorType_;
       return errorType_;
     }
-    if (lhsFix && rhsFix && (expr->op == "+" || expr->op == "-")) {
-      power = std::max(lhs->power, rhs->power);
-    }
-    Type* result =
-        makeFixType(fixOperand->length, fixOperand->radix, power);
+    Type* result = makeFixType(length, fixOperand->radix, power);
     expr->resolvedType = result;
     return result;
   }
@@ -4601,7 +4778,15 @@ Type* Checker::checkAssign(Expr* expr) {
     checkLambda(expr->rhs.get(), lhs);
     rhs = lhs;
   } else {
+    Type* savedExpected = expectedFixTarget_;
+    const bool lhsExplicit =
+        lhs != nullptr && lhs->kind == TypeKind::Fix &&
+        targetHasFixAnnotations(expr->lhs.get());
+    if (lhsExplicit) {
+      expectedFixTarget_ = lhs;
+    }
     rhs = checkExpr(expr->rhs.get());
+    expectedFixTarget_ = savedExpected;
   }
   if (!optional && expr->rhs != nullptr &&
       expr->rhs->kind == ExprKind::Name) {
@@ -4639,7 +4824,11 @@ Type* Checker::checkAssign(Expr* expr) {
     if (lhs != nullptr && lhs->kind == TypeKind::Fix && expr->rhs != nullptr) {
       coercedFixLiteral =
           coerceFractionLiteral(expr->rhs.get(), lhs,
-                                targetHasFixPower(expr->lhs.get()), expr->span);
+                                targetHasFixAnnotations(expr->lhs.get()),
+                                expr->span);
+      applyFixTargetContext(expr->rhs.get(), lhs,
+                            targetHasFixAnnotations(expr->lhs.get()),
+                            expr->span);
       checkIntegerLiteralTarget(expr->rhs.get(), lhs, expr->span);
     }
     requireAssignable(coercedFixLiteral ? lhs : rhs, lhs, expr->span,
@@ -4862,7 +5051,19 @@ Type* Checker::checkCall(Expr* expr) {
         for (std::size_t i = 0; i < expr->args.size(); ++i) {
           Type* paramType = resolveType(found->params[i].type.get(), false);
           Type* argType = checkExpr(expr->args[i].get());
-          requireAssignable(argType, paramType, expr->args[i]->span,
+          bool coercedFixLiteral = false;
+          if (paramType != nullptr && paramType->kind == TypeKind::Fix) {
+            coercedFixLiteral = coerceFractionLiteral(
+                expr->args[i].get(), paramType, found->params[i].hasPower,
+                expr->args[i]->span);
+            applyFixTargetContext(
+                expr->args[i].get(), paramType,
+                found->params[i].hasPower || found->params[i].hasLength ||
+                    found->params[i].hasRadix,
+                expr->args[i]->span);
+          }
+          requireAssignable(coercedFixLiteral ? paramType : argType,
+                            paramType, expr->args[i]->span,
                             "constructor argument");
         }
       } else if (!expr->args.empty()) {
@@ -4898,6 +5099,12 @@ Type* Checker::checkCall(Expr* expr) {
       if (paramType != nullptr && paramType->kind == TypeKind::Fix) {
         coercedFixLiteral = coerceFractionLiteral(
             expr->args[i].get(), paramType, function->params[i].hasPower,
+            expr->args[i]->span);
+        applyFixTargetContext(
+            expr->args[i].get(), paramType,
+            function->params[i].hasPower ||
+                function->params[i].hasLength ||
+                function->params[i].hasRadix,
             expr->args[i]->span);
       }
       if (!(argType != nullptr && argType->kind == TypeKind::Null &&
@@ -5307,7 +5514,20 @@ Type* Checker::checkCall(Expr* expr) {
           Type* paramType =
               resolveType(constructor->params[i].type.get(), false);
           Type* argType = checkExpr(expr->args[i].get());
-          requireAssignable(argType, paramType, expr->args[i]->span,
+          bool coercedFixLiteral = false;
+          if (paramType != nullptr && paramType->kind == TypeKind::Fix) {
+            coercedFixLiteral = coerceFractionLiteral(
+                expr->args[i].get(), paramType,
+                constructor->params[i].hasPower, expr->args[i]->span);
+            applyFixTargetContext(
+                expr->args[i].get(), paramType,
+                constructor->params[i].hasPower ||
+                    constructor->params[i].hasLength ||
+                    constructor->params[i].hasRadix,
+                expr->args[i]->span);
+          }
+          requireAssignable(coercedFixLiteral ? paramType : argType,
+                            paramType, expr->args[i]->span,
                             "constructor argument");
         }
       }
@@ -5391,6 +5611,12 @@ Type* Checker::checkCall(Expr* expr) {
       if (paramType != nullptr && paramType->kind == TypeKind::Fix) {
         coercedFixLiteral = coerceFractionLiteral(
             expr->args[i].get(), paramType, function->params[i].hasPower,
+            expr->args[i]->span);
+        applyFixTargetContext(
+            expr->args[i].get(), paramType,
+            function->params[i].hasPower ||
+                function->params[i].hasLength ||
+                function->params[i].hasRadix,
             expr->args[i]->span);
       }
       if (!(argType != nullptr && argType->kind == TypeKind::Null &&
@@ -6345,7 +6571,8 @@ void Checker::checkStmt(Stmt* stmt) {
     case StmtKind::Var: {
       Type* type = stmt->type ? resolveType(stmt->type.get(), false) : nullptr;
       copyNumericMetadata(stmt->type.get(), stmt->length, stmt->radix,
-                          stmt->power, stmt->hasPower);
+                          stmt->power, stmt->hasLength, stmt->hasRadix,
+                          stmt->hasPower);
       if (stmt->isOptional && stmt->proxyPolicy == ProxyPolicy::Default &&
           stmt->optionalDefault != nullptr) {
         Type* expected = type;
@@ -6628,6 +6855,11 @@ void Checker::checkStmt(Stmt* stmt) {
             stmt->expr.get(), type, stmt->hasPower, stmt->span);
       }
       checkIntegerLiteralTarget(stmt->expr.get(), type, stmt->span);
+      Type* savedExpected = expectedFixTarget_;
+      if (type != nullptr && type->kind == TypeKind::Fix &&
+          (stmt->hasLength || stmt->hasRadix || stmt->hasPower)) {
+        expectedFixTarget_ = type;
+      }
       if (stmt->expr != nullptr &&
           stmt->expr->kind == ExprKind::ArrayLit) {
         if (type == nullptr ||
@@ -6655,6 +6887,7 @@ void Checker::checkStmt(Stmt* stmt) {
       } else {
         initType = stmt->expr ? checkExpr(stmt->expr.get()) : nullptr;
       }
+      expectedFixTarget_ = savedExpected;
       if (!stmt->isOptional && stmt->expr != nullptr &&
           stmt->expr->kind == ExprKind::Name) {
         checkOptionalDirectAccess(stmt->expr.get(), "implicit conversion");
@@ -6683,6 +6916,12 @@ void Checker::checkStmt(Stmt* stmt) {
       if (type == nullptr) {
         type = initType != nullptr ? initType : errorType_;
       } else if (initType != nullptr) {
+        if (stmt->expr != nullptr) {
+          applyFixTargetContext(stmt->expr.get(), type,
+                                stmt->hasLength || stmt->hasRadix ||
+                                    stmt->hasPower,
+                                stmt->span);
+        }
         if (coercedFixLiteral) {
           initType = type;
         }
@@ -6803,7 +7042,7 @@ void Checker::checkStmt(Stmt* stmt) {
         declared->isUnique = stmt->isUnique;
         declared->isShare = stmt->isShare;
           declared->isWeak = stmt->isWeak;
-          declared->hasFixPower = stmt->hasPower;
+          declared->hasFixAnnotations = stmt->hasPower || stmt->hasLength || stmt->hasRadix;
           declared->borrowDepth =
               stmt->expr != nullptr ? stmt->expr->borrowDepth : 0;
       }
@@ -7163,7 +7402,14 @@ void Checker::checkStmt(Stmt* stmt) {
           checkLambda(stmt->expr.get(), expected);
           actual = expected;
         } else {
+          Type* savedExpected = expectedFixTarget_;
+          if (expected->kind == TypeKind::Fix && currentFunction_ != nullptr &&
+              (currentFunction_->hasLength || currentFunction_->hasRadix ||
+               currentFunction_->hasPower)) {
+            expectedFixTarget_ = expected;
+          }
           actual = checkExpr(stmt->expr.get());
+          expectedFixTarget_ = savedExpected;
         }
         checkClosureEscape(stmt->expr.get(), "be returned from the function");
         if (stmt->expr->kind == ExprKind::Unary && stmt->expr->op == "&") {
@@ -7205,6 +7451,12 @@ void Checker::checkStmt(Stmt* stmt) {
                 stmt->expr.get(), expected,
                 currentFunction_ != nullptr && currentFunction_->hasPower,
                 stmt->span);
+            const bool targetExplicit =
+                currentFunction_ != nullptr &&
+                (currentFunction_->hasLength || currentFunction_->hasRadix ||
+                 currentFunction_->hasPower);
+            applyFixTargetContext(stmt->expr.get(), expected, targetExplicit,
+                                  stmt->span);
             checkIntegerLiteralTarget(stmt->expr.get(), expected,
                                       stmt->span);
           }

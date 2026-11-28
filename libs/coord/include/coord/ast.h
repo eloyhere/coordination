@@ -87,6 +87,9 @@ struct Expr : Node {
   /// type: the encoded raw integer and the resolved target type.
   std::int64_t fixRaw = 0;
   bool fixLiteral = false;
+  /// Target fix type for a division whose power is overridden by an explicit
+  /// target annotation (`@Power(n) fix y = x / 2;`).
+  Type* fixTarget = nullptr;
   char32_t charValue = 0;
   bool boolValue = false;
   std::string stringValue;
@@ -275,6 +278,8 @@ struct Stmt : Node {  StmtKind kind = StmtKind::Block;
   int radix = 0;
   int power = 0;
   bool hasPower = false;
+  bool hasLength = false;
+  bool hasRadix = false;
   ExprPtr optionalDefault;
   const Expr* optionalDefaultRef = nullptr;
   std::string letName;
@@ -318,6 +323,8 @@ struct Param {
   int radix = 0;
   int power = 0;
   bool hasPower = false;
+  bool hasLength = false;
+  bool hasRadix = false;
   bool isUnique = false;
   bool isShare = false;
   bool isWeak = false;
@@ -405,6 +412,8 @@ struct Decl : Node {
   int radix = 0;
   int power = 0;
   bool hasPower = false;
+  bool hasLength = false;
+  bool hasRadix = false;
   bool isCore = false;
   bool isStandard = false;
   std::string doc;

@@ -712,12 +712,60 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2103
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
-  add_test(NAME coord_e2e_fix_division_error
+  add_test(NAME coord_e2e_fix_conversion
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>
-      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_division_error.coo
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_division_error
-      -DEXPECT_SUBSTRING=E2104
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_conversion.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_conversion
+      -DEXPECTED=1.5|1.1|1.5|2
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix_operators
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_operators.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_operators
+      -DEXPECTED=1.9|1.1|0.6|3.75|0.3|-1.5|true|0|1.9|1.9|-1.51|3|0.75|2.5|3.5|2.5
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix_division_target
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_division_target.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_division_target
+      -DEXPECTED=0.33|0.3333
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix_lengths
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_lengths.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_lengths
+      -DEXPECTED=2|3|1.25
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix_wide_product
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_wide_product.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_wide_product
+      -DEXPECTED=2.25
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix_conversion_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_conversion_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_conversion_error
+      -DEXPECT_SUBSTRING=E2109
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_fix_bitwise_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_bitwise_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_bitwise_error
+      -DEXPECT_SUBSTRING=E2111
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
   add_test(NAME coord_e2e_fix_length_error

@@ -551,9 +551,13 @@ Param Parser::parseParam() {
   }
   param.type = parseType(true);
   bindNumericAnnotations(param.annotations, param.type.get());
-  if (param.type != nullptr && param.type->hasNumericPower) {
-    param.hasPower = true;
-    param.power = param.type->numericPower;
+  if (param.type != nullptr) {
+    param.hasLength = param.type->hasNumericLength;
+    param.hasRadix = param.type->hasNumericRadix;
+    if (param.type->hasNumericPower) {
+      param.hasPower = true;
+      param.power = param.type->numericPower;
+    }
   }
   if (check(TokKind::Identifier)) {
     param.name = std::string(advance().text);
@@ -1393,6 +1397,8 @@ StmtPtr Parser::parseVarDecl() {
       if (stmt->type->hasNumericRadix && stmt->type->numericRadix > 0) {
         stmt->radix = stmt->type->numericRadix;
       }
+      stmt->hasLength = stmt->type->hasNumericLength;
+      stmt->hasRadix = stmt->type->hasNumericRadix;
       if (stmt->type->hasNumericPower) {
         stmt->hasPower = true;
         stmt->power = stmt->type->numericPower;

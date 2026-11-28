@@ -59,9 +59,10 @@ struct FieldInfo {
   const Decl* decl = nullptr;
   Access access = Access::Default;
   Type* owner = nullptr;
-  /// True when the field declaration carries an explicit @Power; a fix field
-  /// without it cannot receive a fractional literal.
-  bool hasFixPower = false;
+  /// True when the field declaration carries any explicit numeric annotation
+  /// (@Length/@Radix/@Power); a fix field without one cannot receive a fix
+  /// value of a different shape.
+  bool hasFixAnnotations = false;
 };
 
 struct MethodInfo {
@@ -186,9 +187,9 @@ private:
     bool isWeak = false;
     bool moved = false;
     bool narrowed = false;
-    /// True when the declaration site carried an explicit @Power; needed to
-    /// reject fractional literals assigned to a default-power fix variable.
-    bool hasFixPower = false;
+    /// True when the declaration site carried any explicit numeric annotation;
+    /// needed to allow fix-to-fix conversions through the target type.
+    bool hasFixAnnotations = false;
     ProxyPolicy proxyPolicy = ProxyPolicy::Error;
     const Expr* optionalDefault = nullptr;
     const Decl* field = nullptr;
@@ -225,9 +226,22 @@ private:
                              Span span);
   [[nodiscard]] static bool isFractionLiteral(const Expr* expr);
   [[nodiscard]] static bool hasFractionLiteralOperand(const Expr* expr);
-  /// Looks up whether a variable/field/parameter target carried @Power.
-  [[nodiscard]] bool targetHasFixPower(const Expr* target);
+  /// Looks up whether a variable/field/parameter target carried explicit
+  /// numeric annotations.
+  [[nodiscard]] bool targetHasFixAnnotations(const Expr* target);
   void checkIntegerLiteralTarget(const Expr* value, Type* target, Span span);
+  /// Rejects an implicit fix-to-fix conversion unless the target type carried
+  /// an explicit @Length/@Radix/@Power annotation.
+  void checkFixTargetConversion(Type* from, Type* to, bool targetExplicit,
+                                Span span, const std::string& context);
+  /// Applies a declaration/return/argument target to a fix expression. For a
+  /// division the explicit target overrides the natural power.
+  void applyFixTargetContext(Expr* value, Type* target, bool targetExplicit,
+                             Span span);
+  [[nodiscard]] static int nextFixLength(int bits);
+  [[nodiscard]] static int fixAddLength(int left, int right);
+  [[nodiscard]] static int fixMulLength(int left, int right);
+  [[nodiscard]] static bool fixPowerScaleFits(int radix, int power);
   Type* makePointerType(Type* pointee);
   Type* makeSharePtrType(Type* pointee);
   Type* makeArrayType(Type* element, std::int64_t length);
@@ -432,6 +446,11 @@ private:
   Decl* currentClassDecl_ = nullptr;
   Decl* currentFunction_ = nullptr;
   Type* currentReturnType_ = nullptr;
+  /// Explicit fix target for the expression currently being checked (only set
+  /// around a direct declaration/assignment/return/argument initializer). It
+  /// lets `*` and `/` compute at the target scale so 64x64 products can use a
+  /// wide intermediate instead of the (possibly unscalable) natural power.
+  Type* expectedFixTarget_ = nullptr;
   bool inDestructor_ = false;
   int loopDepth_ = 0;
   bool moduleUnsafe_ = false;
