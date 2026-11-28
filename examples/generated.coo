@@ -1,7 +1,6 @@
 @Target(class)
-annotation Generate {
-    @Processor
-    void generate(Description target) {
+annotation Generate implements AnnotationProcessor {
+    override void process(Description target) {
         addFunction("generated");
         addConstant("ANSWER", 42);
     }

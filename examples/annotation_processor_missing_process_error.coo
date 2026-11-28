@@ -1,0 +1,7 @@
+// Implementing AnnotationProcessor without overriding process(Description) is
+// rejected before code generation.
+@Target(class)
+annotation Broken implements AnnotationProcessor {}
+
+@Broken
+class Data {}

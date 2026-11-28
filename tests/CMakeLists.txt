@@ -329,6 +329,41 @@ if(MSVC)
       -DEXPECTED=2
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 
+  # Annotation processors: annotation + ProxyHandler hierarchy, and the Sema
+  # rejections for non-annotation implementers, missing process overrides and
+  # invalid process signatures.
+  add_test(NAME coord_e2e_annotation_processor
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/annotation_processor.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_annotation_processor
+      -DEXPECTED=1|get|value|7
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_annotation_processor_class_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/annotation_processor_class_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_annotation_processor_class_error
+      -DEXPECT_SUBSTRING=E2060
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_annotation_processor_missing_process_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/annotation_processor_missing_process_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_annotation_processor_missing_process_error
+      -DEXPECT_SUBSTRING=E2060
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_annotation_processor_signature_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/annotation_processor_signature_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_annotation_processor_signature_error
+      -DEXPECT_SUBSTRING=E2058
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_proxy_call
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

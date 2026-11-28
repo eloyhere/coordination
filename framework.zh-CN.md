@@ -55,7 +55,7 @@ Coordination 把“编译期计算”当作一等能力，而不是外挂一个�
 | D11 | `enumerate` 声明、`Enumeration` 根类型；C 风格整数后端；默认 0/前值+1；变体名与值唯一；变体可标注；可定义方法、可 `implements`；`match` 强制穷尽；默认无名字表，`@Retention(enum)` 才生成旁路 `(name,value,ordinal)` 表 | 不参与 class 继承，ABI 稳定。 |
 | D12 | 源文件 UTF-8/UTF-16LE/BE/UTF-32LE/BE，BOM 可选并剥离，内部 UTF-8；标识符允许 Unicode 字母/数字/下划线；`char` 是 32 位标量 | 与 Unicode 语义一致；后端映射到 `char32_t`。 |
 | D13 | 一个 `.coo` = 一个模块；`export` 控制导出；`.coox` 是接口/元数据；`coordination.toml`/`coord.pkg` 工程清单 + `coord.lock` | 增量编译粒度清晰；清单与锁文件已实现。 |
-| D14 | 生命周期 Load → Lex → Parse → @Processor → Sema → ConstEval → C++ Lowering → Host CC/Link → Run | 每阶段可单独停止，便于测试与定位。 |
+| D14 | 生命周期 Load → Lex → Parse → AnnotationProcessor → Sema → ConstEval → C++ Lowering → Host CC/Link → Run | 每阶段可单独停止，便于测试与定位。 |
 | D15 | 编译器由 9 个核心阶段头 + 38 个 `modules/*` 模块头组成，单向依赖 | 可逐阶段迁移为独立库；IO/平台相关模块用 `.cpp` 实现。 |
 | D16 | Stream 契约：内部 LF、读时 CRLF/CR 归一、写回 LF、行号 0 基、字节偏移是规范化 UTF-8 偏移 | 跨平台行号/偏移一致。 |
 | D17 | 跨平台边界集中到 `modules/platform`：UTF-8 路径、目录约定、可执行/对象/库命名、`argv` 直接 spawn（无 shell）、Windows UTF-16 命令行 | 编译器/包管理器不写 `#ifdef _WIN32`。 |
@@ -316,13 +316,13 @@ class Service {
 }
 ```
 
-- 注解声明可带参数与处理器方法；处理器方法在编译期执行，接收目标的 `description`。
+- 注解声明可带参数并实现 `AnnotationProcessor`；唯一的 `override void process(Description target)` 在编译期执行，接收目标的 `description`。
 - 只读、只增（完整规则见 §4.7）：应用不会覆盖/替换/修改先前注解，不能修改目标结构，处理器只能生成新的独立声明；默认同一目标上同类型注解只能出现一次，`@Repeatable` 才可重复。
 - 注解默认只存在于编译期，不能作为运行期字段/参数类型（`E2009`）；被 `@Retention` 标注的注解才物化为运行期只读元数据表与生成逻辑。处理器可调用唯一指令原语 `line(file, line)` 设置生成代码的 `#line` 映射。
-- 内建注解名（编译器识别，用户不能重定义同名内建）：`@Result`、`@Expect`、`@Invocation`、`@Proxy`、`@Get`、`@Set`、`@Destructure`、`@Construct`、`@Constructure`、`@Has`、`@Delete`、`@Keys`、`@Describe`、`@Call`、`@Copy`、`@Wrap`、`@Native`、`@FunctionalInterface`、`@Unique`、`@Share`、`@Optional`、`@Signed`、`@Unsigned`、`@Length`。
-- **目标修正**：`@Optional`、`@Unique`、`@Share`、`@Signed`、`@Unsigned`、`@Length` 是 `@Target(type)` 注解，附着在声明位置的类型表达式上，而不是声明本身；`@Constructure` 是 `@Target(constructor)`。其它注解保持原有的声明目标。
-- **分层原则**：元注解只有 6 个，只在 C++ 端实现；其余注解全部是标准库里的普通 Coo 声明（`lib/standard/annotations.coo`）。编译器只保留按名字识别的语义 hook（如 `@Result` 的返回包装、`@Unsigned` 的存储映射），不维护第二套内建注解表。`Descriptor`/`Reflection` 是该文件中的普通类，`Description`/`Reflector<T>` 由编译器特殊处理。
-- `@Native(header: string, library: string, symbol: string = "", abi: "c" | "c++" = "c")`：标注无 body 的 class/function/method/variable；编译器在生成的 C++ 中 `#include` header，并在链接阶段把 library 传给宿主链接器。没有运行期 FFI/dlopen；声明不引入 Scope，也不参与运行期反射。
+- 内建注解名（编译器识别，用户不能重定义同名内建）：`@Result`、`@Expect`、`@Invocation`、`@Proxy`、`@Get`、`@Set`、`@Destructure`、`@Construct`、`@Constructure`、`@Has`、`@Delete`、`@Keys`、`@Describe`、`@Call`、`@Copy`、`@Native`、`@FunctionalInterface`（已弃用）、`@Unique`、`@Share`、`@Weak`、`@Optional`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Lock`、`@ReadOnly`、`@Unsafe`、`@Safe`、`@Test`、`@Bench`。`@Wrap` 已移出声明并标为 deferred；`@Processor` 已删除。
+- **目标修正**：`@Optional`、`@Unique`、`@Share`、`@Weak`、`@Signed`、`@Unsigned`、`@Length`、`@Radix` 是 `@Target(type)` 注解，附着在声明位置的类型表达式上，而不是声明本身；`@Constructure` 是 `@Target(constructor)`。`@Native` 只允许 class/function/method（不再允许 `variable`）。其它注解保持原有的声明目标。
+- **分层原则**：元注解只有 6 个，只在 C++ 端实现；其余注解全部是标准库里的普通 Coo 声明（`lib/standard/annotations.coo`），按节组织（Meta / Processor interfaces / Proxy traps / Value protocols / Ownership-representation / Scope-capability / Native / Tooling）。编译器只保留按名字识别的语义 hook（如 `@Result` 的返回包装、`@Unsigned` 的存储映射），不维护第二套内建注解表。`Descriptor`/`Reflection` 是该文件中的普通类，`Description`/`Reflector<T>` 由编译器特殊处理。
+- `@Native(header: string, library: string, symbol: string = "", abi: "c" | "c++" = "c")`：标注无 body 的 class/function/method；编译器在生成的 C++ 中 `#include` header，并在链接阶段把 library 传给宿主链接器。没有运行期 FFI/dlopen；声明不引入 Scope，也不参与运行期反射。
 
 #### 4.2.5 函数、算子与常量
 
@@ -781,20 +781,22 @@ line(file: string, line: integer);
 
 - **description** 是语言级、用户可见的只读快照（名字、kind、注解值、成员）；**descriptor** 是编译器内部语义对象（targets/repeatable/inherit/retention/processor/intrinsic），定稿后只读，不序列化。
 - 元注解在 C++ 启动时 bootstrap 为 `AnnotationDescriptor`；MetaProcessor 只修改 `DescriptorBuilder`，不修改 description。
-- `AnnotationKind`：`Meta`（6 个）、`Processor`（可通过 `@Processor` 方法生成声明）、`Intrinsic`（`@Result`/`@Unsigned`/`@Native` 等 lowering hook）。
-- 普通处理器在 annotation 声明内用 `@Processor` 方法挂载：
+- `AnnotationKind`：`Meta`（6 个）、`Processor`（annotation 实现 `AnnotationProcessor` 并通过 `process` 生成声明）、`Intrinsic`（`@Result`/`@Unsigned`/`@Native` 等 lowering hook）。
+- Processor 层级定义在标准库：`interface Processor {}`、`interface AnnotationProcessor extends Processor { void process(Description target); }`，`ProxyHandler`/`InvocationHandler` 也继承 `Processor`。只有 annotation 声明可以实现 `AnnotationProcessor`；class、interface 或 enumerate 实现它报 `E2060`。
+- 普通处理器通过实现 `AnnotationProcessor` 并 override `process(Description)` 挂载：
 
 ```coo
-annotation Serializable {
-    @Processor
-    void generate(Description target) {
-        addFunction("serialize" + target.name);
+@Target(class)
+annotation Serializable implements AnnotationProcessor {
+    override void process(Description target) {
+        addFunction("serialize");
     }
 }
 ```
 
-- 固定五阶段：Meta 定稿 → 应用校验 → `@Inherit` 展开 → 普通处理器按应用顺序执行 → Retention 物化。普通处理器只拿 description，不能改目标结构；`@Processor` 与 description 内部 API 属 P4（解析与基础执行已实现）。
-- 处理器在 Sema 前执行，绑定 description，支持局部变量/if/description 查询/`line`，通过 `addFunction`/`addFunctionReturning`/`addConstant`/`addAnnotatedFunction` 生成声明；生成声明参与下一轮，轮次上限默认 8，超限报 `E2068`。
+- Sema 契约是恰好一个 `override void process(Description target)`：`E2058`（返回类型不是 void）、`E2059`（参数不是单个 `Description`）、`E2060`（缺少/重复 process、缺少 `override`、非 annotation 实现者）。已删除的 `@Processor` 方法注解会报 `E2061` 并给出迁移提示。
+- 固定五阶段：Meta 定稿 → 应用校验 → `@Inherit` 展开 → 普通处理器按应用顺序执行 → Retention 物化。普通处理器只拿 description，不能改目标结构；description 内部 API 属 P4（解析与基础执行已实现）。
+- Processor executor 在 Sema 前运行，依据 annotation 声明的 `implements AnnotationProcessor` 与名为 `process` 的成员识别处理器，不依赖已解析的 TypeExpr。处理器绑定 description，支持局部变量/if/description 查询/`line`，通过 `addFunction`/`addFunctionReturning`/`addConstant`/`addAnnotatedFunction` 生成声明；生成声明参与下一轮，轮次上限默认 8，超限报 `E2068`。
 - **Intrinsic 的可见性**：用户可以在自己的声明上**应用**标准库 Intrinsic 注解（`@Result`、`@Expect`、`@Unsigned`、`@Signed`、`@Length`、`@Native`、`@Unique`、`@Share`、`@Optional`、`@Proxy`、`@Invocation` 等），并接受其目标/重复性/Retention 校验；但用户**不能定义**新的 Intrinsic，也不能让自己的注解获得 lowering/ABI hook。Intrinsic 的名字到 C++ hook 的映射是封闭表。
 
 `@Inherit` 的解析规则（与“注解不能覆盖”一致）：先收集目标上**直接声明**的注解（按源码顺序）；若注解类型带 `@Inherit`，再沿继承关系收集（class 走基类链 → 接口列表；interface 走父接口；method 走被覆写的 virtual 方法链）；**直接注解优先**，同类型直接注解已存在时不再加入继承的那一份；不同类型全部共存，非 `@Repeatable` 类型只保留最近的一份；`effective_annotations()` 返回“直接 + 继承”的只读视图并标注每项的 `is_inherited`，源码/`description` 上的直接注解列表不被修改。
@@ -823,7 +825,7 @@ annotation Serializable {
 
 ### 4.8 proxy
 
-`@Proxy(Handler)` 或 `@Proxy(Handler, Policy)` 把 Handler 的 trap 绑定到目标。Handler 是注解或类，且必须实现标准库标记接口 `ProxyHandler` 或其子接口（缺失报 `E2074`）；未实现的 trap 使用默认行为（直接转发）。
+`@Proxy(Handler)` 或 `@Proxy(Handler, Policy)` 把 Handler 的 trap 绑定到目标。Handler 是注解或类，且必须实现标准库标记接口 `ProxyHandler`（它现在继承 `Processor`）或其子接口（缺失报 `E2074`）；未实现的 trap 使用默认行为（直接转发）。
 
 | trap | Coordination 注解 | 触发点 | 默认行为 |
 | --- | --- | --- | --- |
@@ -856,7 +858,7 @@ class Service { ... }
 - 虚分派与接口调用同样适用；trap 在静态类型已知的调用点展开。代理解析失败（trap 签名不匹配、目标不可代理）是编译错误。代理可叠加，展开顺序按注解从内到外、显式 `@Proxy` 优先。
 - 三种模式：handler 未标 `@Retention` → 编译期展开、零开销、无代理对象；标 `@Retention` → 运行期代理包装、trap 运行期分派；标 `@Retention(invocation)` → 运行期代理且 trap 可修改参数/返回值/字段值。
 - `@Proxy(handler)` 默认使用 `ProxyPolicy.Skip`；`@Proxy(handler, Error|Skip|Abort|Default(expr))` 为缺失的构造/解构路径选择策略。四策略见 §4.5.2。
-- `ProxyHandler` 是标记基接口；`MethodProxyHandler`、`DestructureProxyHandler`、`ConstructureProxyHandler`、`ClassProxyHandler`、`ObjectProxyHandler`、`FunctionProxyHandler` 继承它。支持 `interface X extends ProxyHandler`，实现任一子接口即满足 `@Proxy` 的 handler 要求。
+- `ProxyHandler` 是标记基接口并继承 `Processor`；`MethodProxyHandler`、`DestructureProxyHandler`、`ConstructureProxyHandler`、`ClassProxyHandler`、`ObjectProxyHandler`、`FunctionProxyHandler` 继承它。支持 `interface X extends ProxyHandler`，实现任一子接口即满足 `@Proxy` 的 handler 要求。一个 annotation 可以同时实现 `ProxyHandler` 与 `AnnotationProcessor`。
 - `@Construct` 与 `@Destructure` 是 **handler 钩子**：在默认构造/解构行为之前执行，默认行为仍然发生；钩子可按签名校验、记录或修改值。
 - 当前进度：`@Proxy(Handler[, Policy])` 校验、class handler 静态 `@Call/@Get/@Set`、annotation/运行期 retention、`@Construct`（`@Constructure` 构造前）、逐绑定 `@Destructure`、策略默认 `Skip` 均已实现基础版。`@Has/@Delete/@Keys/@Describe` 仍只有声明；runtime handler 构造钩子与部分隐式 optional→非 optional 边界为 🚧。
 
@@ -1157,7 +1159,7 @@ struct ClassDescriptor {
 | ① Load | 文件路径 | `SourceFile`（拥有缓冲） | `string_view` 永远指向稳定内存 |
 | ② Lex | 源文本 | `Token[]` | 关键字、字面量、注释、Span 完整 |
 | ③ Parse | Token 流 | `ModuleAst` | 语法错误恢复；每个节点带 Span |
-| ③.5 @Processor | AST + description 快照 | 生成声明 | 只增不改；轮次上限 8；生成物参与 Sema |
+| ③.5 AnnotationProcessor | AST + description 快照 | 生成声明 | 只增不改；轮次上限 8；生成物参与 Sema |
 | ④ Sema | AST | 类型/符号/诊断 | 类型可解析；Scope 栈平衡；RAII 检查 |
 | ⑤ ConstEval | 已检查 AST | 常量表、编译期输出 | 纯函数、fuel 上限、确定性 |
 | ⑥ Lower | AST + 常量表 | C++20 文本 | 只使用受限 C++ 子集 |
@@ -1259,7 +1261,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **190 项**：`coord_unit` 加 189 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`，以及函数值切片 `coord_e2e_method_ref`、`coord_e2e_method_ref_escape`、`coord_e2e_method_ref_unbound`，以及函数式接口切片 `coord_e2e_functional_interface`、`coord_e2e_functional_interface_error`、`coord_e2e_functional_interface_arity_error`、`coord_e2e_functional_interface_methods_error`，以及线程切片 `coord_e2e_thread`、`coord_e2e_thread_capture_error`、`coord_e2e_thread_this_error`、`coord_e2e_thread_copy_error`，以及 Mutex 切片 `coord_e2e_mutex`、`coord_e2e_mutex_copy_error`、`coord_e2e_mutex_assign_error`，以及 ScopedLock/Atomic/@Lock 切片 `coord_e2e_atomic`、`coord_e2e_scopedlock_copy_error`、`coord_e2e_atomic_copy_error`、`coord_e2e_atomic_assign_error`、`coord_e2e_lock_annotation`、`coord_e2e_lock_annotation_error`，以及 ScopedThread/Atomic-ops 切片 `coord_e2e_scoped_thread`、`coord_e2e_atomic_ops`、`coord_e2e_scopedthread_copy_error`、`coord_e2e_scopedthread_assign_error`、`coord_e2e_scopedthread_capture_error`、`coord_e2e_scopedthread_this_error`，以及 @Lock 能力切片 `coord_e2e_lock_capture`、`coord_e2e_lock_capture_uncaptured_write`、`coord_e2e_lock_capture_const_write`、`coord_e2e_lock_capture_readonly_method`、`coord_e2e_lock_capture_value_class`、`coord_e2e_lock_capture_escape`、`coord_e2e_lock_legacy_error`、`coord_e2e_lock_nested_error`、`coord_e2e_lock_capture_uncaptured_call`、`coord_e2e_lock_capture_value_return`，以及 @Copy 切片 `coord_e2e_copy_deep`、`coord_e2e_copy_deep_unique`、`coord_e2e_copy_shallow`、`coord_e2e_copy_deep_share_error`、`coord_e2e_copy_shallow_unique_error`、`coord_e2e_copy_explicit_required_error`、`coord_e2e_copy_bad_mode_error`、`coord_e2e_lock_capture_deep`、`coord_e2e_lock_capture_shallow_error`、`coord_e2e_copy_deep_unique_chain`、`coord_e2e_copy_deep_nested_error`、`coord_e2e_copy_explicit_shell_error`，以及 Safe/Unsafe 切片 `coord_e2e_unsafe_ffi_error`、`coord_e2e_unsafe_ffi_block`、`coord_e2e_unsafe_pointer_error`、`coord_e2e_unsafe_safe_override_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 当前注册 **194 项**：`coord_unit` 加 193 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、AnnotationProcessor 生成声明与处理器契约、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为注解处理器切片 `coord_e2e_annotation_processor`、`coord_e2e_annotation_processor_class_error`、`coord_e2e_annotation_processor_missing_process_error`、`coord_e2e_annotation_processor_signature_error`、`coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`，以及函数值切片 `coord_e2e_method_ref`、`coord_e2e_method_ref_escape`、`coord_e2e_method_ref_unbound`，以及函数式接口切片 `coord_e2e_functional_interface`、`coord_e2e_functional_interface_error`、`coord_e2e_functional_interface_arity_error`、`coord_e2e_functional_interface_methods_error`，以及线程切片 `coord_e2e_thread`、`coord_e2e_thread_capture_error`、`coord_e2e_thread_this_error`、`coord_e2e_thread_copy_error`，以及 Mutex 切片 `coord_e2e_mutex`、`coord_e2e_mutex_copy_error`、`coord_e2e_mutex_assign_error`，以及 ScopedLock/Atomic/@Lock 切片 `coord_e2e_atomic`、`coord_e2e_scopedlock_copy_error`、`coord_e2e_atomic_copy_error`、`coord_e2e_atomic_assign_error`、`coord_e2e_lock_annotation`、`coord_e2e_lock_annotation_error`，以及 ScopedThread/Atomic-ops 切片 `coord_e2e_scoped_thread`、`coord_e2e_atomic_ops`、`coord_e2e_scopedthread_copy_error`、`coord_e2e_scopedthread_assign_error`、`coord_e2e_scopedthread_capture_error`、`coord_e2e_scopedthread_this_error`，以及 @Lock 能力切片 `coord_e2e_lock_capture`、`coord_e2e_lock_capture_uncaptured_write`、`coord_e2e_lock_capture_const_write`、`coord_e2e_lock_capture_readonly_method`、`coord_e2e_lock_capture_value_class`、`coord_e2e_lock_capture_escape`、`coord_e2e_lock_legacy_error`、`coord_e2e_lock_nested_error`、`coord_e2e_lock_capture_uncaptured_call`、`coord_e2e_lock_capture_value_return`，以及 @Copy 切片 `coord_e2e_copy_deep`、`coord_e2e_copy_deep_unique`、`coord_e2e_copy_shallow`、`coord_e2e_copy_deep_share_error`、`coord_e2e_copy_shallow_unique_error`、`coord_e2e_copy_explicit_required_error`、`coord_e2e_copy_bad_mode_error`、`coord_e2e_lock_capture_deep`、`coord_e2e_lock_capture_shallow_error`、`coord_e2e_copy_deep_unique_chain`、`coord_e2e_copy_deep_nested_error`、`coord_e2e_copy_explicit_shell_error`，以及 Safe/Unsafe 切片 `coord_e2e_unsafe_ffi_error`、`coord_e2e_unsafe_ffi_block`、`coord_e2e_unsafe_pointer_error`、`coord_e2e_unsafe_safe_override_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1980,10 +1982,10 @@ coorc config list|get|set
 | `E2055` | `@Expect` 结果未消费（被当作语句丢弃） |
 | `E2056` | `@Length` 不是 8/16/32/64/128 位 |
 | `E2057` | `@Length` 用于非基本数值类型，或 `@Length(128)` 不是 integer |
-| `E2058` | `@Processor` 方法返回类型不是 void |
-| `E2059` | `@Processor` 方法参数不是单个 `description` |
-| `E2060` | 一个 annotation 声明了多个 `@Processor` 方法 |
-| `E2061` | `@Processor` 出现在 annotation body 之外 |
+| `E2058` | `AnnotationProcessor.process` 返回类型不是 void |
+| `E2059` | `AnnotationProcessor.process` 参数不是单个 `Description` |
+| `E2060` | AnnotationProcessor 契约错误：缺少/重复 `process`、缺少 `override`、非 annotation 实现者，或 class/interface/enumerate 实现 `AnnotationProcessor` |
+| `E2061` | 仍在使用已删除的 `@Processor` 方法注解（迁移错误） |
 | `E2063` | `@Proxy` handler/trap 非法、缺少 trap 或策略非法；`@Destructure`/`@Construct` 钩子签名非法 |
 | `E2064` | `@Test` 不是零参 void 函数，或测试/断言参数错误 |
 | `E2065` | `@Unique/@Share` 同时使用或用于非 class/pointer 类型 |
@@ -2039,7 +2041,7 @@ coorc config list|get|set
 | `T*`（含 `const T*`、`T&`） | ✅ | 后缀语法 + 后端映射 |
 | C++ 后端 `build` 直出可执行文件 | ✅ | 调用宿主 `cl`/`c++` |
 | 模块/包/依赖头（Module/Package/Project/Dependency） | ✅/⏳ | `Package`/`Dependency` 已接入 `coorc deps` 与工程模式；`Module`/`Project` 仍为头文件/测试 |
-| AnnotationRegistry / Descriptor / Outline / Hint / Interface / Processor | ✅/🚧 | Processor 生成声明、outline、`.coox` 已接 driver；Hint 未接 CLI |
+| AnnotationRegistry / Descriptor / Outline / Hint / Interface / Processor | ✅/🚧 | AnnotationProcessor 生成声明、处理器契约、outline、`.coox` 已接 driver；Hint 未接 CLI |
 | Stream / File | ✅ | LF 归一、行/字节偏移读写 |
 | 访问段 + 默认 `private` + 访问检查 | ✅ | `E2030` |
 | `final` 类/方法/字段 + 同名字段隐藏 | ✅ | `E2031`/`E2032` |
@@ -2053,7 +2055,7 @@ coorc config list|get|set
 | Runtime/Enum 保留表 / 注解注释物化 | ✅ | `kRetainedAnnotations` / `k<Enum>Variants`；Invocation hook P4 |
 | `integer` `@Length` 8/16/32/64/128 + `@Signed/@Unsigned` | ✅ | 128 位用 `coord_rt::UInt128` |
 | `Result` / `Expect` | ✅ | 类型实参校验、独立类型、消费检查 |
-| 注解处理器、`line`、proxy、反射五层 | ✅/🚧 | Processor 基础、`line`、proxy class/annotation/runtime、`@Invocation`、`Reflector` 已可用；完整 descriptor API/运行期反射仍推进 |
+| 注解处理器、`line`、proxy、反射五层 | ✅/🚧 | `AnnotationProcessor.process` + `line`、proxy class/annotation/runtime、`@Invocation`、`Reflector` 已可用；完整 descriptor API/运行期反射仍推进 |
 | `.coox`、多模块链接、标准库 | 🚧 | 相对 import、工程目录、`.coox` 读写、outline/hint、`@Test`、`coorc deps`、容器已可用；标准库其余 API 待做 |
 | 包管理器与镜像管理器 | ✅ | 清单、回溯解析、锁、vendor、file/HTTP 注册表、SHA-256、`[trust]` 校验和/HTTPS 策略、离线、镜像故障转移、pack/publish |
 | 跨平台工具链（Windows/macOS/Linux/FreeBSD） | ✅ | 宿主探测、argv spawn、UTF-8 路径、CMake preset；Linux/macOS 已用 g++ 验证 |
@@ -2076,7 +2078,7 @@ coorc config list|get|set
 | Thread 模型 | 🚧 | 内建 move-only `Thread`，由 `() -> void` 构造，支持 `join()`/`detach()`/`joinable()`/`hardwareConcurrency()`，跨线程捕获检查 `E2090`；内建不可拷贝 `Mutex`，手动 `lock()`/`unlock()`/`tryLock()`（`E2091`、`coord_e2e_mutex`）、RAII `ScopedLock`（`E2092`）、`ScopedThread`/`std::jthread` 自动 join（`coord_e2e_scoped_thread`）、seq_cst `Atomic` 的 `load`/`store`/`fetchAdd`/`fetchSub`/`exchange`/`compareExchange`（`coord_e2e_atomic`、`coord_e2e_atomic_ops`）与 `@Lock(Exclusive, mutex, [captures])` 块注解（值/可变/只读捕获、`@ReadOnly` 方法效果与写集检查，`E2094`、`coord_e2e_lock_capture`）、显式 `@Copy(Deep|Shallow)` 与 `@Unique` 链深拷贝（`E2095`、`coord_e2e_copy_deep`）；数据竞争安全、其它类型 atomic、condition variable、scoped thread 与非局部位置 ⏳ |
 | lambda / `if` 表达式 / 完整模式匹配 | 🚧 | lambda 子集：函数类型目标、表达式/块体、隐式/显式捕获（`E2087` 捕获校验、`E2088` 按值只读）、按引用逃逸检查（`E2039`）、赋值/实参/返回、静态/绑定方法引用与链式调用；`@FunctionalInterface` 目标降为函数值并做泛型替换（`E2089`，`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction`，测试 `coord_e2e_functional_interface*`）；具名函数式接口值/类实现、未绑定实例引用、函数指针 thunk、跨线程逃逸 ⏳；测试 `coord_e2e_lambda*`、`coord_e2e_method_ref*`。`if` 表达式（表达式分支）已可用（`coord_e2e_if_expression`；块分支 ⏳）。`match` 支持常量/`|`/范围/绑定/guard 与枚举、布尔、标量穷尽性（`coord_e2e_match_patterns`，负例 `_missing`/`_no_wildcard`/`_bad_pattern`）；类型模式与类解构 ⏳ |
 | `@Native` / FFI | 🚧 | 无函数体的原始类型/string 函数通过生成包装调用 C 符号；`coord_e2e_native_ffi`、`coord_e2e_native_ffi_string`；class/指针/header/library ⏳ |
-| `@Copy` / `@Wrap` / `@FunctionalInterface` 语义 | ⏳ | 注解已声明 |
+| `@Copy` / `@Wrap` / `@FunctionalInterface` 语义 | 🚧 | `@Copy(Deep/Shallow)` 已实现；`@Wrap` 标 deferred（声明已移除）；`@FunctionalInterface` 已弃用，等 Lambda 模块的结构化 `operator()`；`AnnotationProcessor` 层级已实现 |
 | `Weak<T>` / 共享环检测 | ⏳ | 设计与映射已定 |
 | `is` / `new` / `delete` / `unsafe` / `extern` | ⏳ | 保留字，未实现 |
 | `operator` / `where` | 🚧 | 可解析，完整语义待做 |
@@ -2088,9 +2090,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器以及 lambda/match/线程/同步/复制/安全等切片落地后的 190 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器、注解处理器层级以及 lambda/match/线程/同步/复制/安全等切片落地后的 194 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-28）**：`ctest` 注册 **190 项**，Windows 全套 **190/190 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
+**基线（2026-11-28）**：`ctest` 注册 **194 项**，Windows 全套 **194/194 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
 
 **最终验收**：
 

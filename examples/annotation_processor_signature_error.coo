@@ -1,0 +1,13 @@
+// The AnnotationProcessor.process override must return void and take exactly one
+// Description parameter; both failures are reported by Sema.
+@Target(class)
+annotation BadReturn implements AnnotationProcessor {
+    override integer process(Description target) {
+        return 1;
+    }
+}
+
+@Target(class)
+annotation BadParameter implements AnnotationProcessor {
+    override void process(string target) {}
+}

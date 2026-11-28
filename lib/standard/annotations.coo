@@ -1,17 +1,22 @@
-@Target(function, method)
-annotation Result {}
+// Coordination standard annotation library.
+//
+// Sections:
+//   Meta                     compiler meta-annotations and reflection helpers
+//   Processor interfaces     Processor / AnnotationProcessor / handler markers
+//   Proxy traps              @Proxy, @Invocation and trap method annotations
+//   Value protocols          Result/Expect, numeric representation, functional
+//   Ownership-representation @Unique/@Share/@Weak/@Optional and @Copy
+//   Scope-capability         @Lock/@ReadOnly/@Unsafe/@Safe
+//   Native                   @Native FFI declarations
+//   Tooling                  @Test/@Bench
 
-interface ProxyHandler {}
-interface InvocationHandler {}
-
-// Specialized ProxyHandler marker interfaces. They extend ProxyHandler, so a
-// handler that implements any of them is also a valid @Proxy handler.
-interface MethodProxyHandler extends ProxyHandler {}
-interface DestructureProxyHandler extends ProxyHandler {}
-interface ConstructureProxyHandler extends ProxyHandler {}
-interface ClassProxyHandler extends ProxyHandler {}
-interface ObjectProxyHandler extends ProxyHandler {}
-interface FunctionProxyHandler extends ProxyHandler {}
+// ---------------------------------------------------------------------------
+// Meta
+// ---------------------------------------------------------------------------
+// @Target, @Repeatable, @Inherit, @Meta, @Retention and @Documented are
+// compiler-implemented meta-annotations (see annotation_registry.h); they are
+// not declared here. The types below back the `Description` handle that
+// compile-time annotation processors receive.
 
 class Class {
 public:
@@ -201,15 +206,44 @@ public:
 }
 class Reflection {}
 
-@Target(function, method)
-annotation Expect {}
+// ---------------------------------------------------------------------------
+// Processor interfaces
+// ---------------------------------------------------------------------------
 
-@Target(method)
-annotation Processor {}
+/// Root marker for compile-time and runtime extension points.
+interface Processor {}
 
+/// Compile-time annotation processor. An annotation that implements this
+/// interface and overrides `process(Description)` runs before Sema; the old
+/// `@Processor` method annotation has been removed.
+interface AnnotationProcessor extends Processor {
+    void process(Description target);
+}
+
+/// Runtime proxy handler marker; annotations and classes may implement it.
+interface ProxyHandler extends Processor {}
+
+/// Runtime invocation handler marker; classes may implement it.
+interface InvocationHandler extends Processor {}
+
+// Specialized ProxyHandler marker interfaces. They extend ProxyHandler, so a
+// handler that implements any of them is also a valid @Proxy handler.
+interface MethodProxyHandler extends ProxyHandler {}
+interface DestructureProxyHandler extends ProxyHandler {}
+interface ConstructureProxyHandler extends ProxyHandler {}
+interface ClassProxyHandler extends ProxyHandler {}
+interface ObjectProxyHandler extends ProxyHandler {}
+interface FunctionProxyHandler extends ProxyHandler {}
+
+// ---------------------------------------------------------------------------
+// Proxy traps
+// ---------------------------------------------------------------------------
+
+/// Binds one or more runtime invocation handlers to a function or method.
 @Target(function, method)
 annotation Invocation {}
 
+/// Binds a proxy handler annotation or class to a class or method.
 @Target(class, method)
 @Retention
 annotation Proxy {}
@@ -244,23 +278,40 @@ annotation Destructure {}
 @Target(constructor)
 annotation Constructure {}
 
-@Target(class)
-annotation Copy {}
+// ---------------------------------------------------------------------------
+// Value protocols
+// ---------------------------------------------------------------------------
 
-@Target(class, method)
-annotation Wrap {}
+@Target(function, method)
+annotation Result {}
 
-@Target(class, function, method, variable)
-annotation Native {}
+@Target(function, method)
+annotation Expect {}
 
+@Target(type)
+annotation Signed {}
+
+@Target(type)
+annotation Unsigned {}
+
+@Target(type)
+annotation Length {}
+
+@Target(type)
+annotation Radix {}
+
+// Deprecated: functional interfaces lower to function values in v0. They are
+// retained until the Lambda module (slice 12) provides structured operator();
+// they will be deleted then.
 @Target(interface)
 annotation FunctionalInterface {}
 
-@Target(function)
-annotation Test {}
+// ---------------------------------------------------------------------------
+// Ownership-representation
+// ---------------------------------------------------------------------------
 
-@Target(function)
-annotation Bench {}
+@Target(class)
+annotation Copy {}
 
 @Target(type)
 annotation Unique {}
@@ -274,23 +325,40 @@ annotation Weak {}
 @Target(type)
 annotation Optional {}
 
-@Target(type)
-annotation Signed {}
+// ---------------------------------------------------------------------------
+// Scope-capability
+// ---------------------------------------------------------------------------
 
-@Target(type)
-annotation Unsigned {}
-
-@Target(type)
-annotation Length {}
-
-@Target(type)
-annotation Radix {}
 @Target(block)
 annotation Lock {}
+
 @Target(method)
 annotation ReadOnly {}
 
 @Target(class, function, method, constructor, block)
 annotation Unsafe {}
+
 @Target(class, function, method, constructor, block)
 annotation Safe {}
+
+// ---------------------------------------------------------------------------
+// Native
+// ---------------------------------------------------------------------------
+
+// `variable` is deliberately not a target: @Native applies to declarations
+// that can be emitted as a C symbol wrapper (class/function/method only).
+@Target(class, function, method)
+annotation Native {}
+
+// ---------------------------------------------------------------------------
+// Tooling
+// ---------------------------------------------------------------------------
+
+@Target(function)
+annotation Test {}
+
+@Target(function)
+annotation Bench {}
+
+// @Wrap is deferred and has no declaration here anymore: integer wrapping /
+// overflow policy will be revisited with the arithmetic slice.

@@ -1156,6 +1156,14 @@ void Checker::validateAnnotations(
       continue;
     }
 
+    if (use.name == "Processor") {
+      diagnostics_.error(
+          use.span, "E2061",
+          "@Processor method annotation was removed; make the annotation "
+          "implement AnnotationProcessor and override process(Description)");
+      continue;
+    }
+
     const auto it = annotations_.find(use.name);
     if (it != annotations_.end()) {
       const AnnotationInfo& info = it->second;
@@ -1777,6 +1785,11 @@ void Checker::checkClass(Decl& decl) {
       diagnostics_.error(ifaceExpr->span, "E2004",
                          "implemented type must be an interface");
     } else {
+      if (iface->name == "AnnotationProcessor") {
+        diagnostics_.error(
+            ifaceExpr->span, "E2060",
+            "only annotation declarations can implement AnnotationProcessor");
+      }
       type->interfaces.push_back(iface);
     }
   }
@@ -2046,6 +2059,11 @@ void Checker::checkEnum(Decl& decl) {
       diagnostics_.error(ifaceExpr->span, "E2004",
                          "implemented type must be an interface");
     } else {
+      if (iface->name == "AnnotationProcessor") {
+        diagnostics_.error(
+            ifaceExpr->span, "E2060",
+            "only annotation declarations can implement AnnotationProcessor");
+      }
       type->interfaces.push_back(iface);
     }
   }
@@ -2163,6 +2181,15 @@ void Checker::checkInterface(Decl& decl) {
       type->interfaces.push_back(parent);
     }
   }
+  for (const auto& ifaceExpr : decl.interfaces) {
+    Type* iface = resolveType(ifaceExpr.get(), true);
+    if (iface != nullptr && iface->kind == TypeKind::Interface &&
+        iface->name == "AnnotationProcessor") {
+      diagnostics_.error(
+          ifaceExpr->span, "E2060",
+          "only annotation declarations can implement AnnotationProcessor");
+    }
+  }
   Type* savedClass = currentClass_;
   Decl* savedClassDecl = currentClassDecl_;
   currentClass_ = type;
@@ -2180,7 +2207,8 @@ void Checker::checkInterface(Decl& decl) {
     }
     if (member->kind == DeclKind::Method) {
       member->isVirtual = true;
-      checkMethod(*member, type);
+      // AnnotationProcessor declares the meta-typed `Description` parameter.
+      checkMethod(*member, type, decl.name == "AnnotationProcessor");
     }
   }
 
@@ -2223,11 +2251,15 @@ void Checker::checkAnnotation(Decl& decl) {
   if (type == nullptr) {
     return;
   }
+  bool annotationProcessor = false;
   for (const auto& iface : decl.interfaces) {
     Type* interfaceType = resolveType(iface.get(), false);
     if (interfaceType != nullptr &&
         interfaceType->kind == TypeKind::Interface) {
       type->interfaces.push_back(interfaceType);
+      if (interfaceType->name == "AnnotationProcessor") {
+        annotationProcessor = true;
+      }
     } else {
       diagnostics_.error(iface->span, "E2010",
                          "annotation can only implement interfaces");
@@ -2242,6 +2274,7 @@ void Checker::checkAnnotation(Decl& decl) {
   pushTypeScope();
   bindGenericParams(decl.generics, true);
 
+  int processCount = 0;
   for (const auto& member : decl.members) {
     if (member->kind != DeclKind::Method) {
       diagnostics_.error(member->span, "E2014",
@@ -2249,36 +2282,51 @@ void Checker::checkAnnotation(Decl& decl) {
       continue;
     }
 
-    bool processor = false;
-    for (const AnnotationUse& use : member->annotations) {
-      if (use.name == "Processor") {
-        processor = true;
-      }
-    }
-    if (!processor) {
+    const bool process = annotationProcessor && member->name == "process";
+    if (!process) {
       checkMethod(*member, type);
       continue;
     }
 
-    if (!decl.processorMethod.empty()) {
-      diagnostics_.error(member->span, "E2060",
-                         "an annotation can declare only one @Processor "
-                         "method");
-    } else {
-      decl.processorMethod = member->name;
-    }
+    ++processCount;
     checkMethod(*member, type, true);
+    if (!member->isOverride) {
+      diagnostics_.error(
+          member->span, "E2060",
+          "AnnotationProcessor.process must be declared 'override'");
+    }
+    if (member->body == nullptr) {
+      diagnostics_.error(member->span, "E2060",
+                         "AnnotationProcessor.process must have a body");
+    }
     if (member->resolvedType != nullptr &&
         member->resolvedType->kind != TypeKind::Void) {
       diagnostics_.error(member->span, "E2058",
-                         "@Processor method must return void");
+                         "AnnotationProcessor.process must return void");
     }
     if (member->params.size() != 1 ||
         member->params[0].type == nullptr ||
         member->params[0].type->name != "Description") {
-      diagnostics_.error(member->span, "E2059",
-                         "@Processor method must take one description "
-                         "parameter");
+      diagnostics_.error(
+          member->span, "E2059",
+          "AnnotationProcessor.process must take one Description parameter");
+    }
+  }
+  if (annotationProcessor) {
+    if (processCount == 0) {
+      diagnostics_.error(
+          decl.span, "E2060",
+          "annotation '" + decl.name +
+              "' implements AnnotationProcessor but does not override "
+              "process(Description)");
+    } else if (processCount > 1) {
+      diagnostics_.error(
+          decl.span, "E2060",
+          "annotation '" + decl.name +
+              "' declares more than one process method; AnnotationProcessor "
+              "requires exactly one override process(Description)");
+    } else {
+      decl.processorMethod = "process";
     }
   }
 
@@ -2403,7 +2451,6 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
   }
   validateProxyHandler(decl);
   validateInvocationHandler(decl);
-  bool processorMethod = false;
   for (const AnnotationUse& use : decl.annotations) {
     if (use.name == "Result") {
       decl.isResult = true;
@@ -2415,8 +2462,6 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
       decl.isUnsigned = true;
     } else if (use.name == "Signed") {
       decl.isSigned = true;
-    } else if (use.name == "Processor") {
-      processorMethod = true;
     }
   }
   if (decl.isTest) {
@@ -2436,11 +2481,6 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
   if (decl.isUnsigned && decl.isSigned) {
     diagnostics_.error(decl.span, "E2053",
                        "a declaration cannot be both @Signed and @Unsigned");
-  }
-  if (processorMethod &&
-      (owner == nullptr || owner->kind != TypeKind::Annotation)) {
-    diagnostics_.error(decl.span, "E2061",
-                       "@Processor is only allowed in an annotation body");
   }
   pushTypeScope();
   bindGenericParams(decl.generics, false);

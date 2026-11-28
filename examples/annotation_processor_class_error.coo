@@ -1,0 +1,2 @@
+// Only annotation declarations may implement AnnotationProcessor.
+class Handler implements AnnotationProcessor {}

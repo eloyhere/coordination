@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**190 项 CTest**，Windows 全套 **190/190 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 当前基线：**194 项 CTest**，Windows 全套 **194/194 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **190 项**（1 个单元测试 + 189 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 注册 **194 项**（1 个单元测试 + 193 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -494,7 +494,36 @@ integer main() {
 - `@Radix(2|8|10|16)` 是类型注解，只改变生成的 C++ 在声明初始化、字段默认值和 `const` 值中的整数字面量写法：`0XFF`、`0B1010`、C++ 八进制 `0100`。
 - 它不改变源码字面量解析，也不改变运行期 `print`；非法进制或非整数目标报 `E2066`。
 
-### 7.5 包依赖
+### 7.5 注解处理器
+
+annotation 通过实现 `AnnotationProcessor` 并 override `process(Description)` 生成声明；旧的 `@Processor` 方法注解已删除：
+
+```coo
+@Target(class)
+annotation Serializable implements AnnotationProcessor {
+    override void process(Description target) {
+        addFunctionReturning("serialize", target.fieldCount());
+    }
+}
+
+@Serializable
+class Data {
+public:
+    integer first;
+    string second;
+}
+
+integer main() {
+    print(serialize());
+    return 0;
+}
+```
+
+- `Processor` 是根标记接口；`AnnotationProcessor`、`ProxyHandler`、`InvocationHandler` 都继承它。只有 annotation 声明可以实现 `AnnotationProcessor`（`E2060`），且必须恰好有一个 `override void process(Description)`（`E2058`/`E2059`/`E2060`）。
+- 同一个 annotation 可以同时实现 `AnnotationProcessor` 与 `ProxyHandler`（编译期生成 + 运行期 trap）；见 [`examples/annotation_processor.coo`](examples/annotation_processor.coo)。
+- 可用的生成原语：`addFunction`、`addFunctionReturning`、`addConstant`、`addAnnotatedFunction`，以及 `line(file, line)`。
+
+### 7.6 包依赖
 
 ```bat
 coorc init app --name app
@@ -519,7 +548,7 @@ coorc build . -o out\app.exe
 
 ## 9 限制与已知问题
 
-- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口目标以函数值子集提供：`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` 降为函数类型（泛型实参替换，`.apply`/`.accept`/`.test`/`.get` 调用形式）；具名接口值与类实现 `@FunctionalInterface` 仍属 ⏳（`E2004`/`E2089`）。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 为 v1 子集：无函数体、原始类型/string 参数与返回值，通过生成包装调用 C 符号；class/指针/header/library 与 C++ ABI 选择仍属 ⏳。`@Copy`/`@Wrap`、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 仍属 ⏳；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
+- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口目标以函数值子集提供：`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` 降为函数类型（泛型实参替换，`.apply`/`.accept`/`.test`/`.get` 调用形式）；具名接口值与类实现 `@FunctionalInterface` 仍属 ⏳（`E2004`/`E2089`），且 `@FunctionalInterface` 已弃用，等 Lambda 模块（切片 12）结构化 `operator()` 后删除。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 为 v1 子集：无函数体、原始类型/string 参数与返回值，通过生成包装调用 C 符号；class/指针/header/library 与 C++ ABI 选择仍属 ⏳，且 `@Native` 不再以 variable 为目标。`@Copy`/`@Wrap`、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 仍属 ⏳；`@Wrap` 标 deferred（声明已移除）；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
 - `ProxyPolicy` 的执行主要验证了局部 `T*`/`@Unique`/`@Share` 变量（直接访问、收窄、局部 Optional 解构）与 `@Proxy` 的 `Skip`/`Abort`/`Error` 解构路径。字段/参数/返回值上的 `@Optional` 已解析/校验，但完整 policy 执行仍不完整；`@Proxy` 的 `Default(expr)` 构造/解构、runtime 构造前钩子、任意非默认构造类的 `Skip` 默认值仍属 🚧。
 - `@Constructure` 类型化/命名构造与 `@Retention(Compile/Runtime)` 代码块已实现基础版；编译期块不能依赖运行期局部状态，代码块上的 `Invocation`/`enum` 报 `E2044`；复杂构造重载消歧仍属 🚧。
 - Atomic v0：内建不可拷贝 `Atomic`，降为 `std::atomic<std::int64_t>`，支持 `load()`、`store(v)`、`fetchAdd(v)`/`fetchSub(v)`（返回操作前的值）、`exchange(v)`（返回旧值）与 `compareExchange(expected, desired)`（值等于 expected 并替换为 desired 时返回 true；expected 不被更新）。所有操作 seq_cst，无内存序参数；没有 `Atomic<T>` 泛型、浮点/指针原子、condition variable 或数据竞争静态分析。支持局部变量与类字段，参数/返回位置 ⏳。拷贝或赋值报 `E2092`。

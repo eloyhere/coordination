@@ -6,7 +6,7 @@ Coordination is a statically typed systems language with **no macros**: compile-
 
 - Source files `.coo`; module interfaces `.coox`; compiler `coorc`.
 - Package manifests `coordination.toml` / `coord.pkg`; lockfile `coord.lock`.
-- Current baseline: **190 CTest cases**, with **190/190 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
+- Current baseline: **194 CTest cases**, with **194/194 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
 - The language and toolchain are wrapping up M3; [framework.md](framework.md) / [framework.zh-CN.md](framework.zh-CN.md) are authoritative, while this document focuses on usage.
 
 ## 1 Run It in 30 Seconds
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows uses presets derived from `windows-base` (Ninja + cl); Linux/macOS use `linux-release`/`macos-release`/`linux-debug`.
-- `ctest` registers **190 tests** (1 unit test plus 189 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
+- `ctest` registers **194 tests** (1 unit test plus 193 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
 - Sanitizers: `cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` builds with ASan + UBSan; `linux-sanitize` preset is provided. Run tests with `ASAN_OPTIONS=detect_leaks=0` when leak checks are not relevant.
 - Parser/compiler fuzzing: build with Clang and `-DCOORD_FUZZ=ON`; see [tests/fuzz/README.md](tests/fuzz/README.md). The parser fuzzer caught unbounded diagnostics; the compiler fuzzer exercises Sema/emitter and requires the `Checker` to outlive emission.
 - Always `--clean-first` after header changes; keep generated C++ for inspection with `coorc --emit-cpp out\x.cpp file.coo`.
@@ -493,7 +493,36 @@ integer main() {
 - `@Radix(2|8|10|16)` is a type annotation that changes only how generated C++ spells integer literals in declaration initializers, field defaults and `const` values: `0XFF`, `0B1010`, C++ octal `0100`.
 - It does not change source literal parsing or runtime `print`; unsupported bases/types report `E2066`.
 
-### 7.5 Package Dependencies
+### 7.5 Annotation Processors
+
+Annotations generate declarations by implementing `AnnotationProcessor` and overriding `process(Description)`; the old `@Processor` method annotation has been removed:
+
+```coo
+@Target(class)
+annotation Serializable implements AnnotationProcessor {
+    override void process(Description target) {
+        addFunctionReturning("serialize", target.fieldCount());
+    }
+}
+
+@Serializable
+class Data {
+public:
+    integer first;
+    string second;
+}
+
+integer main() {
+    print(serialize());
+    return 0;
+}
+```
+
+- `Processor` is the root marker; `AnnotationProcessor`, `ProxyHandler` and `InvocationHandler` extend it. Only annotation declarations may implement `AnnotationProcessor` (`E2060`); exactly one `override void process(Description)` is required (`E2058`/`E2059`/`E2060`).
+- An annotation may implement `AnnotationProcessor` and `ProxyHandler` together (compile-time generation plus runtime traps); see [`examples/annotation_processor.coo`](examples/annotation_processor.coo).
+- Available generation primitives: `addFunction`, `addFunctionReturning`, `addConstant`, `addAnnotatedFunction`, plus `line(file, line)`.
+
+### 7.6 Package Dependencies
 
 ```bat
 coorc init app --name app
@@ -518,7 +547,7 @@ coorc build . -o out\app.exe
 
 ## 9 Limitations and Known Issues
 
-- Lambda has a subset: function-type targets, expression/block bodies, implicit/explicit captures (`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`), capture validation (`E2087`), read-only explicit by-value captures (`E2088`), by-reference closure escape checks (`E2039`) for returns, field/container-literal stores and outer-scope variables, initialization/assignment, calls, arguments and returns. Omitted capture lists produce mutable by-value copies. Functional-interface targets are available as a function-value subset: `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` from `lib/standard/utility.coo` lower to function types (generic arguments substituted, `.apply`/`.accept`/`.test`/`.get` call forms); nominal interface values and classes implementing a `@FunctionalInterface` are ⏳ (`E2004`/`E2089`). Unbound instance method references and function-pointer targets are ⏳; thread-entry capture is checked by `Thread` creation (`E2090`), while the rest of cross-thread borrow analysis is ⏳; static (`Type::method`) and bound (`object::method`) method references, calls through function-typed fields and chained calls on returned function values work, with bound receivers following the by-reference escape rules. `if` expressions support expression branches (`if (c) a else b` and `else if` chains); block branches are ⏳. `match` supports constants, ranges, or-patterns, bindings and guards, with enumerate/boolean/scalar exhaustiveness; type patterns and class destructuring are ⏳. `@Native`/FFI has a v1 subset: body-less functions with primitive or string parameters/return values that call a C symbol through a generated wrapper; classes, pointers, headers/libraries and C++ ABI selection remain ⏳. `@Copy`/`@Wrap`, `Weak<T>` and `unsafe`/`new`/`delete`/`extern` remain ⏳; see [framework.md](framework.md) §11.
+- Lambda has a subset: function-type targets, expression/block bodies, implicit/explicit captures (`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`), capture validation (`E2087`), read-only explicit by-value captures (`E2088`), by-reference closure escape checks (`E2039`) for returns, field/container-literal stores and outer-scope variables, initialization/assignment, calls, arguments and returns. Omitted capture lists produce mutable by-value copies. Functional-interface targets are available as a function-value subset: `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` from `lib/standard/utility.coo` lower to function types (generic arguments substituted, `.apply`/`.accept`/`.test`/`.get` call forms); nominal interface values and classes implementing a `@FunctionalInterface` are ⏳ (`E2004`/`E2089`), and `@FunctionalInterface` is deprecated until the Lambda module structures `operator()` (slice 12). Unbound instance method references and function-pointer targets are ⏳; thread-entry capture is checked by `Thread` creation (`E2090`), while the rest of cross-thread borrow analysis is ⏳; static (`Type::method`) and bound (`object::method`) method references, calls through function-typed fields and chained calls on returned function values work, with bound receivers following the by-reference escape rules. `if` expressions support expression branches (`if (c) a else b` and `else if` chains); block branches are ⏳. `match` supports constants, ranges, or-patterns, bindings and guards, with enumerate/boolean/scalar exhaustiveness; type patterns and class destructuring are ⏳. `@Native`/FFI has a v1 subset: body-less functions with primitive or string parameters/return values that call a C symbol through a generated wrapper; classes, pointers, headers/libraries and C++ ABI selection remain ⏳, and `@Native` no longer targets variables. `@Copy`/`@Wrap`, `Weak<T>` and `unsafe`/`new`/`delete`/`extern` remain ⏳; `@Wrap` is deferred (declaration removed); see [framework.md](framework.md) §11.
 - `ProxyPolicy` execution covers local `T*`/`@Unique`/`@Share` variables, Optional parameters, fields, returns, and local Optional destructuring, plus `@Proxy` `Skip`/`Abort`/`Error` destructuring. `@Proxy` `Default(expr)` construction/destructuring, runtime pre-construction hooks, and `Skip` defaults for arbitrary non-default-constructible classes are still 🚧.
 - `@Constructure` typed/named construction and `@Retention(Compile/Runtime)` blocks are implemented at a basic level; compile-time blocks cannot depend on runtime local state, and `Invocation`/`enum` on a block reports `E2044`. Complex constructor-overload disambiguation remains 🚧.
 - Atomic v0: a built-in non-copyable `Atomic` lowers to `std::atomic<std::int64_t>` with `load()`, `store(v)`, `fetchAdd(v)`/`fetchSub(v)` (return the previous value), `exchange(v)` (returns the previous value) and `compareExchange(expected, desired)` (returns true when the value equalled `expected` and was replaced; `expected` is not updated). All operations are seq_cst with no memory-order parameters; there is no `Atomic<T>`, floating-point/pointer atomic, condition variable or data-race static analysis. Locals and class fields are supported; parameters/returns are ⏳. Copying or assigning reports `E2092`.

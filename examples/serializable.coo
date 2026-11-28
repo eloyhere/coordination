@@ -1,7 +1,6 @@
 @Target(class)
-annotation Serializable {
-    @Processor
-    void generate(Description target) {
+annotation Serializable implements AnnotationProcessor {
+    override void process(Description target) {
         addFunctionReturning("serialize", target.fieldCount());
     }
 }

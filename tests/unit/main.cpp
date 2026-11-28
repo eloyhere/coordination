@@ -1476,49 +1476,135 @@ annotation Marker { string value() const; }
 }
 
 void testProcessorMethods() {
-  Harness harness(R"(
+  Harness valid(R"(
 @Target(class)
-annotation Serializable {
-  @Processor
-  void generate(Description target) {}
+annotation Generate implements AnnotationProcessor {
+  override void process(Description target) {
+    addFunction("generated");
+    addConstant("ANSWER", 42);
+  }
+}
+
+@Generate
+class Data {}
+)");
+  CHECK(!valid.diagnostics.hasErrors());
+
+  const coord::Decl* generate = nullptr;
+  for (const auto& decl : valid.module->decls) {
+    if (decl->kind == coord::DeclKind::Annotation &&
+        decl->name == "Generate") {
+      generate = decl.get();
+      break;
+    }
+  }
+  CHECK(generate != nullptr);
+  if (generate != nullptr) {
+    CHECK(generate->processorMethod == "process");
+    CHECK(generate->interfaces.size() == 1);
+  }
+
+  coord::processor::Executor executor(*valid.module, valid.diagnostics);
+  executor.run();
+  CHECK(!valid.diagnostics.hasErrors());
+  CHECK(executor.invocations() == 1);
+  CHECK(executor.takeGenerated().size() == 2);
+
+  Harness classImpl(R"(
+class Handler implements AnnotationProcessor {}
+)");
+  CHECK(classImpl.countCode("E2060") >= 1);
+
+  Harness interfaceImpl(R"(
+interface Handler implements AnnotationProcessor {}
+)");
+  CHECK(interfaceImpl.countCode("E2060") >= 1);
+
+  Harness combined(R"(
+@Target(class)
+annotation Trace implements ProxyHandler, AnnotationProcessor {
+  override void process(Description target) {
+    addFunction("audited");
+  }
+
+  @Get
+  void get(string field) {}
+}
+
+@Trace
+@Proxy(Trace)
+class Box {
+public:
+  integer value;
 }
 )");
-  CHECK(!harness.diagnostics.hasErrors());
+  CHECK(!combined.diagnostics.hasErrors());
+
+  const coord::Decl* trace = nullptr;
+  for (const auto& decl : combined.module->decls) {
+    if (decl->kind == coord::DeclKind::Annotation && decl->name == "Trace") {
+      trace = decl.get();
+      break;
+    }
+  }
+  CHECK(trace != nullptr);
+  if (trace != nullptr) {
+    CHECK(trace->interfaces.size() == 2);
+    CHECK(trace->processorMethod == "process");
+  }
+  const coord::Decl* box = combined.findClass("Box");
+  CHECK(box != nullptr);
+  if (box != nullptr) {
+    CHECK(box->isProxy);
+    CHECK(box->proxyHandler == "Trace");
+  }
+  coord::processor::Executor combinedExecutor(*combined.module,
+                                               combined.diagnostics);
+  combinedExecutor.run();
+  CHECK(!combined.diagnostics.hasErrors());
+  CHECK(combinedExecutor.invocations() == 1);
+
+  Harness missing(R"(
+annotation Missing implements AnnotationProcessor {}
+)");
+  CHECK(missing.countCode("E2060") >= 1);
+
+  Harness duplicated(R"(
+annotation Duplicate implements AnnotationProcessor {
+  override void process(Description target) {}
+  override void process(Description target) {}
+}
+)");
+  CHECK(duplicated.countCode("E2060") >= 1);
 
   Harness badReturn(R"(
-annotation Bad {
-  @Processor
-  integer generate(Description target) { return 1; }
+annotation BadReturn implements AnnotationProcessor {
+  override integer process(Description target) { return 1; }
 }
 )");
   CHECK(badReturn.countCode("E2058") >= 1);
 
   Harness badParam(R"(
-annotation Bad {
-  @Processor
-  void generate(string target) {}
+annotation BadParam implements AnnotationProcessor {
+  override void process(string target) {}
 }
 )");
   CHECK(badParam.countCode("E2059") >= 1);
 
-  Harness duplicated(R"(
-annotation Bad {
-  @Processor
-  void first(Description target) {}
-  @Processor
-  void second(Description target) {}
+  Harness noOverride(R"(
+annotation Implicit implements AnnotationProcessor {
+  void process(Description target) {}
 }
 )");
-  CHECK(duplicated.countCode("E2060") >= 1);
+  CHECK(noOverride.countCode("E2060") >= 1);
 
-  Harness outside(R"(
-class Service {
-public:
+  Harness legacy(R"(
+annotation Legacy {
   @Processor
   void generate(Description target) {}
 }
 )");
-  CHECK(outside.countCode("E2061") >= 1);
+  CHECK(legacy.countCode("E2061") >= 1);
 }
 
 void testInterfaceWriter() {
@@ -1609,9 +1695,8 @@ integer read(integer& value) {
 void testDescriptionApi() {
   Harness harness(R"(
 @Target(class)
-annotation Reflectable {
-  @Processor
-  void inspect(Description target) {
+annotation Reflectable implements AnnotationProcessor {
+  override void process(Description target) {
     string name = target.name();
     string kind = target.kind();
     boolean has = target.hasAnnotation("Result");
@@ -1623,9 +1708,8 @@ annotation Reflectable {
   CHECK(!harness.diagnostics.hasErrors());
 
   Harness badCall(R"(
-annotation Bad {
-  @Processor
-  void inspect(Description target) {
+annotation Bad implements AnnotationProcessor {
+  override void process(Description target) {
     integer value = target.hasAnnotation(1);
   }
 }
@@ -1669,9 +1753,8 @@ integer main() {
 void testProcessorExecution() {
   Harness harness(R"(
 @Target(class)
-annotation Inspect {
-  @Processor
-  void inspect(Description target) {
+annotation Inspect implements AnnotationProcessor {
+  override void process(Description target) {
     string name = target.name();
     string kind = target.kind();
     integer fields = target.fieldCount();
@@ -1701,9 +1784,8 @@ public:
 
   Harness unsupported(R"(
 @Target(class)
-annotation Unsupported {
-  @Processor
-  void inspect(Description target) {
+annotation Unsupported implements AnnotationProcessor {
+  override void process(Description target) {
     print("not allowed");
   }
 }
@@ -1720,9 +1802,8 @@ class Target {}
 
   Harness looping(R"(
 @Target(function)
-annotation Replicate {
-  @Processor
-  void generate(Description target) {
+annotation Replicate implements AnnotationProcessor {
+  override void process(Description target) {
     addAnnotatedFunction("copy", "Replicate");
   }
 }

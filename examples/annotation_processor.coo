@@ -1,0 +1,31 @@
+// A single annotation may implement AnnotationProcessor (compile-time
+// generation) and ProxyHandler (runtime traps) at the same time.
+@Target(class)
+annotation Instrument implements AnnotationProcessor, ProxyHandler {
+    override void process(Description target) {
+        addFunction("instrumented");
+        addConstant("FIELD_COUNT", target.fieldCount());
+    }
+
+    @Get
+    void get(string field) {
+        print("get");
+        print(field);
+    }
+}
+
+@Instrument
+@Proxy(Instrument)
+class Box {
+public:
+    integer value;
+}
+
+integer main() {
+    instrumented();
+    print(FIELD_COUNT);
+    Box box;
+    box.value = 7;
+    print(box.value);
+    return 0;
+}

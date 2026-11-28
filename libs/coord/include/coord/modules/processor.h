@@ -19,10 +19,12 @@ struct LineDirective {
   std::int64_t line = 0;
 };
 
-/// R1 processor execution scope: bind a `description` argument to the target
-/// declaration, evaluate the restricted processor body (local declarations,
-/// description queries, `line(...)`), and report unsupported statements.
-/// Generated declarations are deliberately not part of R1.
+/// R1 processor execution scope: an annotation that implements
+/// `AnnotationProcessor` and overrides `process(Description)` is a compile-time
+/// processor. Bind the description argument to the target declaration, evaluate
+/// the restricted processor body (local declarations, description queries,
+/// `line(...)`), and report unsupported statements. Generated declarations are
+/// deliberately not part of R1.
 class Executor {
  public:
   Executor(const ModuleAst& module, DiagnosticEngine& diagnostics)
@@ -57,10 +59,8 @@ class Executor {
           if (annotation == nullptr) {
             continue;
           }
-          std::string processorName = annotation->processorMethod;
-          if (processorName.empty()) {
-            processorName = findProcessorMethodName(*annotation);
-          }
+          const std::string processorName =
+              findProcessorMethodName(*annotation);
           if (processorName.empty()) {
             continue;
           }
@@ -129,16 +129,25 @@ class Executor {
     return nullptr;
   }
 
+  /// Finds the `process` override of an annotation that implements
+  /// `AnnotationProcessor`. Sema has not run yet at this point, so only the
+  /// unresolved interface names and member names are available.
   [[nodiscard]] static std::string findProcessorMethodName(
       const Decl& owner) {
-    for (const auto& member : owner.members) {
-      if (member->kind != DeclKind::Method) {
-        continue;
+    bool implementsProcessor = false;
+    for (const auto& interfaceType : owner.interfaces) {
+      if (interfaceType != nullptr &&
+          interfaceType->name == "AnnotationProcessor") {
+        implementsProcessor = true;
+        break;
       }
-      for (const AnnotationUse& use : member->annotations) {
-        if (use.name == "Processor") {
-          return member->name;
-        }
+    }
+    if (!implementsProcessor) {
+      return {};
+    }
+    for (const auto& member : owner.members) {
+      if (member->kind == DeclKind::Method && member->name == "process") {
+        return member->name;
       }
     }
     return {};
