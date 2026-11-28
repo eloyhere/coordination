@@ -1,0 +1,32 @@
+// A user-defined interface is a lambda target when it declares exactly one
+// abstract operator(); no annotation is required, and default methods may
+// accompany the abstract operator().
+interface Mapper {
+    integer operator()(integer value);
+
+    integer twice(integer value) {
+        return value + value;
+    }
+}
+
+interface Noisy {
+    void operator()();
+
+    void describe() {
+        print("noisy");
+    }
+}
+
+integer apply(Mapper mapper, integer value) {
+    return mapper(value);
+}
+
+integer main() {
+    Mapper increment = [](integer value): integer -> value + 1;
+    print(increment(41));
+    print(apply(increment, 9));
+
+    Noisy noisy = [](): void -> { print("noisy"); };
+    noisy();
+    return 0;
+}

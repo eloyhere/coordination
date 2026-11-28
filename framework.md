@@ -492,7 +492,7 @@ integer main() {
 }
 ```
 
-- `switch` supports integer/string/character/boolean/enumerate; every branch has its own scope, there is no fallthrough, `default` must be last, the condition is evaluated once, and the backend emits an if/else chain.
+- `switch` accepts exactly one scalar value per `case`: `integer`, `boolean`, `string`, `character`, `fix`, `float` or `enumerate`. Arrays, ranges, iterables and comma-separated multi-value cases are not supported; use multiple branches or an explicit `if` chain when values share behavior. Every branch has its own scope, there is no fallthrough, `default()` must be last, the condition is evaluated once, and the backend emits an if/else chain.
 - `if` expressions produce a value: `if (condition) a else b` with expression branches and chained `else if`; the condition must be `boolean` and both branches must be assignable to a common type. Block branches are ⏳; use an `if` statement for side effects.
 - `match` supports enumerate variants (`Color.Red`), integer/string/character/boolean constants, the `_` wildcard, bindings (`x`), inclusive/exclusive ranges (`1..10`, `1..=10`), or-patterns (`1 | 2 | 3`) and guards (`x if x > 0`). Branches use `pattern => body` (block or expression); the legacy `case pattern:` form is accepted for compatibility.
 - Exhaustiveness is checked: an enumerate must cover every variant unless a wildcard/binding is present; a `boolean` must cover `true` and `false` unless a wildcard is present; every other scalar match requires `_`. Missing coverage reports `E2077`, an unknown enumerate variant `E2024`, and a binding over a non-scalar value `E2077`. Bindings are copies visible in the guard and body. Type patterns and class destructuring patterns are ⏳.

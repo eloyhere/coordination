@@ -495,7 +495,7 @@ integer main() {
 }
 ```
 
-- `switch` 支持 integer/string/character/boolean/enumerate；每个分支独立作用域，无 fallthrough；`default` 必须最后；条件只求值一次，后端生成 if/else 链。
+- `switch` 的每个 `case` 只接受一个标量值：`integer`、`boolean`、`string`、`character`、`fix`、`float` 或 `enumerate`。不支持数组、range、Iterable 和逗号分隔的多值 case；需要共享行为时使用多个分支或显式 `if` 链。每个分支独立作用域，无 fallthrough；`default()` 必须最后；条件只求值一次，后端生成 if/else 链。
 - `if` 表达式产生值：`if (condition) a else b`，分支为表达式并支持 `else if` 链；条件必须是 `boolean`，两个分支必须可赋给共同类型。块分支 ⏳；有副作用时使用 `if` 语句。
 - `match` 支持枚举变体（`Color.Red`）、整数/字符串/字符/布尔常量、`_` 通配、绑定（`x`）、闭/开区间（`1..10`、`1..=10`）、或模式（`1 | 2 | 3`）与守卫（`x if x > 0`）。分支写作 `pattern => body`（块或表达式），同时兼容旧的 `case pattern:` 形式。
 - 穷尽性检查：枚举必须覆盖全部变体（除非有通配/绑定）；`boolean` 必须覆盖 `true` 与 `false`（除非有通配）；其它标量类型必须写 `_`。缺失覆盖报 `E2077`，未知枚举变体报 `E2024`，非标量值上的绑定报 `E2077`。绑定是副本，在守卫与分支体内可见。类型模式与类解构模式 ⏳。

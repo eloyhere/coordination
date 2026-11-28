@@ -113,8 +113,9 @@ struct Type {
   bool builtin = false;
   bool unordered = false;
   bool isUnion = false;
-  /// Set for `@FunctionalInterface` interfaces: exactly one abstract method,
-  /// lowered to a function value target in v0.
+  /// Set for structurally callable interfaces: exactly one abstract method,
+  /// which must be `operator()`. Such a type is lowered to a function value
+  /// target; default methods may accompany the abstract `operator()`.
   bool functional = false;
   std::string functionalMethod;
   std::vector<FieldInfo> fields;
@@ -306,11 +307,11 @@ private:
 
   Type* resolveType(TypeExpr* type, bool allowMeta);
   Type* resolveNamedType(TypeExpr* type, bool allowMeta);
-  /// Lowers a `@FunctionalInterface` type reference to its equivalent function
-  /// type by substituting the interface's generic arguments into its single
-  /// abstract method.
-  Type* instantiateFunctionalInterface(Type* iface, TypeExpr* type,
-                                       bool allowMeta);
+  /// Lowers a structurally callable interface type reference (exactly one
+  /// abstract `operator()`) to its equivalent function type by substituting the
+  /// interface's generic arguments into the operator's signature.
+  Type* instantiateCallableInterface(Type* iface, TypeExpr* type,
+                                     bool allowMeta);
 
   void pushScope(Scope::Kind kind);
   void popScope();

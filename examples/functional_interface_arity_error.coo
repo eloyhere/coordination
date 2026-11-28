@@ -1,6 +1,6 @@
-// A functional interface must receive the declared number of type arguments.
+// A callable interface expects the declared number of type arguments.
 integer main() {
     Function<integer> bad = (integer value): integer -> value;
-    print(bad.apply(1));
+    print(bad(1));
     return 0;
 }

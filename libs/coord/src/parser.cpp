@@ -999,14 +999,32 @@ DeclPtr Parser::parseClassMember(const std::string& className) {
 
   TypeExprPtr type = parseType(true);
   bindNumericAnnotations(annotations, type.get());
-  if (!check(TokKind::Identifier)) {
+  std::string name;
+  if (match(TokKind::KwOperator)) {
+    if (check(TokKind::LParen)) {
+      // Call operator: `R operator()(params)`.
+      advance();
+      expect(TokKind::RParen, "')'");
+      name = "operator()";
+    } else if (check(TokKind::Identifier)) {
+      name = "operator" + std::string(advance().text);
+    } else {
+      const Token& token = advance();
+      const std::string text = operatorText(token.kind);
+      if (text.empty()) {
+        error(token, "expected an overloadable operator symbol");
+      }
+      name = "operator" + text;
+    }
+  } else if (check(TokKind::Identifier)) {
+    name = std::string(advance().text);
+  } else {
     error(current(), "expected member name");
     if (!atEnd() && !check(TokKind::RBrace)) {
       advance();
     }
     return nullptr;
   }
-  std::string name(advance().text);
 
   if (check(TokKind::Less)) {
     // Generic method.
@@ -1133,7 +1151,13 @@ DeclPtr Parser::parseFunction(std::vector<AnnotationUse> annotations,
   bindNumericAnnotations(decl->annotations, decl->type.get());
 
   if (match(TokKind::KwOperator)) {
-    if (check(TokKind::Identifier)) {
+    if (check(TokKind::LParen)) {
+      // Call operator: `R operator()(params)`. The parameter list follows the
+      // empty operator name, so consume the `()` here.
+      advance();
+      expect(TokKind::RParen, "')'");
+      decl->name = "operator()";
+    } else if (check(TokKind::Identifier)) {
       // Named operator, e.g. operator add.
       decl->name = "operator" + std::string(advance().text);
     } else {

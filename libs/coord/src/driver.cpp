@@ -822,8 +822,9 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
   }
 
   // Standard-library declarations are ordinary Coo sources loaded from
-  // lib/standard: annotations.coo first, then utility.coo (functional
-  // interfaces). Only the meta-annotations are special in C++.
+  // lib/standard: annotations.coo (meta-annotations and helpers), lambda.coo
+  // (callable interfaces with abstract operator()) and utility.coo (the stable
+  // utility entry point). Only the meta-annotations are special in C++.
   const auto loadStandardModule = [&](const std::string& displayName,
                                       const std::string& source) -> bool {
     if (source.empty()) {
@@ -848,8 +849,10 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
   std::string standardError;
   const std::string annotationSource =
       standardAnnotationsSource(&standardError);
+  const std::string lambdaSource = standardLambdaSource(&standardError);
   const std::string utilitySource = standardUtilitySource(&standardError);
   if (!loadStandardModule("<standard-annotations>", annotationSource) ||
+      !loadStandardModule("<standard-lambda>", lambdaSource) ||
       !loadStandardModule("<standard-utility>", utilitySource)) {
     if (standardError.empty()) {
       standardError = "cannot read the standard library";

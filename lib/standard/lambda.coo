@@ -1,0 +1,35 @@
+// Standard callable interfaces.
+//
+// A callable interface declares exactly one abstract `operator()`. Sema
+// recognizes that shape structurally (no annotation is required) and lowers a
+// reference such as `Function<integer, integer>` to the equivalent function
+// value type, so lambdas and method references target it directly. Default
+// methods may accompany the abstract `operator()`; an interface with more than
+// one abstract `operator()` is not a lambda target.
+interface Function<T, R> {
+    R operator()(T value);
+}
+
+interface Consumer<T> {
+    void operator()(T value);
+}
+
+interface Predicate<T> {
+    boolean operator()(T value);
+}
+
+interface Supplier<T> {
+    T operator()();
+}
+
+interface BiFunction<A, B, R> {
+    R operator()(A first, B second);
+}
+
+interface Action {
+    void operator()();
+}
+
+interface ElseAction {
+    void operator()();
+}

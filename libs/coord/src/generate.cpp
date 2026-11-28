@@ -7346,14 +7346,12 @@ void CppEmitter::emit() {
         emitEnum(*decl);
         break;
       case DeclKind::Interface: {
-        bool functional = false;
-        for (const AnnotationUse& use : decl->annotations) {
-          if (use.name == "FunctionalInterface") {
-            functional = true;
-            break;
-          }
-        }
-        if (!functional) {
+        // Structurally callable interfaces (exactly one abstract operator())
+        // are lowered to function value types at every use site, so they have
+        // no C++ interface of their own.
+        const bool callable = decl->resolvedType != nullptr &&
+                              decl->resolvedType->functional;
+        if (!callable) {
           emitInterface(*decl);
         }
         break;

@@ -1,5 +1,5 @@
-// A @FunctionalInterface is a function-value target in v0; classes cannot
-// implement it nominally yet.
+// A callable interface is a lambda target type in v0; classes cannot implement
+// it nominally yet.
 class Doubler implements Function<integer, integer> {
 public:
     Doubler() {}

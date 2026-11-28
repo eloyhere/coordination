@@ -4,7 +4,7 @@
 //   Meta                     compiler meta-annotations and reflection helpers
 //   Processor interfaces     Processor / AnnotationProcessor / handler markers
 //   Proxy traps              @Proxy, @Invocation and trap method annotations
-//   Value protocols          Result/Expect, numeric representation, functional
+//   Value protocols          Result/Expect, numeric representation
 //   Ownership-representation @Unique/@Share/@Weak/@Optional and @Copy
 //   Scope-capability         @Lock/@ReadOnly/@Unsafe/@Safe
 //   Native                   @Native FFI declarations
@@ -304,12 +304,6 @@ annotation Radix {}
 /// integer/float declarations to `fix` when present.
 @Target(type)
 annotation Power {}
-
-// Deprecated: functional interfaces lower to function values in v0. They are
-// retained until the Lambda module (slice 12) provides structured operator();
-// they will be deleted then.
-@Target(interface)
-annotation FunctionalInterface {}
 
 // ---------------------------------------------------------------------------
 // Ownership-representation

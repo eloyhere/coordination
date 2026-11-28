@@ -12,7 +12,13 @@ namespace coord {
     std::string* error = nullptr);
 
 /// Read the ordinary Coo source of the standard utility library
-/// (`lib/standard/utility.coo`): functional interfaces and related helpers.
+/// (`lib/standard/utility.coo`): the stable utility entry point. Callable
+/// interfaces live in `lambda.coo`.
 [[nodiscard]] std::string standardUtilitySource(std::string* error = nullptr);
+
+/// Read the ordinary Coo source of the standard callable-interface library
+/// (`lib/standard/lambda.coo`): Function, Consumer, Predicate, Supplier,
+/// BiFunction, Action and ElseAction, all declared with abstract `operator()`.
+[[nodiscard]] std::string standardLambdaSource(std::string* error = nullptr);
 
 }  // namespace coord

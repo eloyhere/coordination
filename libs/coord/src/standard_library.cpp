@@ -55,4 +55,8 @@ std::string standardUtilitySource(std::string* error) {
   return readStandardFile("utility.coo", error);
 }
 
+std::string standardLambdaSource(std::string* error) {
+  return readStandardFile("lambda.coo", error);
+}
+
 }  // namespace coord

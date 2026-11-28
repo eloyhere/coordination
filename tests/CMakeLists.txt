@@ -1294,6 +1294,14 @@ add_test(NAME coord_e2e_lambda_this
     -DEXPECT_SUBSTRING=E2087
     -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+add_test(NAME coord_e2e_lambda_interface
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda_interface.coo
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda_interface
+    -DEXPECTED=42|10|noisy
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
 add_test(NAME coord_e2e_match_patterns
   COMMAND ${CMAKE_COMMAND}
     -DCOORC=$<TARGET_FILE:coorc>
@@ -1371,7 +1379,7 @@ add_test(NAME coord_e2e_functional_interface
     -DCOORC=$<TARGET_FILE:coorc>
     -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/functional_interface.coo
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_functional_interface
-    -DEXPECTED=42|20|10|9|functional|true|false|9|5
+    -DEXPECTED=42|20|10|9|functional|true|false|9|5|action|else
     -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 
 add_test(NAME coord_e2e_functional_interface_error
@@ -1387,7 +1395,7 @@ add_test(NAME coord_e2e_functional_interface_arity_error
     -DCOORC=$<TARGET_FILE:coorc>
     -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/functional_interface_arity_error.coo
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_functional_interface_arity_error
-    -DEXPECT_SUBSTRING=E2089
+    -DEXPECT_SUBSTRING=E2097
     -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
 add_test(NAME coord_e2e_functional_interface_methods_error
@@ -1395,7 +1403,7 @@ add_test(NAME coord_e2e_functional_interface_methods_error
     -DCOORC=$<TARGET_FILE:coorc>
     -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/functional_interface_methods_error.coo
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_functional_interface_methods_error
-    -DEXPECT_SUBSTRING=E2089
+    -DEXPECT_SUBSTRING=E2079
     -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
 add_test(NAME coord_e2e_thread

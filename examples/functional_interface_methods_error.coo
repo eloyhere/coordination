@@ -1,11 +1,14 @@
-// @FunctionalInterface requires exactly one abstract method.
-@FunctionalInterface
+// A lambda target interface must declare exactly one abstract operator().
+// Overloaded abstract operator() methods cannot be inferred as a lambda
+// signature, so the assignment reports a structural error.
 interface Bad {
-    void first();
+    void operator()();
 
-    void second();
+    void operator()(integer value);
 }
 
 integer main() {
+    Bad bad = [](): void -> {};
+    bad();
     return 0;
 }

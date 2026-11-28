@@ -1692,7 +1692,7 @@ Type* Checker::resolveNamedType(TypeExpr* type, bool allowMeta) {
     return errorType_;
   }
   if (found->kind == TypeKind::Interface && found->functional) {
-    return instantiateFunctionalInterface(found, type, allowMeta);
+    return instantiateCallableInterface(found, type, allowMeta);
   }
   if (!type->args.empty()) {
     if (resolvedName == "Reflector") {      std::vector<Type*> arguments;
@@ -1715,8 +1715,8 @@ Type* Checker::resolveNamedType(TypeExpr* type, bool allowMeta) {
   return found;
 }
 
-Type* Checker::instantiateFunctionalInterface(Type* iface, TypeExpr* type,
-                                              bool allowMeta) {
+Type* Checker::instantiateCallableInterface(Type* iface, TypeExpr* type,
+                                            bool allowMeta) {
   const Decl* decl = iface->decl;
   if (decl == nullptr) {
     return errorType_;
@@ -1724,9 +1724,10 @@ Type* Checker::instantiateFunctionalInterface(Type* iface, TypeExpr* type,
   const std::size_t expected = decl->generics.size();
   if (type->args.size() != expected) {
     diagnostics_.error(
-        type->span, "E2089",
-        "functional interface '" + iface->name + "' expects " +
-            std::to_string(expected) + " type argument(s)");
+        type->span, "E2097",
+        "callable interface '" + iface->name + "' expects " +
+            std::to_string(expected) + " type argument(s), but " +
+            std::to_string(type->args.size()) + " were given");
     return errorType_;
   }
   std::vector<Type*> arguments;
@@ -1736,15 +1737,18 @@ Type* Checker::instantiateFunctionalInterface(Type* iface, TypeExpr* type,
   }
   const Decl* method = nullptr;
   for (const auto& member : decl->members) {
-    if (member->kind == DeclKind::Method && member->body == nullptr) {
+    if (member->kind == DeclKind::Method && member->body == nullptr &&
+        member->name == "operator()") {
       method = member.get();
       break;
     }
   }
   if (method == nullptr) {
-    diagnostics_.error(type->span, "E2089",
-                       "functional interface '" + iface->name +
-                           "' has no abstract method");
+    diagnostics_.error(
+        type->span, "E2079",
+        "interface '" + iface->name +
+            "' is not a lambda target: it must declare exactly one abstract "
+            "operator()");
     return errorType_;
   }
   pushTypeScope();
@@ -3574,30 +3578,25 @@ void Checker::checkInterface(Decl& decl) {
     }
   }
 
-  bool functional = false;
-  for (const AnnotationUse& use : decl.annotations) {
-    if (use.name == "FunctionalInterface") {
-      functional = true;
+  // A callable (lambda-target) interface is recognized structurally: it must
+  // declare exactly one abstract method, and that method must be operator().
+  // Default methods (with bodies) are allowed alongside it.
+  std::size_t abstractCount = 0;
+  std::size_t abstractOperators = 0;
+  const Decl* abstractMethod = nullptr;
+  for (const auto& member : decl.members) {
+    if (member->kind != DeclKind::Method || member->body != nullptr) {
+      continue;
+    }
+    ++abstractCount;
+    abstractMethod = member.get();
+    if (member->name == "operator()") {
+      ++abstractOperators;
     }
   }
-  if (functional) {
-    const Decl* abstractMethod = nullptr;
-    int abstractCount = 0;
-    for (const auto& member : decl.members) {
-      if (member->kind == DeclKind::Method && member->body == nullptr) {
-        ++abstractCount;
-        abstractMethod = member.get();
-      }
-    }
-    if (abstractCount != 1) {
-      diagnostics_.error(
-          decl.span, "E2089",
-          "@FunctionalInterface requires exactly one abstract method, but '" +
-              decl.name + "' declares " + std::to_string(abstractCount));
-    } else {
-      type->functional = true;
-      type->functionalMethod = abstractMethod->name;
-    }
+  if (abstractCount == 1 && abstractOperators == 1) {
+    type->functional = true;
+    type->functionalMethod = abstractMethod->name;
   }
 
   popTypeScope();
@@ -4831,6 +4830,52 @@ void Checker::checkLambda(Expr* expr, Type* expected) {
   if (expr == nullptr || expr->lambda == nullptr) {
     return;
   }
+  if (expected != nullptr && expected->kind == TypeKind::Error) {
+    expr->resolvedType = errorType_;
+    return;
+  }
+  if (expected != nullptr && expected->kind == TypeKind::Interface) {
+    // A non-callable interface can still be the declared target type; report a
+    // structural reason instead of the generic "needs a function target" error.
+    const Decl* decl = expected->decl;
+    std::size_t abstractCount = 0;
+    std::size_t abstractOperators = 0;
+    std::string abstractNames;
+    if (decl != nullptr) {
+      for (const auto& member : decl->members) {
+        if (member->kind != DeclKind::Method || member->body != nullptr) {
+          continue;
+        }
+        ++abstractCount;
+        if (member->name == "operator()") {
+          ++abstractOperators;
+        }
+        if (!abstractNames.empty()) {
+          abstractNames += ", ";
+        }
+        abstractNames += member->name;
+      }
+    }
+    std::string message;
+    if (abstractOperators > 1) {
+      message = "interface '" + expected->name + "' declares " +
+                std::to_string(abstractOperators) +
+                " abstract operator() overloads; a lambda target requires "
+                "exactly one abstract operator()";
+    } else if (abstractOperators == 1) {
+      message = "interface '" + expected->name + "' declares " +
+                std::to_string(abstractCount) +
+                " abstract methods (" + abstractNames +
+                "); a lambda target requires exactly one abstract operator()";
+    } else {
+      message = "interface '" + expected->name +
+                "' does not declare an abstract operator(); a lambda target "
+                "requires exactly one abstract operator()";
+    }
+    diagnostics_.error(expr->span, "E2079", message);
+    expr->resolvedType = errorType_;
+    return;
+  }
   if (expected == nullptr || expected->kind != TypeKind::Function) {
     diagnostics_.error(expr->span, "E2079",
                        "lambda requires a function target type");
@@ -5573,7 +5618,9 @@ Type* Checker::checkAssign(Expr* expr) {
     }
   }
   Type* rhs = nullptr;
-  if (lhs != nullptr && lhs->kind == TypeKind::Function &&
+  if (lhs != nullptr &&
+      (lhs->kind == TypeKind::Function || lhs->kind == TypeKind::Interface ||
+       lhs->kind == TypeKind::Error) &&
       expr->rhs != nullptr && expr->rhs->kind == ExprKind::Lambda) {
     checkLambda(expr->rhs.get(), lhs);
     rhs = lhs;
@@ -5889,7 +5936,10 @@ Type* Checker::checkCall(Expr* expr) {
       Type* argType = nullptr;
       if (expr->args[i] != nullptr &&
           expr->args[i]->kind == ExprKind::Lambda &&
-          paramType != nullptr && paramType->kind == TypeKind::Function) {
+          paramType != nullptr &&
+          (paramType->kind == TypeKind::Function ||
+           paramType->kind == TypeKind::Interface ||
+           paramType->kind == TypeKind::Error)) {
         checkLambda(expr->args[i].get(), paramType);
         argType = paramType;
       } else {
@@ -6401,7 +6451,10 @@ Type* Checker::checkCall(Expr* expr) {
       Type* argType = nullptr;
       if (expr->args[i] != nullptr &&
           expr->args[i]->kind == ExprKind::Lambda &&
-          paramType != nullptr && paramType->kind == TypeKind::Function) {
+          paramType != nullptr &&
+          (paramType->kind == TypeKind::Function ||
+           paramType->kind == TypeKind::Interface ||
+           paramType->kind == TypeKind::Error)) {
         checkLambda(expr->args[i].get(), paramType);
         argType = paramType;
       } else {
@@ -6457,33 +6510,6 @@ Type* Checker::checkCall(Expr* expr) {
 
   if (callee->kind == ExprKind::Member) {
     Type* baseType = checkExpr(callee->lhs.get());
-    if (baseType != nullptr && baseType->kind == TypeKind::Function &&
-        (callee->name == "apply" || callee->name == "accept" ||
-         callee->name == "test" || callee->name == "get" ||
-         callee->name == "run" || callee->name == "call")) {
-      const std::size_t count =
-          std::min(expr->args.size(), baseType->alternatives.size());
-      if (expr->args.size() != baseType->alternatives.size()) {
-        diagnostics_.error(
-            expr->span, "E2004",
-            "functional interface method '" + callee->name + "' takes " +
-                std::to_string(baseType->alternatives.size()) +
-                " argument(s)");
-      }
-      for (std::size_t i = 0; i < count; ++i) {
-        if (expr->args[i] != nullptr &&
-            expr->args[i]->kind == ExprKind::Lambda) {
-          checkLambda(expr->args[i].get(), baseType->alternatives[i]);
-        } else {
-          Type* argType = checkExpr(expr->args[i].get());
-          requireAssignable(argType, baseType->alternatives[i],
-                            expr->args[i]->span,
-                            "functional interface argument");
-        }
-      }
-      expr->resolvedType = baseType->returnType;
-      return baseType->returnType;
-    }
     if (callee->lhs != nullptr && callee->lhs->optionalCall) {
       Type* fieldType = callee->lhs->resolvedType;
       Type* valueType =
@@ -7692,7 +7718,9 @@ void Checker::checkStmt(Stmt* stmt) {
         initType = type;
       } else if (stmt->expr != nullptr &&
                  stmt->expr->kind == ExprKind::Lambda && type != nullptr &&
-                 type->kind == TypeKind::Function) {
+                 (type->kind == TypeKind::Function ||
+                  type->kind == TypeKind::Interface ||
+                  type->kind == TypeKind::Error)) {
         checkLambda(stmt->expr.get(), type);
         initType = type;
       } else {
@@ -8217,7 +8245,9 @@ void Checker::checkStmt(Stmt* stmt) {
           }
         }
         if (stmt->expr->kind == ExprKind::Lambda &&
-            expected->kind == TypeKind::Function) {
+            (expected->kind == TypeKind::Function ||
+             expected->kind == TypeKind::Interface ||
+             expected->kind == TypeKind::Error)) {
           checkLambda(stmt->expr.get(), expected);
           actual = expected;
         } else {

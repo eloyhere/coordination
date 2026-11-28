@@ -1,5 +1,6 @@
-// Functional interfaces lower to function values in v0; their single abstract
-// method is callable through the interface method name.
+// Callable interfaces declare one abstract operator(); Sema recognizes that
+// shape structurally, so a lambda or method reference targets the interface
+// directly and values are invoked with `name(...)`.
 class Math {
 public:
     static integer triple(integer value) {
@@ -13,25 +14,30 @@ integer applyTwice(Function<integer, integer> fn, integer value) {
 
 integer main() {
     Function<integer, integer> twice = [](integer x): integer -> x * 2;
-    print(twice.apply(21));
+    print(twice(21));
     print(applyTwice(twice, 5));
     print(applyTwice((integer x): integer -> x + 3, 4));
 
     Function<integer, integer> triple = Math::triple;
-    print(triple.apply(3));
+    print(triple(3));
 
     Consumer<string> printLine = [](string text): void -> { print(text); };
-    printLine.accept("functional");
+    printLine("functional");
 
     Predicate<integer> positive = (integer value): boolean -> value > 0;
-    print(positive.test(5));
-    print(positive.test(-1));
+    print(positive(5));
+    print(positive(-1));
 
     Supplier<integer> constant = (): integer -> 9;
-    print(constant.get());
+    print(constant());
 
     BiFunction<integer, integer, integer> add =
         (integer a, integer b): integer -> a + b;
-    print(add.apply(2, 3));
+    print(add(2, 3));
+
+    Action log = [](): void -> { print("action"); };
+    log();
+    ElseAction fallback = [](): void -> { print("else"); };
+    fallback();
     return 0;
 }
