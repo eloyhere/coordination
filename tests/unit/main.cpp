@@ -298,6 +298,63 @@ public:
   CHECK(generated.find("class Point : public Drawable") != std::string::npos);
 }
 
+void testCallableInterfaceLambdaTarget() {
+  Harness valid(R"(
+interface Mapper {
+  integer operator()(integer value);
+
+  integer twice(integer value) {
+    return value + value;
+  }
+}
+
+integer apply(Mapper mapper, integer value) {
+  return mapper(value);
+}
+
+integer main() {
+  Mapper increment = [](integer value): integer -> value + 1;
+  return apply(increment, 1);
+}
+)");
+  CHECK(!valid.diagnostics.hasErrors());
+  coord::Type* mapper = valid.checker->lookupType("Mapper");
+  CHECK(mapper != nullptr);
+  if (mapper != nullptr) {
+    CHECK(mapper->functional);
+    CHECK(mapper->functionalMethod == "operator()");
+  }
+  // Callable interfaces lower to function values; no C++ interface is emitted.
+  std::ostringstream output;
+  coord::CppEmitter emitter(*valid.module, {}, output);
+  emitter.emit();
+  CHECK(output.str().find("class Mapper") == std::string::npos);
+
+  Harness invalid(R"(
+interface Overloaded {
+  void operator()();
+  void operator()(integer value);
+}
+
+interface Mixed {
+  void operator()();
+  void other();
+}
+
+interface Empty {
+  void only();
+}
+
+integer main() {
+  Overloaded overloaded = [](): void -> {};
+  Mixed mixed = [](): void -> {};
+  Empty empty = [](): void -> {};
+  return 0;
+}
+)");
+  CHECK(invalid.countCode("E2079") == 3);
+}
+
 void testEnum() {
   Harness harness(R"(
 enumerate Color {
@@ -3784,6 +3841,7 @@ int main() {
   testCompileTimeEvaluation();
   testCodegen();
   testInterface();
+  testCallableInterfaceLambdaTarget();
   testEnum();
   testDuplicateEnumValue();
   testEnumCodegen();
