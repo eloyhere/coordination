@@ -1,0 +1,22 @@
+// A [const&x] capture can only call methods annotated @ReadOnly.
+class Box {
+public:
+    integer value;
+
+    Box() {
+        value = 0;
+    }
+
+    void touch() {
+        value = 1;
+    }
+}
+
+integer main() {
+    Mutex mutex;
+    Box box;
+    @Lock(Exclusive, mutex, [const&box]) {
+        box.touch();
+    }
+    return 0;
+}

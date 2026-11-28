@@ -1,0 +1,8 @@
+// Legacy @Lock(mutex) syntax requires migration to the capability form.
+integer main() {
+    Mutex mutex;
+    @Lock(mutex) {
+        print(1);
+    }
+    return 0;
+}

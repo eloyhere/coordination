@@ -206,8 +206,7 @@ struct ConstructureArgument {
   ExprPtr value;
 };
 
-enum class StmtKind {
-  Block,
+enum class StmtKind {  Block,
   Var,
   Expr,
   If,
@@ -221,8 +220,7 @@ enum class StmtKind {
   Destructure,
 };
 
-struct Stmt : Node {
-  StmtKind kind = StmtKind::Block;
+struct Stmt : Node {  StmtKind kind = StmtKind::Block;
   std::vector<AnnotationUse> annotations;
   BlockRetention blockRetention = BlockRetention::None;
   std::vector<StmtPtr> statements;
@@ -237,7 +235,18 @@ struct Stmt : Node {
   bool isWeak = false;
   bool isLet = false;
   bool isMatch = false;
-  bool isLockBlock = false;
+  /// `@Lock(Exclusive, mutex, [captures]) { ... }` block specification.
+  enum class LockMode { None, Exclusive };
+  enum class LockCaptureKind { Value, MutRef, ConstRef };
+  struct LockCaptureSpec {
+    Span span;
+    std::string name;
+    LockCaptureKind kind = LockCaptureKind::Value;
+  };
+  bool hasLock = false;
+  LockMode lockMode = LockMode::None;
+  ExprPtr lockMutex;
+  std::vector<LockCaptureSpec> lockCaptures;
   bool optionalDestructure = false;
   bool optionalDestructureNarrowed = false;
   ProxyPolicy proxyPolicy = ProxyPolicy::Error;

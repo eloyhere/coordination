@@ -287,3 +287,5 @@ annotation Length {}
 annotation Radix {}
 @Target(block)
 annotation Lock {}
+@Target(method)
+annotation ReadOnly {}

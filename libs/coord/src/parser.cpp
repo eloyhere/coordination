@@ -1685,17 +1685,84 @@ StmtPtr Parser::parseExprStmt() {
   return stmt;
 }
 
+StmtPtr Parser::parseLockBlock() {
+  auto spec = std::make_unique<Stmt>();
+  spec->kind = StmtKind::Block;
+  spec->span = current().span;
+  spec->hasLock = true;
+  advance();  // @
+  advance();  // Lock
+  expect(TokKind::LParen, "'(' after @Lock");
+  const bool hasMode = check(TokKind::Identifier) &&
+                       current().text == "Exclusive" &&
+                       peek(1).kind == TokKind::Comma;
+  if (hasMode) {
+    advance();  // Exclusive
+    spec->lockMode = Stmt::LockMode::Exclusive;
+    expect(TokKind::Comma, "',' after the lock mode");
+    spec->lockMutex = parseExpression();
+    if (match(TokKind::Comma)) {
+      expect(TokKind::LBracket, "'[' before @Lock captures");
+      while (!atEnd() && !check(TokKind::RBracket)) {
+        Stmt::LockCaptureSpec capture;
+        capture.span = current().span;
+        bool isConst = false;
+        if (match(TokKind::KwConst)) {
+          isConst = true;
+        }
+        const bool isRef = match(TokKind::Amp);
+        if (isConst && !isRef) {
+          error(current(), "'const' requires '&' in a @Lock capture");
+        }
+        if (!check(TokKind::Identifier)) {
+          error(current(), "expected a capture name in @Lock");
+          break;
+        }
+        capture.name = std::string(advance().text);
+        capture.kind = isConst
+                           ? Stmt::LockCaptureKind::ConstRef
+                           : (isRef ? Stmt::LockCaptureKind::MutRef
+                                    : Stmt::LockCaptureKind::Value);
+        spec->lockCaptures.push_back(std::move(capture));
+        if (!match(TokKind::Comma)) {
+          break;
+        }
+      }
+      expect(TokKind::RBracket, "']' after @Lock captures");
+    }
+  } else {
+    // Legacy `@Lock(mutex)` form; Sema reports the E2094 migration error.
+    spec->lockMutex = parseExpression();
+  }
+  expect(TokKind::RParen, "')' after @Lock arguments");
+  if (!check(TokKind::LBrace)) {
+    error(current(), "@Lock must be followed by a block");
+    return spec;
+  }
+  StmtPtr block = parseBlock();
+  block->hasLock = true;
+  block->lockMode = spec->lockMode;
+  block->lockMutex = std::move(spec->lockMutex);
+  block->lockCaptures = std::move(spec->lockCaptures);
+  block->span = spec->span;
+  return block;
+}
+
 StmtPtr Parser::parseStatement() {
   if (check(TokKind::At) && peek(1).kind == TokKind::Identifier &&
-      (peek(1).text == "Retention" || peek(1).text == "Lock")) {
+      peek(1).text == "Retention") {
     std::vector<AnnotationUse> annotations = parseAnnotations();
     if (check(TokKind::LBrace)) {
       StmtPtr block = parseBlock();
       block->annotations = std::move(annotations);
       return block;
     }
-    error(current(), "a statement annotation must be followed by a block");
+    error(current(), "@Retention must be followed by a block");
     return nullptr;
+  }
+  if (check(TokKind::At) && peek(1).kind == TokKind::Identifier &&
+      peek(1).text == "Lock") {
+    return parseLockBlock();
   }
   if (check(TokKind::LBrace)) {
     if (looksLikeDestructure()) {

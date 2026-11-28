@@ -1,0 +1,39 @@
+// @Lock capture capabilities: [&x] mutable borrow, [const&x] read-only
+// borrow, [x] value copy. Objects outside the capture list cannot be written.
+class Counter {
+public:
+    integer value;
+
+    Counter() {
+        value = 0;
+    }
+
+    void add(integer amount) {
+        value = value + amount;
+    }
+
+    @ReadOnly
+    integer read() {
+        return value;
+    }
+}
+
+integer main() {
+    Mutex mutex;
+    Counter mutableCounter;
+    Counter readableCounter;
+    integer snapshot = 5;
+
+    @Lock(Exclusive, mutex, [&mutableCounter, const&readableCounter, snapshot]) {
+        mutableCounter.add(2);
+        print(readableCounter.read());
+        snapshot = snapshot + 1;
+        integer local = 3;
+        local = local + snapshot;
+        print(local);
+    }
+
+    print(mutableCounter.value);
+    print(snapshot);
+    return 0;
+}

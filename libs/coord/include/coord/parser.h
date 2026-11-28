@@ -60,6 +60,7 @@ private:
   StmtPtr parseWhile();
   StmtPtr parseSwitch(bool isMatch = false);
   StmtPtr parseMatch();
+  StmtPtr parseLockBlock();
   PatternPtr parsePattern();
   PatternPtr parsePatternPrimary();
   StmtPtr parseMatchBody();

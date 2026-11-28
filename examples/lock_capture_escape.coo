@@ -1,0 +1,14 @@
+// A @Lock capture is scope-bound and cannot escape the block.
+integer take() {
+    Mutex mutex;
+    integer value = 3;
+    @Lock(Exclusive, mutex, [&value]) {
+        return value;
+    }
+    return 0;
+}
+
+integer main() {
+    print(take());
+    return 0;
+}

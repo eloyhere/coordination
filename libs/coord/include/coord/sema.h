@@ -307,6 +307,24 @@ private:
   void checkBlock(Stmt* block);
   void checkDestroy(Stmt* stmt);
 
+  /// @Lock write-set bookkeeping for the block currently being checked.
+  struct LockCaptureInfo {
+    Stmt::LockCaptureKind kind = Stmt::LockCaptureKind::Value;
+    std::size_t scopeDepth = 0;
+  };
+  struct LockBlockContext {
+    std::size_t blockDepth = 0;
+    std::unordered_map<std::string, LockCaptureInfo> captures;
+  };
+  std::vector<LockBlockContext> lockBlocks_;
+  void validateLockBlock(Stmt* stmt);
+  void checkLockWrite(Expr* target, Span span);
+  void checkLockCall(const Expr* base, const MethodInfo* method, Span span);
+  [[nodiscard]] bool lockCaptureRoot(const Expr* expr, std::string& name,
+                                     bool& isThis) const;
+  [[nodiscard]] const LockCaptureInfo* findLockCapture(
+      const std::string& name) const;
+
   /// Exhaustiveness bookkeeping for one match statement.
   struct MatchCoverage {
     std::set<std::string> variants;

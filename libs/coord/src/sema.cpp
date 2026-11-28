@@ -3043,6 +3043,12 @@ void Checker::resolveLambdaCaptures(Expr* expr) {
 void Checker::recordCaptureUse(const Expr* expr, const std::string& name,
                                const Variable& variable,
                                std::size_t scopeIndex) {
+  if (!lambdaContexts_.empty() && findLockCapture(name) != nullptr) {
+    diagnostics_.error(
+        expr->span, "E2039",
+        "@Lock capture '" + name +
+            "' cannot be captured by a nested closure; it is scope-bound");
+  }
   for (auto it = lambdaContexts_.rbegin(); it != lambdaContexts_.rend(); ++it) {
     if (scopeIndex >= it->scopeBoundary) {
       break;
@@ -3511,6 +3517,7 @@ Type* Checker::checkExpr(Expr* expr) {
     case ExprKind::Inc: {
       Type* target = checkExpr(expr->lhs.get());
       checkCaptureMutation(expr->lhs.get(), expr->span);
+      checkLockWrite(expr->lhs.get(), expr->span);
       if (target != nullptr && !target->isInteger()) {
         diagnostics_.error(expr->span, "E2005",
                            "operator '++' requires an integer lvalue");
@@ -3649,6 +3656,17 @@ Type* Checker::checkBinary(Expr* expr) {
 Type* Checker::checkAssign(Expr* expr) {
   Type* lhs = checkExpr(expr->lhs.get());
   checkCaptureMutation(expr->lhs.get(), expr->span);
+  checkLockWrite(expr->lhs.get(), expr->span);
+  if (expr->rhs != nullptr && expr->rhs->kind == ExprKind::Name &&
+      expr->lhs != nullptr &&
+      (expr->lhs->kind == ExprKind::Member ||
+       expr->lhs->kind == ExprKind::Index) &&
+      findLockCapture(expr->rhs->name) != nullptr) {
+    diagnostics_.error(
+        expr->span, "E2039",
+        "@Lock capture '" + expr->rhs->name +
+            "' cannot be stored in a field or container; it is scope-bound");
+  }
   if (lhs != nullptr && (lhs->kind == TypeKind::Thread ||
                           lhs->kind == TypeKind::ScopedThread)) {
     diagnostics_.error(expr->span, "E2090",
@@ -5060,6 +5078,7 @@ Type* Checker::checkCall(Expr* expr) {
                              std::string(accessName(method->access)) +
                              " method '" + method->name + "'");
     }
+    checkLockCall(callee->lhs.get(), method, expr->span);
     expr->resolvedType = method->returnType;
     return method->returnType;
   }
@@ -5147,6 +5166,174 @@ Type* Checker::checkMember(Expr* expr) {
   return errorType_;
 }
 
+bool Checker::lockCaptureRoot(const Expr* expr, std::string& name,
+                              bool& isThis) const {
+  if (expr == nullptr) {
+    return false;
+  }
+  if (expr->kind == ExprKind::Name) {
+    name = expr->name;
+    return true;
+  }
+  if (expr->kind == ExprKind::This) {
+    isThis = true;
+    return true;
+  }
+  if (expr->kind == ExprKind::Member || expr->kind == ExprKind::Index) {
+    return lockCaptureRoot(expr->lhs.get(), name, isThis);
+  }
+  return false;
+}
+
+const Checker::LockCaptureInfo* Checker::findLockCapture(
+    const std::string& name) const {
+  for (auto it = lockBlocks_.rbegin(); it != lockBlocks_.rend(); ++it) {
+    const auto found = it->captures.find(name);
+    if (found != it->captures.end()) {
+      return &found->second;
+    }
+  }
+  return nullptr;
+}
+
+void Checker::validateLockBlock(Stmt* stmt) {
+  if (stmt->lockMode != Stmt::LockMode::Exclusive) {
+    diagnostics_.error(
+        stmt->span, "E2094",
+        "legacy @Lock form; migrate to "
+        "@Lock(Exclusive, mutex, [captures])");
+    return;
+  }
+  if (stmt->lockMutex == nullptr) {
+    diagnostics_.error(stmt->span, "E2094",
+                       "@Lock(Exclusive, ...) requires a Mutex value");
+    return;
+  }
+  Type* mutex = checkExpr(stmt->lockMutex.get());
+  if (mutex == nullptr || mutex->kind != TypeKind::Mutex) {
+    diagnostics_.error(stmt->lockMutex->span, "E2094",
+                       "@Lock requires a Mutex value");
+  } else if (stmt->lockMutex->kind != ExprKind::Name &&
+             stmt->lockMutex->kind != ExprKind::Member) {
+    diagnostics_.error(stmt->lockMutex->span, "E2094",
+                       "@Lock requires a named Mutex lvalue");
+  }
+  LockBlockContext context;
+  context.blockDepth = scopes_.size();
+  std::set<std::string> seen;
+  for (const Stmt::LockCaptureSpec& capture : stmt->lockCaptures) {
+    if (!seen.insert(capture.name).second) {
+      diagnostics_.error(capture.span, "E2094",
+                         "duplicate @Lock capture '" + capture.name + "'");
+      continue;
+    }
+    std::size_t scopeIndex = 0;
+    Variable* variable = lookupVariable(capture.name, &scopeIndex);
+    if (variable == nullptr) {
+      diagnostics_.error(capture.span, "E2094",
+                         "cannot capture unknown identifier '" +
+                             capture.name + "'");
+      continue;
+    }
+    if (capture.kind == Stmt::LockCaptureKind::Value) {
+      Type* type = variable->type;
+      const bool valueType =
+          type != nullptr &&
+          (type->kind == TypeKind::Int || type->kind == TypeKind::Decimal ||
+           type->kind == TypeKind::Float || type->kind == TypeKind::Bool ||
+           type->kind == TypeKind::Char || type->kind == TypeKind::String ||
+           type->kind == TypeKind::Enum);
+      if (!valueType) {
+        diagnostics_.error(
+            capture.span, "E2094",
+            "value capture of class/container/pointer '" + capture.name +
+                "' is rejected in v0 (shallow copies share @Share/pointer "
+                "fields); use [&name] or [const&name]");
+        continue;
+      }
+    }
+    context.captures[capture.name] =
+        LockCaptureInfo{capture.kind,
+                        static_cast<std::size_t>(variable->scopeDepth)};
+  }
+  lockBlocks_.push_back(std::move(context));
+}
+
+void Checker::checkLockWrite(Expr* target, Span span) {
+  if (lockBlocks_.empty() || target == nullptr) {
+    return;
+  }
+  std::string name;
+  bool isThis = false;
+  if (!lockCaptureRoot(target, name, isThis) || isThis) {
+    return;
+  }
+  std::size_t scopeIndex = 0;
+  if (lookupVariable(name, &scopeIndex) == nullptr) {
+    return;
+  }
+  const LockBlockContext& context = lockBlocks_.back();
+  if (scopeIndex >= context.blockDepth) {
+    return;
+  }
+  const auto found = context.captures.find(name);
+  if (found == context.captures.end()) {
+    diagnostics_.error(
+        span, "E2094",
+        "object '" + name +
+            "' is not in the @Lock capture list and cannot be modified");
+    return;
+  }
+  if (found->second.kind == Stmt::LockCaptureKind::ConstRef) {
+    diagnostics_.error(span, "E2094",
+                       "const& capture '" + name +
+                           "' is read-only and cannot be modified");
+  }
+}
+
+void Checker::checkLockCall(const Expr* base, const MethodInfo* method,
+                            Span span) {
+  if (lockBlocks_.empty() || base == nullptr) {
+    return;
+  }
+  std::string name;
+  bool isThis = false;
+  if (!lockCaptureRoot(base, name, isThis) || isThis) {
+    return;
+  }
+  std::size_t scopeIndex = 0;
+  if (lookupVariable(name, &scopeIndex) == nullptr) {
+    return;
+  }
+  const LockBlockContext& context = lockBlocks_.back();
+  if (scopeIndex >= context.blockDepth) {
+    return;
+  }
+  const auto found = context.captures.find(name);
+  if (found == context.captures.end()) {
+    return;
+  }
+  if (found->second.kind != Stmt::LockCaptureKind::ConstRef) {
+    return;
+  }
+  bool readOnly = false;
+  if (method != nullptr && method->decl != nullptr) {
+    for (const AnnotationUse& use : method->decl->annotations) {
+      if (use.name == "ReadOnly") {
+        readOnly = true;
+        break;
+      }
+    }
+  }
+  if (!readOnly) {
+    diagnostics_.error(
+        span, "E2094",
+        "const& capture '" + name +
+            "' can only call @ReadOnly methods; annotate the method or use "
+            "[&" + name + "]");
+  }
+}
+
 void Checker::checkStmt(Stmt* stmt) {
   if (stmt == nullptr) {
     return;
@@ -5176,31 +5363,13 @@ void Checker::checkStmt(Stmt* stmt) {
                              "Runtime");
         }
       }
-      for (const AnnotationUse& use : stmt->annotations) {
-        if (use.name != "Lock") {
-          continue;
-        }
-        if (use.args.size() != 1 || use.args[0] == nullptr) {
-          diagnostics_.error(use.span, "E2093",
-                             "@Lock requires exactly one Mutex argument");
-          continue;
-        }
-        Expr* lockTarget = use.args[0].get();
-        Type* lockType = checkExpr(lockTarget);
-        if (lockType == nullptr || lockType->kind != TypeKind::Mutex) {
-          diagnostics_.error(lockTarget->span, "E2093",
-                             "@Lock requires a Mutex value");
-          continue;
-        }
-        if (lockTarget->kind != ExprKind::Name &&
-            lockTarget->kind != ExprKind::Member) {
-          diagnostics_.error(lockTarget->span, "E2093",
-                             "@Lock requires a named Mutex lvalue");
-          continue;
-        }
-        stmt->isLockBlock = true;
+      if (stmt->hasLock) {
+        validateLockBlock(stmt);
       }
       checkBlock(stmt);
+      if (stmt->hasLock && !lockBlocks_.empty()) {
+        lockBlocks_.pop_back();
+      }
       return;
     }
     case StmtKind::Var: {
@@ -6013,6 +6182,13 @@ void Checker::checkStmt(Stmt* stmt) {
           currentReturnType_ != nullptr ? currentReturnType_ : voidType_;
       if (stmt->expr) {
         Type* actual = nullptr;
+        if (stmt->expr->kind == ExprKind::Name &&
+            findLockCapture(stmt->expr->name) != nullptr) {
+          diagnostics_.error(
+              stmt->span, "E2039",
+              "@Lock capture '" + stmt->expr->name +
+                  "' cannot be returned; it is scope-bound");
+        }
         if (stmt->expr->kind == ExprKind::Lambda &&
             expected->kind == TypeKind::Function) {
           checkLambda(stmt->expr.get(), expected);

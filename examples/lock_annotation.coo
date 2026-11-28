@@ -1,4 +1,4 @@
-// @Lock(mutex) { ... } is a block-scoped RAII lock: entering the block locks,
+// @Lock(Exclusive, mutex) { ... } is a block-scoped RAII lock: entering the block locks,
 // leaving it (including return/break) unlocks.
 class Counter {
 public:
@@ -10,13 +10,13 @@ public:
     }
 
     void add(integer amount) {
-        @Lock(mutex) {
+        @Lock(Exclusive, mutex) {
             value = value + amount;
         }
     }
 
     integer get() {
-        @Lock(mutex) {
+        @Lock(Exclusive, mutex) {
             return value;
         }
     }

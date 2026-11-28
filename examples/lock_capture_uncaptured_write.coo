@@ -1,0 +1,10 @@
+// Writing an object that is not in the @Lock capture list is rejected.
+integer main() {
+    Mutex mutex;
+    integer value = 0;
+    @Lock(Exclusive, mutex) {
+        value = 1;
+    }
+    print(value);
+    return 0;
+}

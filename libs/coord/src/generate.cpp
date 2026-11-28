@@ -2389,6 +2389,16 @@ void CppEmitter::emitMatchBranches(const Stmt* stmt, std::size_t index,
   }
 }
 
+void CppEmitter::emitLockGuard(const Expr* expr) {
+  if (expr == nullptr) {
+    return;
+  }
+  indent();
+  out_ << "std::lock_guard<std::mutex> __lock_" << tempCounter_++ << '(';
+  emitExpr(expr);
+  out_ << ");\n";
+}
+
 void CppEmitter::emitMatch(const Stmt* stmt) {
   const std::string value = "__match" + std::to_string(tempCounter_++);
   indent();
@@ -2409,31 +2419,45 @@ void CppEmitter::emitStmt(const Stmt* stmt) {
     return;
   }
   switch (stmt->kind) {
-    case StmtKind::Block:
+    case StmtKind::Block: {
       if (stmt->blockRetention == BlockRetention::Compile) {
         line("// @Retention(Compile) block executed by the compiler");
         return;
       }
       line("{");
       ++depth_;
-      if (stmt->isLockBlock) {
-        for (const AnnotationUse& use : stmt->annotations) {
-          if (use.name != "Lock" || use.args.empty() ||
-              use.args[0] == nullptr) {
-            continue;
-          }
-          indent();
-          out_ << "std::lock_guard<std::mutex> __lock_"
-               << tempCounter_++ << '(';
-          emitExpr(use.args[0].get());
-          out_ << ");\n";
-          break;
+      if (stmt->hasLock &&
+          stmt->lockMode == Stmt::LockMode::Exclusive) {
+        emitLockGuard(stmt->lockMutex.get());
+      }
+      std::vector<std::pair<std::string, std::string>> savedCaptures;
+      for (const Stmt::LockCaptureSpec& capture : stmt->lockCaptures) {
+        if (capture.kind != Stmt::LockCaptureKind::Value) {
+          continue;
         }
+        const std::string alias =
+            "__lockcap" + std::to_string(tempCounter_++) + "_" +
+            sanitize(capture.name);
+        indent();
+        out_ << "auto " << alias << " = " << sanitize(capture.name) << ";\n";
+        const auto existing = valueCaptures_.find(capture.name);
+        savedCaptures.emplace_back(
+            capture.name,
+            existing == valueCaptures_.end() ? std::string() : existing->second);
+        valueCaptures_[capture.name] = alias;
       }
       emitBlock(stmt);
+      for (const auto& entry : savedCaptures) {
+        if (entry.second.empty()) {
+          valueCaptures_.erase(entry.first);
+        } else {
+          valueCaptures_[entry.first] = entry.second;
+        }
+      }
       --depth_;
       line("}");
       return;
+    }
     case StmtKind::Var: {
       if (stmt->constructureInit && stmt->constructureCtor != nullptr) {
         const Decl* owner =
@@ -3015,6 +3039,11 @@ void CppEmitter::emitExpr(const Expr* expr) {
       out_ << "std::string(\"" << escapeString(expr->stringValue) << "\")";
       return;
     case ExprKind::Name: {
+      const auto captured = valueCaptures_.find(expr->name);
+      if (captured != valueCaptures_.end() && !expr->optionalAccess) {
+        out_ << captured->second;
+        return;
+      }
       if (expr->optionalAccess) {
         const std::string name = sanitize(expr->name);
         if (expr->proxyPolicy == ProxyPolicy::Abort) {

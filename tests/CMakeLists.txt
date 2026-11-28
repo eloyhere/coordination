@@ -1230,7 +1230,63 @@ if(MSVC)
       -DCOORC=$<TARGET_FILE:coorc>
       -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_annotation_error.coo
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_annotation_error
-      -DEXPECT_SUBSTRING=E2093
+      -DEXPECT_SUBSTRING=E2094
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_capture
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture
+      -DEXPECTED=0|9|2|5
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_uncaptured_write
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_uncaptured_write.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_uncaptured_write
+      -DEXPECT_SUBSTRING=E2094
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_const_write
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_const_write.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_const_write
+      -DEXPECT_SUBSTRING=E2094
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_readonly_method
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_readonly_method.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_readonly_method
+      -DEXPECT_SUBSTRING=E2094
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_value_class
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_value_class.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_value_class
+      -DEXPECT_SUBSTRING=E2094
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_escape
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_escape.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_escape
+      -DEXPECT_SUBSTRING=E2039
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_legacy_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_legacy_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_legacy_error
+      -DEXPECT_SUBSTRING=E2094
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
   add_test(NAME coord_e2e_scoped_thread

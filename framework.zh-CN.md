@@ -540,11 +540,18 @@ public:
 
 - **`ScopedLock`**：内建 RAII 类型，降为 `std::lock_guard<std::mutex>`，由具名 `Mutex` 左值构造：`ScopedLock guard = ScopedLock(mutex);`。进入声明时加锁，离开作用域（含 `return`/`break`/`continue`）自动解锁。不可拷贝/赋值（`E2092`），必须就地初始化，且仅支持局部变量（字段/参数/返回位置拒绝）。
 - **`Atomic`**：内建 `std::atomic<std::int64_t>`，由 `integer` 初值构造：`Atomic count = Atomic(0);`。支持 `load()` 返回 `integer`、`store(integer)`、`fetchAdd(integer)`/`fetchSub(integer)`（返回操作前的值）、`exchange(integer)`（返回旧值）与 `compareExchange(expected, desired)` 返回 `boolean`（值等于 `expected` 并被替换为 `desired` 时为 true；`expected` 按值传入且不会被更新）。所有操作固定 **seq_cst**，没有内存序参数。`Atomic` 不可拷贝（`E2092`），可作局部变量或类字段；参数/返回位置 ⏳。没有泛型 `Atomic<T>`、没有浮点/指针原子、没有 `condition_variable`。
-- **`@Lock(mutex) { ... }`**：块注解。参数必须恰好是一个具名 `Mutex` 左值（`Name` 或 `Member`，不能是临时值/拷贝）；参数数量或类型错误报 `E2093`。降为 `{ std::lock_guard<std::mutex> __lock_N(mutex); ... }`，因此正常/`return`/`break`/`continue` 退出都会解锁。`@Lock` 只能标注语句块，其它声明位置由 `@Target(block)` 拒绝。没有超时、try-lock 或重入检查：同一线程对同一 mutex 嵌套加锁会死锁（`std::mutex` 下为未定义）。
+- **`@Lock(Exclusive, mutex, [captures]) { ... }`**：带捕获能力列表的块注解。第一个参数是字面量模式 `Exclusive`（其它模式 ⏳），第二个是具名 `Mutex` 左值（`Name`/`Member`），可选的第三个是捕获列表。捕获是**能力声明**而非引用：
+  - `[x]` 复制值，只允许 primitive/string/enumerate；class/container/pointer 的值捕获报 `E2094`（浅拷贝会共享 `@Share`/指针字段，且暂无 `@Copy`）。对 `[x]` 的写入只改块内副本。
+  - `[&x]` 可变借用：允许字段/下标写入与修改方法调用。
+  - `[const&x]` 只读借用：写报 `E2094`；只能调用标了 `@ReadOnly` 的方法，未标注/修改方法在 `const&` 下报 `E2094`。只分析直接调用（无别名分析），经由其它表达式到达的方法不检查。
+  - 未捕获的外层对象被写报 `E2094`；块内新声明的局部变量可正常写。
+  - 捕获受作用域限制：返回、存入字段/容器、被嵌套闭包捕获均报 `E2039`。
+  - 旧 `@Lock(mutex)` 语法报 `E2094`，需迁移到 `@Lock(Exclusive, mutex, [captures])`。
+  - 降为 `{ std::lock_guard<std::mutex> __lock_N(mutex); <值捕获副本>; ... }`，任意退出路径都会解锁。`@Lock` 只允许语句块（`@Target(block)`）。没有超时、try-lock、重入或嵌套锁检测：同一 mutex 嵌套加锁会死锁。写集检查刻意保守，不证明无数据竞争。
 
 ```coo
 void add(integer amount) {
-    @Lock(mutex) {
+    @Lock(Exclusive, mutex, [&value]) {
         value = value + amount;
     }
 }
@@ -1239,7 +1246,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **164 项**：`coord_unit` 加 163 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`，以及函数值切片 `coord_e2e_method_ref`、`coord_e2e_method_ref_escape`、`coord_e2e_method_ref_unbound`，以及函数式接口切片 `coord_e2e_functional_interface`、`coord_e2e_functional_interface_error`、`coord_e2e_functional_interface_arity_error`、`coord_e2e_functional_interface_methods_error`，以及线程切片 `coord_e2e_thread`、`coord_e2e_thread_capture_error`、`coord_e2e_thread_this_error`、`coord_e2e_thread_copy_error`，以及 Mutex 切片 `coord_e2e_mutex`、`coord_e2e_mutex_copy_error`、`coord_e2e_mutex_assign_error`，以及 ScopedLock/Atomic/@Lock 切片 `coord_e2e_atomic`、`coord_e2e_scopedlock_copy_error`、`coord_e2e_atomic_copy_error`、`coord_e2e_atomic_assign_error`、`coord_e2e_lock_annotation`、`coord_e2e_lock_annotation_error`，以及 ScopedThread/Atomic-ops 切片 `coord_e2e_scoped_thread`、`coord_e2e_atomic_ops`、`coord_e2e_scopedthread_copy_error`、`coord_e2e_scopedthread_assign_error`、`coord_e2e_scopedthread_capture_error`、`coord_e2e_scopedthread_this_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 当前注册 **171 项**：`coord_unit` 加 170 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`，以及函数值切片 `coord_e2e_method_ref`、`coord_e2e_method_ref_escape`、`coord_e2e_method_ref_unbound`，以及函数式接口切片 `coord_e2e_functional_interface`、`coord_e2e_functional_interface_error`、`coord_e2e_functional_interface_arity_error`、`coord_e2e_functional_interface_methods_error`，以及线程切片 `coord_e2e_thread`、`coord_e2e_thread_capture_error`、`coord_e2e_thread_this_error`、`coord_e2e_thread_copy_error`，以及 Mutex 切片 `coord_e2e_mutex`、`coord_e2e_mutex_copy_error`、`coord_e2e_mutex_assign_error`，以及 ScopedLock/Atomic/@Lock 切片 `coord_e2e_atomic`、`coord_e2e_scopedlock_copy_error`、`coord_e2e_atomic_copy_error`、`coord_e2e_atomic_assign_error`、`coord_e2e_lock_annotation`、`coord_e2e_lock_annotation_error`，以及 ScopedThread/Atomic-ops 切片 `coord_e2e_scoped_thread`、`coord_e2e_atomic_ops`、`coord_e2e_scopedthread_copy_error`、`coord_e2e_scopedthread_assign_error`、`coord_e2e_scopedthread_capture_error`、`coord_e2e_scopedthread_this_error`，以及 @Lock 能力切片 `coord_e2e_lock_capture`、`coord_e2e_lock_capture_uncaptured_write`、`coord_e2e_lock_capture_const_write`、`coord_e2e_lock_capture_readonly_method`、`coord_e2e_lock_capture_value_class`、`coord_e2e_lock_capture_escape`、`coord_e2e_lock_legacy_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1984,7 +1991,7 @@ coorc config list|get|set
 | `E2090` | Thread/ScopedThread 规则：入口调用/签名错误、按引用或捕获 `this`、调用期借用的函数值、拷贝/赋值线程值、`hardwareConcurrency()` 带参数 |
 | `E2091` | `Mutex` 值不能拷贝或赋值 |
 | `E2092` | `ScopedLock`/`Atomic` 值不能拷贝或赋值，或 `ScopedLock` 未用 `ScopedLock(mutex)` 就地初始化 |
-| `E2093` | `@Lock` 需要恰好一个具名 `Mutex` 左值参数 |
+| `E2094` | `@Lock` 能力错误：旧语法、非 Mutex/非具名 mutex 参数、写未捕获或 `const&` 对象、经 `const&` 调用非 `@ReadOnly` 方法、class/container/pointer 的值捕获 |
 | `E2080`–`E2086` | 规划中的 Scope 专用诊断（不可见、同域冲突、歧义、声明点前使用、import 冲突、私有访问、初始化环） |
 | `E3001` | 编译期求值错误（fuel 耗尽、递归超限、除零等） |
 
@@ -2052,7 +2059,7 @@ coorc config list|get|set
 | ASan/UBSan + 解析器/编译器 fuzz | ✅ | `COORD_SANITIZE`、`COORD_FUZZ`、`linux-sanitize`；解析器 + 编译器 harness；诊断上限 256 |
 | 交叉编译 `--target`/`--sysroot` | 🚧 | 设计锁定，正在实现 |
 | workspace / feature / 签名 / git 依赖 | ⏳ | workspace `members` 只解析 |
-| Thread 模型 | 🚧 | 内建 move-only `Thread`，由 `() -> void` 构造，支持 `join()`/`detach()`/`joinable()`/`hardwareConcurrency()`，跨线程捕获检查 `E2090`；内建不可拷贝 `Mutex`，手动 `lock()`/`unlock()`/`tryLock()`（`E2091`、`coord_e2e_mutex`）、RAII `ScopedLock`（`E2092`）、`ScopedThread`/`std::jthread` 自动 join（`coord_e2e_scoped_thread`）、seq_cst `Atomic` 的 `load`/`store`/`fetchAdd`/`fetchSub`/`exchange`/`compareExchange`（`coord_e2e_atomic`、`coord_e2e_atomic_ops`）与 `@Lock(mutex) { ... }` 块注解（`E2093`、`coord_e2e_lock_annotation`）；数据竞争安全、其它类型 atomic、condition variable、scoped thread 与非局部位置 ⏳ |
+| Thread 模型 | 🚧 | 内建 move-only `Thread`，由 `() -> void` 构造，支持 `join()`/`detach()`/`joinable()`/`hardwareConcurrency()`，跨线程捕获检查 `E2090`；内建不可拷贝 `Mutex`，手动 `lock()`/`unlock()`/`tryLock()`（`E2091`、`coord_e2e_mutex`）、RAII `ScopedLock`（`E2092`）、`ScopedThread`/`std::jthread` 自动 join（`coord_e2e_scoped_thread`）、seq_cst `Atomic` 的 `load`/`store`/`fetchAdd`/`fetchSub`/`exchange`/`compareExchange`（`coord_e2e_atomic`、`coord_e2e_atomic_ops`）与 `@Lock(Exclusive, mutex, [captures])` 块注解（值/可变/只读捕获、`@ReadOnly` 方法效果与写集检查，`E2094`、`coord_e2e_lock_capture`）；数据竞争安全、其它类型 atomic、condition variable、scoped thread 与非局部位置 ⏳ |
 | lambda / `if` 表达式 / 完整模式匹配 | 🚧 | lambda 子集：函数类型目标、表达式/块体、隐式/显式捕获（`E2087` 捕获校验、`E2088` 按值只读）、按引用逃逸检查（`E2039`）、赋值/实参/返回、静态/绑定方法引用与链式调用；`@FunctionalInterface` 目标降为函数值并做泛型替换（`E2089`，`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction`，测试 `coord_e2e_functional_interface*`）；具名函数式接口值/类实现、未绑定实例引用、函数指针 thunk、跨线程逃逸 ⏳；测试 `coord_e2e_lambda*`、`coord_e2e_method_ref*`。`if` 表达式（表达式分支）已可用（`coord_e2e_if_expression`；块分支 ⏳）。`match` 支持常量/`|`/范围/绑定/guard 与枚举、布尔、标量穷尽性（`coord_e2e_match_patterns`，负例 `_missing`/`_no_wildcard`/`_bad_pattern`）；类型模式与类解构 ⏳ |
 | `@Native` / FFI | 🚧 | 无函数体的原始类型/string 函数通过生成包装调用 C 符号；`coord_e2e_native_ffi`、`coord_e2e_native_ffi_string`；class/指针/header/library ⏳ |
 | `@Copy` / `@Wrap` / `@FunctionalInterface` 语义 | ⏳ | 注解已声明 |
@@ -2067,9 +2074,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器、lambda 闭包切片、match/if 表达式切片、方法引用切片、函数式接口切片与线程、Mutex、ScopedLock/Atomic/@Lock 与 ScopedThread/Atomic-ops 切片落地后的 164 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器、lambda 闭包切片、match/if 表达式切片、方法引用切片、函数式接口切片与线程、Mutex、ScopedLock/Atomic/@Lock 与 ScopedThread/Atomic-ops 切片落地后的 171 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-28）**：`ctest` 注册 **164 项**，Windows 全套 **164/164 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
+**基线（2026-11-28）**：`ctest` 注册 **171 项**，Windows 全套 **171/171 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
 
 **最终验收**：
 

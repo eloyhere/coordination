@@ -51,6 +51,7 @@ private:
   void emitStmt(const Stmt* stmt);
   void emitBlock(const Stmt* block);
   void emitMatch(const Stmt* stmt);
+  void emitLockGuard(const Expr* expr);
   void emitMatchBranches(const Stmt* stmt, std::size_t index,
                          const std::string& value);
   void emitPatternCondition(const Pattern* pattern, const std::string& value);
@@ -97,6 +98,9 @@ private:
   const Decl* currentCallable_ = nullptr;
   int refTemps_ = 0;
   std::map<std::string, int> smartLocals_;
+  /// `@Lock` value captures are lowered to copied locals; body references are
+  /// rewritten to the copy so mutations cannot affect the original.
+  std::map<std::string, std::string> valueCaptures_;
   std::vector<descriptor::Declaration> descriptors_;
   std::string currentBase_;
   std::string currentReturnType_;

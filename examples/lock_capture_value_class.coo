@@ -1,0 +1,19 @@
+// Value captures of class types are rejected: shallow copies would share
+// @Share/pointer fields.
+class Box {
+public:
+    integer value;
+
+    Box() {
+        value = 0;
+    }
+}
+
+integer main() {
+    Mutex mutex;
+    Box box;
+    @Lock(Exclusive, mutex, [box]) {
+        print(box.value);
+    }
+    return 0;
+}
