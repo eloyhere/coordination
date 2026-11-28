@@ -1610,11 +1610,35 @@ integer main() {
 
   Harness fixLength(R"(
 integer main() {
-  @Length(128) @Power(2) fix narrow = 1.5;
+  @Length(128) @Power(2) fix wide = 1.5;
+  print(wide);
   return 0;
 }
 )");
-  CHECK(fixLength.countCode("E2102") >= 1);
+  CHECK(!fixLength.diagnostics.hasErrors());
+  std::ostringstream fixLengthOutput;
+  coord::CppEmitter fixLengthEmitter(*fixLength.module, {}, fixLengthOutput);
+  fixLengthEmitter.emit();
+  CHECK(fixLengthOutput.str().find("coord_rt::Fix<2, 10, 128> wide") !=
+        std::string::npos);
+
+  Harness scaleOverflow(R"(
+integer main() {
+  @Power(20) fix tooFine = 1.5;
+  return 0;
+}
+)");
+  CHECK(scaleOverflow.countCode("E2102") >= 1);
+
+  Harness sameTypeCopy(R"(
+integer main() {
+  @Power(2) fix source = 1.5;
+  @Power(2) fix copy = source;
+  print(copy);
+  return 0;
+}
+)");
+  CHECK(!sameTypeCopy.diagnostics.hasErrors());
 
   Harness missingPower(R"(
 integer main() {

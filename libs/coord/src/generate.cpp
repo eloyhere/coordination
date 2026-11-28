@@ -85,8 +85,15 @@ std::string formatCppInteger(std::int64_t value, int radix) {
   return result;
 }
 
-std::string escapeString(const std::string& text) {
-  std::string result;
+/// 64-bit hex literal for a @Length(128) fix raw limb.
+std::string formatCppHex64(std::uint64_t value) {
+  std::ostringstream stream;
+  stream << "0x" << std::hex << std::uppercase << std::setw(16)
+         << std::setfill('0') << value << "ULL";
+  return stream.str();
+}
+
+std::string escapeString(const std::string& text) {  std::string result;
   for (const char c : text) {
     switch (c) {
       case '\\':
@@ -1125,12 +1132,17 @@ constexpr int fixNextLength(int bits) {
   if (bits <= 8) return 8;
   if (bits <= 16) return 16;
   if (bits <= 32) return 32;
-  return 64;
+  if (bits <= 64) return 64;
+  return 128;
 }
 constexpr int fixAddLength(int left, int right) {
+  // Widths below 128 keep their historical result width; only a 128-bit
+  // operand widens the result to 128.
+  if (left > 64 || right > 64) return 128;
   return fixNextLength(static_cast<int>(fixMax(left, right)) + 1);
 }
 constexpr int fixMulLength(int left, int right) {
+  if (left > 64 || right > 64) return 128;
   return fixNextLength(left + right);
 }
 [[noreturn]] inline void fixOverflow() {
@@ -1442,42 +1454,691 @@ constexpr std::int64_t fixIncrementRaw(std::int64_t power,
   const long double rounded = scaled >= 0.0L ? scaled + 0.5L : scaled - 0.5L;
   return static_cast<std::int64_t>(rounded);
 }
+// ---------------------------------------------------------------------------
+// @Length(128) raw layer.
+//
+// The raw of Fix<..., 128> is coord_rt::UInt128 used as a signed
+// two's-complement 128-bit integer. Products and quotients that can exceed 128
+// bits go through a portable 256-bit intermediate (four 64-bit limbs), so a
+// 128x128 multiply or divide is never silently truncated. The type itself is a
+// custom two-limb integer: no non-standard library is required. GCC/Clang use
+// __int128 and 64-bit MSVC uses _mul128 for the 64x64->128 primitive, with a
+// portable 32-bit split fallback for every other compiler/target.
+// ---------------------------------------------------------------------------
+inline UInt128 fixWideFromI64(std::int64_t value) {
+  UInt128 result;
+  result.lo = static_cast<std::uint64_t>(value);
+  result.hi = value < 0 ? ~static_cast<std::uint64_t>(0) : 0;
+  return result;
+}
+/// Widens a raw value into 128-bit space (sign-extending narrow raws).
+inline UInt128 fixRawToU128(std::int64_t value) {
+  return fixWideFromI64(value);
+}
+inline UInt128 fixRawToU128(UInt128 value) {
+  return value;
+}
+/// Converts a raw value to an explicitly chosen wide type: identity for a
+/// 64-bit result type, sign extension for a 128-bit result type.
+template <class W>
+struct FixRawCast;
+
+template <>
+struct FixRawCast<std::int64_t> {
+  static std::int64_t to(std::int64_t value) { return value; }
+  static std::int64_t to(UInt128 value) {
+    return static_cast<std::int64_t>(value.lo);
+  }
+};
+
+template <>
+struct FixRawCast<UInt128> {
+  static UInt128 to(std::int64_t value) { return fixWideFromI64(value); }
+  static UInt128 to(UInt128 value) { return value; }
+};
+inline bool fixWideZero(UInt128 value) {
+  return value.hi == 0 && value.lo == 0;
+}
+inline bool fixWideNegative(UInt128 value) {
+  return (value.hi >> 63) != 0;
+}
+inline UInt128 fixWideNegate(UInt128 value) {
+  UInt128 result;
+  result.lo = ~value.lo + 1;
+  result.hi = ~value.hi + (result.lo == 0 ? 1ULL : 0ULL);
+  return result;
+}
+inline UInt128 fixWideAbs(UInt128 value) {
+  return fixWideNegative(value) ? fixWideNegate(value) : value;
+}
+inline bool fixWideEqual(UInt128 left, UInt128 right) {
+  return left.hi == right.hi && left.lo == right.lo;
+}
+inline int fixWideCompare(UInt128 left, UInt128 right) {
+  const bool leftNegative = fixWideNegative(left);
+  const bool rightNegative = fixWideNegative(right);
+  if (leftNegative != rightNegative) {
+    return leftNegative ? -1 : 1;
+  }
+  if (left.hi != right.hi) return left.hi < right.hi ? -1 : 1;
+  if (left.lo != right.lo) return left.lo < right.lo ? -1 : 1;
+  return 0;
+}
+inline bool fixRawLess(std::int64_t left, std::int64_t right) {
+  return left < right;
+}
+inline bool fixRawLess(UInt128 left, UInt128 right) {
+  return fixWideCompare(left, right) < 0;
+}
+inline bool fixRawEqual(std::int64_t left, std::int64_t right) {
+  return left == right;
+}
+inline bool fixRawEqual(UInt128 left, UInt128 right) {
+  return fixWideEqual(left, right);
+}
+inline std::int64_t fixRawRemainder(std::int64_t dividend,
+                                    std::int64_t divisor) {
+  return dividend % divisor;
+}
+inline UInt128 fixRawRemainder(UInt128 dividend, UInt128 divisor) {
+  const bool negative = fixWideNegative(dividend);
+  const UInt128 remainder =
+      fixWideAbs(dividend) % fixWideAbs(divisor);
+  return negative && !fixWideZero(remainder) ? fixWideNegate(remainder)
+                                             : remainder;
+}
+inline UInt128 fixWideNot(UInt128 value) {
+  UInt128 result;
+  result.lo = ~value.lo;
+  result.hi = ~value.hi;
+  return result;
+}
+inline UInt128 fixWideAnd(UInt128 left, UInt128 right) {
+  UInt128 result;
+  result.lo = left.lo & right.lo;
+  result.hi = left.hi & right.hi;
+  return result;
+}
+inline UInt128 fixWideOr(UInt128 left, UInt128 right) {
+  UInt128 result;
+  result.lo = left.lo | right.lo;
+  result.hi = left.hi | right.hi;
+  return result;
+}
+inline UInt128 fixWideXor(UInt128 left, UInt128 right) {
+  UInt128 result;
+  result.lo = left.lo ^ right.lo;
+  result.hi = left.hi ^ right.hi;
+  return result;
+}
+inline UInt128 fixWideShl(UInt128 value, int amount) {
+  if (amount <= 0) return value;
+  if (amount >= 128) return UInt128(0);
+  return value << amount;
+}
+inline UInt128 fixWideShrArith(UInt128 value, int amount) {
+  if (amount <= 0) return value;
+  if (amount >= 128) {
+    return fixWideNegative(value) ? fixWideFromI64(-1) : UInt128(0);
+  }
+  UInt128 result = value >> amount;
+  if (fixWideNegative(value)) {
+    UInt128 fill;
+    fill.lo = ~static_cast<std::uint64_t>(0);
+    fill.hi = ~static_cast<std::uint64_t>(0);
+    fill = fill << (128 - amount);
+    result.lo |= fill.lo;
+    result.hi |= fill.hi;
+  }
+  return result;
+}
+inline std::int64_t fixWideToI64(UInt128 value) {
+  if (fixWideNegative(value)) {
+    if (value.hi != ~static_cast<std::uint64_t>(0) ||
+        value.lo < (static_cast<std::uint64_t>(1) << 63)) {
+      fixOverflow();
+    }
+    return static_cast<std::int64_t>(value.lo);
+  }
+  if (value.hi != 0 ||
+      value.lo > static_cast<std::uint64_t>(
+                     std::numeric_limits<std::int64_t>::max())) {
+    fixOverflow();
+  }
+  return static_cast<std::int64_t>(value.lo);
+}
+inline long double fixWideToLongDouble(UInt128 value) {
+  const bool negative = fixWideNegative(value);
+  const UInt128 magnitude = negative ? fixWideNegate(value) : value;
+  const long double twoTo64 = 18446744073709551616.0L;
+  const long double result = static_cast<long double>(magnitude.hi) * twoTo64 +
+                             static_cast<long double>(magnitude.lo);
+  return negative ? -result : result;
+}
+inline UInt128 fixWideFromLongDouble(long double value) {
+  const long double limit = 170141183460469231731687303715884105728.0L;
+  if (!std::isfinite(static_cast<double>(value)) || value >= limit ||
+      value < -limit) {
+    fixOverflow();
+  }
+  const bool negative = value < 0.0L;
+  const long double magnitude = negative ? -value : value;
+  long double rounded = std::floor(magnitude);
+  if (magnitude - rounded >= 0.5L) {
+    rounded += 1.0L;
+  }
+  if (negative) {
+    if (rounded > limit) fixOverflow();
+  } else if (rounded >= limit) {
+    fixOverflow();
+  }
+  const long double twoTo64 = 18446744073709551616.0L;
+  const long double highValue = std::floor(rounded / twoTo64);
+  const long double lowValue = rounded - highValue * twoTo64;
+  UInt128 result;
+  result.hi = static_cast<std::uint64_t>(highValue);
+  result.lo = static_cast<std::uint64_t>(lowValue);
+  if (negative) result = fixWideNegate(result);
+  return result;
+}
+inline UInt128 fixWidePositiveLimit() {
+  UInt128 limit;
+  limit.lo = ~static_cast<std::uint64_t>(0);
+  limit.hi = 0x7fffffffffffffffULL;
+  return limit;
+}
+inline UInt128 fixWideNegativeLimit() {
+  UInt128 limit;
+  limit.lo = 0;
+  limit.hi = 0x8000000000000000ULL;
+  return limit;
+}
+inline std::uint64_t fixMul64(std::uint64_t left, std::uint64_t right,
+                              std::uint64_t& high) {
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
+  return _umul128(left, right, &high);
+#elif defined(__SIZEOF_INT128__)
+  const unsigned __int128 product =
+      static_cast<unsigned __int128>(left) * right;
+  high = static_cast<std::uint64_t>(product >> 64);
+  return static_cast<std::uint64_t>(product);
+#else
+  const std::uint64_t leftLow = left & 0xffffffffULL;
+  const std::uint64_t leftHigh = left >> 32;
+  const std::uint64_t rightLow = right & 0xffffffffULL;
+  const std::uint64_t rightHigh = right >> 32;
+  const std::uint64_t lowLow = leftLow * rightLow;
+  const std::uint64_t lowHigh = leftLow * rightHigh;
+  const std::uint64_t highLow = leftHigh * rightLow;
+  const std::uint64_t highHigh = leftHigh * rightHigh;
+  const std::uint64_t middle = (lowLow >> 32) + (lowHigh & 0xffffffffULL) +
+                               (highLow & 0xffffffffULL);
+  high = highHigh + (lowHigh >> 32) + (highLow >> 32) + (middle >> 32);
+  return (lowLow & 0xffffffffULL) | (middle << 32);
+#endif
+}
+struct FixU256 {
+  std::uint64_t words[4] = {0, 0, 0, 0};
+};
+inline FixU256 makeFixU256(std::uint64_t value) {
+  FixU256 result;
+  result.words[0] = value;
+  return result;
+}
+inline FixU256 fixU256FromU128(UInt128 value) {
+  FixU256 result;
+  result.words[0] = value.lo;
+  result.words[1] = value.hi;
+  return result;
+}
+inline bool fixU256Zero(const FixU256& value) {
+  return value.words[0] == 0 && value.words[1] == 0 &&
+         value.words[2] == 0 && value.words[3] == 0;
+}
+inline int fixU256Compare(const FixU256& left, const FixU256& right) {
+  for (int index = 3; index >= 0; --index) {
+    if (left.words[index] != right.words[index]) {
+      return left.words[index] < right.words[index] ? -1 : 1;
+    }
+  }
+  return 0;
+}
+inline FixU256 fixU256Sub(const FixU256& left, const FixU256& right) {
+  FixU256 result;
+  std::uint64_t borrow = 0;
+  for (int index = 0; index < 4; ++index) {
+    const std::uint64_t difference = left.words[index] - right.words[index];
+    const std::uint64_t nextBorrow =
+        left.words[index] < right.words[index] ? std::uint64_t{1}
+                                               : std::uint64_t{0};
+    result.words[index] = difference - borrow;
+    borrow = difference < borrow ? 1 : nextBorrow;
+  }
+  return result;
+}
+inline FixU256 fixU256Shl1(const FixU256& value) {
+  FixU256 result;
+  result.words[0] = value.words[0] << 1;
+  result.words[1] = (value.words[1] << 1) | (value.words[0] >> 63);
+  result.words[2] = (value.words[2] << 1) | (value.words[1] >> 63);
+  result.words[3] = (value.words[3] << 1) | (value.words[2] >> 63);
+  return result;
+}
+inline bool fixU256Bit(const FixU256& value, int index) {
+  if (index < 0 || index >= 256) return false;
+  return ((value.words[index / 64] >> (index % 64)) & 1ULL) != 0;
+}
+inline void fixU256SetBit(FixU256& value, int index) {
+  if (index < 0 || index >= 256) return;
+  value.words[index / 64] |= (static_cast<std::uint64_t>(1) << (index % 64));
+}
+inline bool fixU256FitsU128(const FixU256& value, UInt128& out) {
+  if (value.words[2] != 0 || value.words[3] != 0) return false;
+  out.hi = value.words[1];
+  out.lo = value.words[0];
+  return true;
+}
+inline FixU256 fixU256AddOne(const FixU256& value, bool& overflow) {
+  FixU256 result = value;
+  for (int index = 0; index < 4; ++index) {
+    ++result.words[index];
+    if (result.words[index] != 0) return result;
+  }
+  overflow = true;
+  return result;
+}
+inline FixU256 fixU256MulU64(const FixU256& value, std::uint64_t factor,
+                             bool& overflow) {
+  FixU256 result;
+  std::uint64_t carry = 0;
+  for (int index = 0; index < 4; ++index) {
+    std::uint64_t productHigh = 0;
+    const std::uint64_t productLow =
+        fixMul64(value.words[index], factor, productHigh);
+    std::uint64_t sum = productLow + carry;
+    if (sum < productLow) ++productHigh;
+    result.words[index] = sum;
+    carry = productHigh;
+  }
+  if (carry != 0) overflow = true;
+  return result;
+}
+inline FixU256 fixU256MulU128(UInt128 left, UInt128 right) {
+  std::uint64_t high00 = 0;
+  const std::uint64_t low00 = fixMul64(left.lo, right.lo, high00);
+  std::uint64_t high01 = 0;
+  const std::uint64_t low01 = fixMul64(left.lo, right.hi, high01);
+  std::uint64_t high10 = 0;
+  const std::uint64_t low10 = fixMul64(left.hi, right.lo, high10);
+  std::uint64_t high11 = 0;
+  const std::uint64_t low11 = fixMul64(left.hi, right.hi, high11);
+  FixU256 result;
+  result.words[0] = low00;
+  std::uint64_t middle = high00 + low01;
+  std::uint64_t carry = middle < high00 ? 1 : 0;
+  const std::uint64_t middlePlus = middle + low10;
+  carry += middlePlus < middle ? 1 : 0;
+  result.words[1] = middlePlus;
+  std::uint64_t upper = high01 + high10;
+  std::uint64_t upperCarry = upper < high01 ? 1 : 0;
+  const std::uint64_t upperPlus = upper + low11;
+  upperCarry += upperPlus < upper ? 1 : 0;
+  const std::uint64_t upperCarryPlus = upperPlus + carry;
+  upperCarry += upperCarryPlus < upperPlus ? 1 : 0;
+  result.words[2] = upperCarryPlus;
+  result.words[3] = high11 + upperCarry;
+  return result;
+}
+inline void fixU256DivMod(const FixU256& numerator, const FixU256& divisor,
+                          FixU256& quotient, FixU256& remainder) {
+  quotient = FixU256{};
+  remainder = FixU256{};
+  if (fixU256Zero(divisor)) return;
+  if ((divisor.words[3] >> 63) != 0) {
+    if (fixU256Compare(numerator, divisor) >= 0) {
+      quotient = makeFixU256(1);
+      remainder = fixU256Sub(numerator, divisor);
+    } else {
+      remainder = numerator;
+    }
+    return;
+  }
+  for (int bit = 255; bit >= 0; --bit) {
+    remainder = fixU256Shl1(remainder);
+    if (fixU256Bit(numerator, bit)) fixU256SetBit(remainder, 0);
+    if (fixU256Compare(remainder, divisor) >= 0) {
+      remainder = fixU256Sub(remainder, divisor);
+      fixU256SetBit(quotient, bit);
+    }
+  }
+}
+/// radix^exponent as a 256-bit factor; `tooLarge` marks a factor beyond 2^256.
+struct FixFactor {
+  FixU256 value;
+  bool tooLarge = false;
+};
+inline FixFactor fixPowFactor(std::int64_t radix, std::int64_t exponent) {
+  FixFactor factor;
+  factor.value = makeFixU256(1);
+  const std::uint64_t base = static_cast<std::uint64_t>(radix);
+  for (std::int64_t index = 0; index < exponent; ++index) {
+    bool overflow = false;
+    factor.value = fixU256MulU64(factor.value, base, overflow);
+    if (overflow) {
+      factor.tooLarge = true;
+      return factor;
+    }
+  }
+  return factor;
+}
+/// Quotient of a 256-bit numerator by a factor, rounded half away from zero,
+/// with the signed 128-bit range checked. A factor beyond 2^256 makes the
+/// quotient zero for every numerator produced by the fix arithmetic.
+inline UInt128 fixWideDivideRounded(FixU256 numerator, const FixFactor& divisor,
+                                    bool negative) {
+  if (divisor.tooLarge) return UInt128(0);
+  FixU256 quotient;
+  FixU256 remainder;
+  fixU256DivMod(numerator, divisor.value, quotient, remainder);
+  if (!fixU256Zero(remainder)) {
+    bool roundUp = false;
+    if (fixU256Bit(remainder, 255)) {
+      roundUp = true;
+    } else {
+      roundUp = fixU256Compare(fixU256Shl1(remainder), divisor.value) >= 0;
+    }
+    if (roundUp) {
+      bool overflow = false;
+      quotient = fixU256AddOne(quotient, overflow);
+      if (overflow) fixOverflow();
+    }
+  }
+  const UInt128 limit =
+      negative ? fixWideNegativeLimit() : fixWidePositiveLimit();
+  if (fixU256Compare(quotient, fixU256FromU128(limit)) > 0) fixOverflow();
+  UInt128 magnitude;
+  if (!fixU256FitsU128(quotient, magnitude)) fixOverflow();
+  return negative && !fixWideZero(magnitude) ? fixWideNegate(magnitude)
+                                             : magnitude;
+}
+inline UInt128 fixWideTruncDivRaw(UInt128 value, UInt128 divisor) {
+  if (fixWideZero(divisor)) fixOverflow();
+  if (fixWideZero(value)) return UInt128(0);
+  const bool negative = fixWideNegative(value) != fixWideNegative(divisor);
+  const UInt128 quotient = fixWideAbs(value) / fixWideAbs(divisor);
+  const UInt128 limit =
+      negative ? fixWideNegativeLimit() : fixWidePositiveLimit();
+  if (fixWideCompare(quotient, limit) > 0) fixOverflow();
+  return negative && !fixWideZero(quotient) ? fixWideNegate(quotient)
+                                            : quotient;
+}
+inline UInt128 fixWideRoundDivRaw(UInt128 value, UInt128 divisor) {
+  if (fixWideZero(divisor)) fixOverflow();
+  if (fixWideZero(value)) return UInt128(0);
+  const bool negative = fixWideNegative(value) != fixWideNegative(divisor);
+  const UInt128 numerator = fixWideAbs(value);
+  const UInt128 denominator = fixWideAbs(divisor);
+  UInt128 quotient = numerator / denominator;
+  const UInt128 remainder = numerator % denominator;
+  if (!fixWideZero(remainder) && !(remainder < denominator - remainder)) {
+    quotient = quotient + UInt128(1);
+  }
+  const UInt128 limit =
+      negative ? fixWideNegativeLimit() : fixWidePositiveLimit();
+  if (fixWideCompare(quotient, limit) > 0) fixOverflow();
+  return negative && !fixWideZero(quotient) ? fixWideNegate(quotient)
+                                            : quotient;
+}
+inline UInt128 fixAddChecked(UInt128 a, UInt128 b) {
+  const UInt128 sum = a + b;
+  if (((a.hi ^ sum.hi) & (b.hi ^ sum.hi) & 0x8000000000000000ULL) != 0) {
+    fixOverflow();
+  }
+  return sum;
+}
+inline UInt128 fixSubChecked(UInt128 a, UInt128 b) {
+  const UInt128 difference = a - b;
+  if (((a.hi ^ b.hi) & (a.hi ^ difference.hi) &
+       0x8000000000000000ULL) != 0) {
+    fixOverflow();
+  }
+  return difference;
+}
+inline UInt128 fixNegChecked(UInt128 value) {
+  if (value.hi == 0x8000000000000000ULL && value.lo == 0) fixOverflow();
+  return fixWideNegate(value);
+}
+inline UInt128 fixMulChecked(UInt128 a, UInt128 b) {
+  if (fixWideZero(a) || fixWideZero(b)) return UInt128(0);
+  const bool negative = fixWideNegative(a) != fixWideNegative(b);
+  const UInt128 left = fixWideAbs(a);
+  const UInt128 right = fixWideAbs(b);
+  const UInt128 limit =
+      negative ? fixWideNegativeLimit() : fixWidePositiveLimit();
+  if (fixWideCompare(left, limit) > 0) fixOverflow();
+  const UInt128 threshold = limit / left;
+  if (threshold < right) fixOverflow();
+  const UInt128 product = left * right;
+  return negative ? fixWideNegate(product) : product;
+}
+inline UInt128 fixMulWideRounded(UInt128 a, UInt128 b,
+                                 const FixFactor& divisor) {
+  if (fixWideZero(a) || fixWideZero(b)) return UInt128(0);
+  const bool negative = fixWideNegative(a) != fixWideNegative(b);
+  const FixU256 product = fixU256MulU128(fixWideAbs(a), fixWideAbs(b));
+  return fixWideDivideRounded(product, divisor, negative);
+}
+inline UInt128 fixRescaleRaw(UInt128 raw, std::int64_t fromPower,
+                             std::int64_t toPower, std::int64_t radix) {
+  if (fromPower == toPower) return raw;
+  if (fixWideZero(raw)) return raw;
+  const std::int64_t delta = toPower - fromPower;
+  const bool negative = fixWideNegative(raw);
+  const UInt128 magnitude = fixWideAbs(raw);
+  if (delta > 0) {
+    const FixFactor factor = fixPowFactor(radix, delta);
+    if (factor.tooLarge) fixOverflow();
+    UInt128 factorValue;
+    if (!fixU256FitsU128(factor.value, factorValue)) fixOverflow();
+    const UInt128 limit =
+        negative ? fixWideNegativeLimit() : fixWidePositiveLimit();
+    if (fixWideCompare(factorValue, limit) > 0) fixOverflow();
+    const FixU256 product = fixU256MulU128(magnitude, factorValue);
+    if (fixU256Compare(product, fixU256FromU128(limit)) > 0) fixOverflow();
+    UInt128 result;
+    if (!fixU256FitsU128(product, result)) fixOverflow();
+    return negative ? fixWideNegate(result) : result;
+  }
+  const FixFactor factor = fixPowFactor(radix, -delta);
+  return fixWideDivideRounded(fixU256FromU128(magnitude), factor, negative);
+}
+inline UInt128 fixConvertRawWide(UInt128 raw, std::int64_t fromPower,
+                                 std::int64_t fromRadix,
+                                 std::int64_t toPower,
+                                 std::int64_t toRadix) {
+  if (fromRadix == toRadix) {
+    return fixRescaleRaw(raw, fromPower, toPower, fromRadix);
+  }
+  if (fixWideZero(raw)) return raw;
+  const bool negative = fixWideNegative(raw);
+  const UInt128 magnitude = fixWideAbs(raw);
+  FixU256 numerator = fixU256FromU128(magnitude);
+  FixU256 denominator = makeFixU256(1);
+  bool denominatorTooLarge = false;
+  const auto multiply = [](FixU256& value, std::uint64_t base,
+                           std::int64_t count, bool& overflow) {
+    for (std::int64_t index = 0; index < count; ++index) {
+      value = fixU256MulU64(value, base, overflow);
+      if (overflow) return;
+    }
+  };
+  if (fromPower < 0) {
+    bool overflow = false;
+    multiply(numerator, static_cast<std::uint64_t>(fromRadix), -fromPower,
+             overflow);
+    if (overflow) fixOverflow();
+  } else if (fromPower > 0) {
+    bool overflow = false;
+    multiply(denominator, static_cast<std::uint64_t>(fromRadix), fromPower,
+             overflow);
+    denominatorTooLarge = overflow;
+  }
+  if (!denominatorTooLarge) {
+    if (toPower > 0) {
+      bool overflow = false;
+      multiply(numerator, static_cast<std::uint64_t>(toRadix), toPower,
+               overflow);
+      if (overflow) fixOverflow();
+    } else if (toPower < 0) {
+      bool overflow = false;
+      multiply(denominator, static_cast<std::uint64_t>(toRadix), -toPower,
+               overflow);
+      denominatorTooLarge = overflow;
+    }
+  }
+  FixFactor divisor;
+  divisor.value = denominator;
+  divisor.tooLarge = denominatorTooLarge;
+  return fixWideDivideRounded(numerator, divisor, negative);
+}
+inline UInt128 fixDivideRaw(UInt128 a, UInt128 b, std::int64_t powerA,
+                            std::int64_t powerB, std::int64_t targetPower,
+                            std::int64_t radix) {
+  if (fixWideZero(b)) {
+    std::cerr << "fix division by zero\n";
+    std::abort();
+  }
+  if (fixWideZero(a)) return UInt128(0);
+  const std::int64_t delta = powerB + targetPower - powerA;
+  const bool negative = fixWideNegative(a) != fixWideNegative(b);
+  const UInt128 magnitudeA = fixWideAbs(a);
+  const UInt128 magnitudeB = fixWideAbs(b);
+  FixU256 numerator = fixU256FromU128(magnitudeA);
+  FixU256 denominator = fixU256FromU128(magnitudeB);
+  if (delta > 0) {
+    const FixFactor factor = fixPowFactor(radix, delta);
+    if (factor.tooLarge) fixOverflow();
+    UInt128 factorValue;
+    if (!fixU256FitsU128(factor.value, factorValue)) fixOverflow();
+    numerator = fixU256MulU128(magnitudeA, factorValue);
+  } else if (delta < 0) {
+    const FixFactor factor = fixPowFactor(radix, -delta);
+    if (factor.tooLarge) return UInt128(0);
+    UInt128 factorValue;
+    if (!fixU256FitsU128(factor.value, factorValue)) return UInt128(0);
+    denominator = fixU256MulU128(magnitudeB, factorValue);
+  }
+  FixFactor divisor;
+  divisor.value = denominator;
+  return fixWideDivideRounded(numerator, divisor, negative);
+}
+/// Exact a*b*radix^exponent for a target power above the natural product
+/// power; only the final 128-bit result is rounded/checked.
+inline UInt128 fixWideMulScaleUp(UInt128 a, UInt128 b, std::int64_t radix,
+                                 std::int64_t exponent) {
+  if (fixWideZero(a) || fixWideZero(b)) return UInt128(0);
+  const bool negative = fixWideNegative(a) != fixWideNegative(b);
+  const FixU256 product = fixU256MulU128(fixWideAbs(a), fixWideAbs(b));
+  const FixFactor factor = fixPowFactor(radix, exponent);
+  if (factor.tooLarge) fixOverflow();
+  UInt128 factorValue;
+  if (!fixU256FitsU128(factor.value, factorValue)) fixOverflow();
+  const UInt128 limit =
+      negative ? fixWideNegativeLimit() : fixWidePositiveLimit();
+  if (fixWideCompare(factorValue, limit) > 0) fixOverflow();
+  const UInt128 threshold = limit / factorValue;
+  if (fixU256Compare(product, fixU256FromU128(threshold)) > 0) fixOverflow();
+  UInt128 productValue;
+  if (!fixU256FitsU128(product, productValue)) fixOverflow();
+  const UInt128 scaled = productValue * factorValue;
+  return negative ? fixWideNegate(scaled) : scaled;
+}
+inline UInt128 fixMultiplyToWide(UInt128 a, UInt128 b, std::int64_t radix,
+                                 std::int64_t targetPower,
+                                 std::int64_t naturalPower) {
+  if (targetPower <= naturalPower) {
+    const FixFactor divisor = fixPowFactor(radix, naturalPower - targetPower);
+    return fixMulWideRounded(a, b, divisor);
+  }
+  return fixWideMulScaleUp(a, b, radix, targetPower - naturalPower);
+}
+inline std::string fixBaseDigitsWide(UInt128 value, std::uint64_t base) {
+  if (fixWideZero(value)) return "0";
+  const char* alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+  const UInt128 divisor(base);
+  std::string digits;
+  while (!fixWideZero(value)) {
+    const UInt128 quotient = value / divisor;
+    const UInt128 remainder = value % divisor;
+    digits.push_back(alphabet[static_cast<std::size_t>(remainder.lo)]);
+    value = quotient;
+  }
+  std::reverse(digits.begin(), digits.end());
+  return digits;
+}
+inline UInt128 fixWideDivSmall(UInt128 value, std::uint64_t divisor) {
+  return value / UInt128(divisor);
+}
+inline UInt128 fixWideModSmall(UInt128 value, std::uint64_t divisor) {
+  return value % UInt128(divisor);
+}
+inline UInt128 fixWideMulSmall(UInt128 value, std::uint64_t factor) {
+  return value * UInt128(factor);
+}
+inline UInt128 fixWideMulSmallChecked(UInt128 value, std::uint64_t factor) {
+  bool overflow = false;
+  const FixU256 product = fixU256MulU64(fixU256FromU128(value), factor, overflow);
+  if (overflow) fixOverflow();
+  UInt128 result;
+  if (!fixU256FitsU128(product, result)) fixOverflow();
+  return result;
+}
 template <int Length>
 struct FixRaw;
 template <>
 struct FixRaw<8> {
   using type = std::int8_t;
-  static constexpr std::int64_t minimum = -128;
-  static constexpr std::int64_t maximum = 127;
+  using wide = std::int64_t;
+  static bool inRange(std::int64_t value) { return value >= -128 && value <= 127; }
 };
 template <>
 struct FixRaw<16> {
   using type = std::int16_t;
-  static constexpr std::int64_t minimum = -32768;
-  static constexpr std::int64_t maximum = 32767;
+  using wide = std::int64_t;
+  static bool inRange(std::int64_t value) {
+    return value >= -32768 && value <= 32767;
+  }
 };
 template <>
 struct FixRaw<32> {
   using type = std::int32_t;
-  static constexpr std::int64_t minimum = -2147483648LL;
-  static constexpr std::int64_t maximum = 2147483647LL;
+  using wide = std::int64_t;
+  static bool inRange(std::int64_t value) {
+    return value >= -2147483648LL && value <= 2147483647LL;
+  }
 };
 template <>
 struct FixRaw<64> {
   using type = std::int64_t;
-  static constexpr std::int64_t minimum =
-      std::numeric_limits<std::int64_t>::min();
-  static constexpr std::int64_t maximum =
-      std::numeric_limits<std::int64_t>::max();
+  using wide = std::int64_t;
+  static bool inRange(std::int64_t) { return true; }
+};
+template <>
+struct FixRaw<128> {
+  using type = UInt128;
+  using wide = UInt128;
+  static bool inRange(UInt128) { return true; }
 };
 template <std::int64_t Power, std::int64_t Radix, int Length>
 struct Fix {
   static_assert(Radix >= 2, "fix radix must be >= 2");
-  static_assert(Length == 8 || Length == 16 || Length == 32 || Length == 64,
-                "fix length must be 8, 16, 32 or 64");
+  static_assert(Length == 8 || Length == 16 || Length == 32 || Length == 64 ||
+                    Length == 128,
+                "fix length must be 8, 16, 32, 64 or 128");
   static_assert(Power >= -63 && Power <= 63,
                 "fix power must fit a 64-bit scale");
   using Raw = typename FixRaw<Length>::type;
+  using Wide = typename FixRaw<Length>::wide;
   static constexpr std::int64_t power = Power;
   static constexpr std::int64_t radix = Radix;
   static constexpr int length = Length;
@@ -1485,112 +2146,183 @@ struct Fix {
   static constexpr std::int64_t scale = fixIPow(Radix, absPower);
   static constexpr std::int64_t numerator = Power < 0 ? 1 : scale;
   static constexpr std::int64_t denominator = Power < 0 ? scale : 1;
-  static constexpr std::int64_t rawMinimum = FixRaw<Length>::minimum;
-  static constexpr std::int64_t rawMaximum = FixRaw<Length>::maximum;
   Raw raw = 0;
   Fix() = default;
-  static constexpr Fix fromRaw(std::int64_t value) {
-    if (value < rawMinimum || value > rawMaximum) fixOverflow();
+  static Fix fromRaw(Wide value) {
+    if (!FixRaw<Length>::inRange(value)) fixOverflow();
     Fix result;
     result.raw = static_cast<Raw>(value);
     return result;
   }
-  static Fix fromInteger(std::int64_t value) {
-    std::int64_t rawValue = 0;
-    if (Power >= 0) {
-      rawValue = fixMulChecked(value, numerator);
+  /// @Length(128) literal bits: the two 64-bit limbs of a two's-complement
+  /// 128-bit raw value.
+  static Fix fromRawBits(std::uint64_t high, std::uint64_t low) {
+    if constexpr (Length == 128) {
+      Wide bits;
+      bits.hi = high;
+      bits.lo = low;
+      return fromRaw(bits);
     } else {
-      rawValue = fixRoundDiv(value, denominator);
+      return fromRaw(static_cast<Wide>(static_cast<std::int64_t>(low)));
     }
-    return fromRaw(rawValue);
+  }
+  /// Conversion results are computed in 128-bit space; this stores one in the
+  /// target width, rejecting values that do not fit instead of truncating.
+  static Fix fromRawWideBits(UInt128 bits) {
+    if constexpr (Length == 128) {
+      return fromRaw(bits);
+    } else {
+      const std::uint64_t extension =
+          (bits.lo >> 63) != 0 ? ~static_cast<std::uint64_t>(0)
+                               : static_cast<std::uint64_t>(0);
+      if (bits.hi != extension) fixOverflow();
+      return fromRaw(static_cast<std::int64_t>(bits.lo));
+    }
+  }
+  static Fix fromInteger(std::int64_t value) {
+    if constexpr (Length == 128) {
+      UInt128 rawValue;
+      if (Power >= 0) {
+        rawValue = fixMulChecked(fixWideFromI64(value),
+                                 fixWideFromI64(numerator));
+      } else {
+        rawValue = fixWideRoundDivRaw(fixWideFromI64(value),
+                                      fixWideFromI64(denominator));
+      }
+      return fromRawWideBits(rawValue);
+    } else {
+      std::int64_t rawValue = 0;
+      if (Power >= 0) {
+        rawValue = fixMulChecked(value, numerator);
+      } else {
+        rawValue = fixRoundDiv(value, denominator);
+      }
+      return fromRaw(rawValue);
+    }
   }
   static Fix fromDouble(double value) {
-    const long double scaled =
-        static_cast<long double>(value) *
-        static_cast<long double>(numerator) /
-        static_cast<long double>(denominator);
-    if (!std::isfinite(static_cast<double>(scaled)) ||
-        scaled > 9223372036854775807.0L ||
-        scaled < -9223372036854775808.0L) {
-      fixOverflow();
+    if constexpr (Length == 128) {
+      const long double scaled = static_cast<long double>(value) *
+                                 static_cast<long double>(numerator) /
+                                 static_cast<long double>(denominator);
+      return fromRawWideBits(fixWideFromLongDouble(scaled));
+    } else {
+      const long double scaled =
+          static_cast<long double>(value) *
+          static_cast<long double>(numerator) /
+          static_cast<long double>(denominator);
+      if (!std::isfinite(static_cast<double>(scaled)) ||
+          scaled > 9223372036854775807.0L ||
+          scaled < -9223372036854775808.0L) {
+        fixOverflow();
+      }
+      return fromRaw(static_cast<std::int64_t>(std::llroundl(scaled)));
     }
-    return fromRaw(static_cast<std::int64_t>(std::llroundl(scaled)));
   }
   template <std::int64_t Power2, std::int64_t Radix2, int Length2>
   Fix(const Fix<Power2, Radix2, Length2>& other) {
-    const std::int64_t value =
-        fixConvertRaw(other.rawValue(), Power2, Radix2, Power, Radix);
-    if (value < rawMinimum || value > rawMaximum) fixOverflow();
-    raw = static_cast<Raw>(value);
+    if constexpr (Length == 128 || Length2 == 128) {
+      const Fix converted = fromRawWideBits(fixConvertRawWide(
+          fixRawToU128(other.rawValue()), Power2, Radix2, Power, Radix));
+      raw = converted.raw;
+    } else {
+      const std::int64_t value =
+          fixConvertRaw(other.rawValue(), Power2, Radix2, Power, Radix);
+      if (!FixRaw<Length>::inRange(value)) fixOverflow();
+      raw = static_cast<Raw>(value);
+    }
   }
   Fix(std::int64_t value) : raw(fromInteger(value).raw) {}
   Fix& operator=(std::int64_t value) {
     raw = fromInteger(value).raw;
     return *this;
   }
-  std::int64_t rawValue() const { return static_cast<std::int64_t>(raw); }
+  Wide rawValue() const { return static_cast<Wide>(raw); }
   std::int64_t toInteger() const {
-    if (Power >= 0) return fixTruncDiv(rawValue(), numerator);
-    return fixMulChecked(rawValue(), denominator);
+    if constexpr (Length == 128) {
+      if (Power >= 0) {
+        return fixWideToI64(
+            fixWideTruncDivRaw(rawValue(), fixWideFromI64(numerator)));
+      }
+      return fixWideToI64(
+          fixMulChecked(rawValue(), fixWideFromI64(denominator)));
+    } else {
+      if (Power >= 0) return fixTruncDiv(rawValue(), numerator);
+      return fixMulChecked(rawValue(), denominator);
+    }
   }
   double toFloat() const {
-    return static_cast<double>(rawValue()) *
-           (static_cast<double>(denominator) /
-            static_cast<double>(numerator));
+    if constexpr (Length == 128) {
+      return static_cast<double>(fixWideToLongDouble(rawValue())) *
+             (static_cast<double>(denominator) /
+              static_cast<double>(numerator));
+    } else {
+      return static_cast<double>(rawValue()) *
+             (static_cast<double>(denominator) /
+              static_cast<double>(numerator));
+    }
   }
 };
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 Fix<(P1 > P2 ? P1 : P2), R, fixAddLength(L1, L2)> operator+(
     const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   using Result = Fix<(P1 > P2 ? P1 : P2), R, fixAddLength(L1, L2)>;
-  const std::int64_t alignedA =
-      fixRescaleRaw(a.rawValue(), P1, Result::power, R);
-  const std::int64_t alignedB =
-      fixRescaleRaw(b.rawValue(), P2, Result::power, R);
+  using W = typename Result::Wide;
+  const W alignedA = fixRescaleRaw(FixRawCast<W>::to(a.rawValue()),
+                                   P1, Result::power, R);
+  const W alignedB = fixRescaleRaw(FixRawCast<W>::to(b.rawValue()),
+                                   P2, Result::power, R);
   return Result::fromRaw(fixAddChecked(alignedA, alignedB));
 }
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 Fix<(P1 > P2 ? P1 : P2), R, fixAddLength(L1, L2)> operator-(
     const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   using Result = Fix<(P1 > P2 ? P1 : P2), R, fixAddLength(L1, L2)>;
-  const std::int64_t alignedA =
-      fixRescaleRaw(a.rawValue(), P1, Result::power, R);
-  const std::int64_t alignedB =
-      fixRescaleRaw(b.rawValue(), P2, Result::power, R);
+  using W = typename Result::Wide;
+  const W alignedA = fixRescaleRaw(FixRawCast<W>::to(a.rawValue()),
+                                   P1, Result::power, R);
+  const W alignedB = fixRescaleRaw(FixRawCast<W>::to(b.rawValue()),
+                                   P2, Result::power, R);
   return Result::fromRaw(fixSubChecked(alignedA, alignedB));
 }
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 Fix<(P1 > P2 ? P1 : P2), R, (L1 > L2 ? L1 : L2)> operator/(
     const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   using Result = Fix<(P1 > P2 ? P1 : P2), R, (L1 > L2 ? L1 : L2)>;
-  return Result::fromRaw(
-      fixDivideRaw(a.rawValue(), b.rawValue(), P1, P2, Result::power, R));
+  using W = typename Result::Wide;
+  return Result::fromRaw(fixDivideRaw(
+      FixRawCast<W>::to(a.rawValue()),
+      FixRawCast<W>::to(b.rawValue()), P1, P2, Result::power, R));
 }
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 Fix<(P1 > P2 ? P1 : P2), R, (L1 > L2 ? L1 : L2)> operator%(
     const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   using Result = Fix<(P1 > P2 ? P1 : P2), R, (L1 > L2 ? L1 : L2)>;
+  using W = typename Result::Wide;
   if (b.rawValue() == 0) {
     std::cerr << "fix remainder by zero\n";
     std::abort();
   }
-  const std::int64_t alignedA =
-      fixRescaleRaw(a.rawValue(), P1, Result::power, R);
-  const std::int64_t alignedB =
-      fixRescaleRaw(b.rawValue(), P2, Result::power, R);
-  return Result::fromRaw(alignedA % alignedB);
+  const W alignedA = fixRescaleRaw(FixRawCast<W>::to(a.rawValue()),
+                                   P1, Result::power, R);
+  const W alignedB = fixRescaleRaw(FixRawCast<W>::to(b.rawValue()),
+                                   P2, Result::power, R);
+  return Result::fromRaw(fixRawRemainder(alignedA, alignedB));
 }
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 Fix<(P1 + P2), R, fixMulLength(L1, L2)> operator*(
     const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
-  return Fix<(P1 + P2), R, fixMulLength(L1, L2)>::fromRaw(
-      fixMulChecked(a.rawValue(), b.rawValue()));
+  using Result = Fix<(P1 + P2), R, fixMulLength(L1, L2)>;
+  using W = typename Result::Wide;
+  return Result::fromRaw(fixMulChecked(
+      FixRawCast<W>::to(a.rawValue()),
+      FixRawCast<W>::to(b.rawValue())));
 }
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 bool operator==(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   const std::int64_t power = P1 > P2 ? P1 : P2;
-  return fixRescaleRaw(a.rawValue(), P1, power, R) ==
-         fixRescaleRaw(b.rawValue(), P2, power, R);
+  return fixRawEqual(fixRescaleRaw(a.rawValue(), P1, power, R),
+                     fixRescaleRaw(b.rawValue(), P2, power, R));
 }
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 bool operator!=(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
@@ -1599,8 +2331,8 @@ bool operator!=(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 bool operator<(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
   const std::int64_t power = P1 > P2 ? P1 : P2;
-  return fixRescaleRaw(a.rawValue(), P1, power, R) <
-         fixRescaleRaw(b.rawValue(), P2, power, R);
+  return fixRawLess(fixRescaleRaw(a.rawValue(), P1, power, R),
+                    fixRescaleRaw(b.rawValue(), P2, power, R));
 }
 template <std::int64_t P1, std::int64_t P2, std::int64_t R, int L1, int L2>
 bool operator<=(const Fix<P1, R, L1>& a, const Fix<P2, R, L2>& b) {
@@ -1635,30 +2367,37 @@ Fix<P, R, L> operator-(std::int64_t a, const Fix<P, R, L>& b) {
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator*(const Fix<P, R, L>& a, std::int64_t b) {
-  return Fix<P, R, L>::fromRaw(fixMulChecked(a.rawValue(), b));
+  using W = typename Fix<P, R, L>::Wide;
+  return Fix<P, R, L>::fromRaw(
+      fixMulChecked(a.rawValue(), FixRawCast<W>::to(b)));
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator*(std::int64_t a, const Fix<P, R, L>& b) {
-  return Fix<P, R, L>::fromRaw(fixMulChecked(a, b.rawValue()));
+  using W = typename Fix<P, R, L>::Wide;
+  return Fix<P, R, L>::fromRaw(
+      fixMulChecked(FixRawCast<W>::to(a), b.rawValue()));
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator/(const Fix<P, R, L>& a, std::int64_t b) {
-  return Fix<P, R, L>::fromRaw(
-      fixDivideRaw(a.rawValue(), b, P, 0, P, R));
+  using W = typename Fix<P, R, L>::Wide;
+  return Fix<P, R, L>::fromRaw(fixDivideRaw(
+      a.rawValue(), FixRawCast<W>::to(b), P, 0, P, R));
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator/(std::int64_t a, const Fix<P, R, L>& b) {
-  return Fix<P, R, L>::fromRaw(
-      fixDivideRaw(a, b.rawValue(), 0, P, P, R));
+  using W = typename Fix<P, R, L>::Wide;
+  return Fix<P, R, L>::fromRaw(fixDivideRaw(
+      FixRawCast<W>::to(a), b.rawValue(), 0, P, P, R));
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator%(const Fix<P, R, L>& a, std::int64_t b) {
-  const std::int64_t divisor = Fix<P, R, L>::fromInteger(b).rawValue();
+  using W = typename Fix<P, R, L>::Wide;
+  const W divisor = Fix<P, R, L>::fromInteger(b).rawValue();
   if (divisor == 0) {
     std::cerr << "fix remainder by zero\n";
     std::abort();
   }
-  return Fix<P, R, L>::fromRaw(a.rawValue() % divisor);
+  return Fix<P, R, L>::fromRaw(fixRawRemainder(a.rawValue(), divisor));
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator-(const Fix<P, R, L>& a) {
@@ -1670,45 +2409,72 @@ Fix<P, R, L> operator+(const Fix<P, R, L>& a) {
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator~(const Fix<P, R, L>& a) {
-  const std::uint64_t bits =
-      (~fixToBits(a.rawValue(), L)) & fixMaskFor(L);
-  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  if constexpr (L == 128) {
+    return Fix<P, R, L>::fromRaw(fixWideNot(a.rawValue()));
+  } else {
+    const std::uint64_t bits =
+        (~fixToBits(a.rawValue(), L)) & fixMaskFor(L);
+    return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  }
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator&(const Fix<P, R, L>& a, const Fix<P, R, L>& b) {
-  const std::uint64_t bits =
-      fixToBits(a.rawValue(), L) & fixToBits(b.rawValue(), L);
-  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  if constexpr (L == 128) {
+    return Fix<P, R, L>::fromRaw(fixWideAnd(a.rawValue(), b.rawValue()));
+  } else {
+    const std::uint64_t bits =
+        fixToBits(a.rawValue(), L) & fixToBits(b.rawValue(), L);
+    return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  }
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator|(const Fix<P, R, L>& a, const Fix<P, R, L>& b) {
-  const std::uint64_t bits =
-      fixToBits(a.rawValue(), L) | fixToBits(b.rawValue(), L);
-  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  if constexpr (L == 128) {
+    return Fix<P, R, L>::fromRaw(fixWideOr(a.rawValue(), b.rawValue()));
+  } else {
+    const std::uint64_t bits =
+        fixToBits(a.rawValue(), L) | fixToBits(b.rawValue(), L);
+    return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  }
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator^(const Fix<P, R, L>& a, const Fix<P, R, L>& b) {
-  const std::uint64_t bits =
-      fixToBits(a.rawValue(), L) ^ fixToBits(b.rawValue(), L);
-  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  if constexpr (L == 128) {
+    return Fix<P, R, L>::fromRaw(fixWideXor(a.rawValue(), b.rawValue()));
+  } else {
+    const std::uint64_t bits =
+        fixToBits(a.rawValue(), L) ^ fixToBits(b.rawValue(), L);
+    return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  }
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator<<(const Fix<P, R, L>& a, std::int64_t count) {
   if (count < 0 || count >= L) fixOverflow();
-  const std::uint64_t bits =
-      (fixToBits(a.rawValue(), L) << count) & fixMaskFor(L);
-  return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  if constexpr (L == 128) {
+    return Fix<P, R, L>::fromRaw(
+        fixWideShl(a.rawValue(), static_cast<int>(count)));
+  } else {
+    const std::uint64_t bits =
+        (fixToBits(a.rawValue(), L) << count) & fixMaskFor(L);
+    return Fix<P, R, L>::fromRaw(fixFromBits(bits, L));
+  }
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L> operator>>(const Fix<P, R, L>& a, std::int64_t count) {
   if (count < 0) fixOverflow();
-  const std::int64_t value = a.rawValue();
-  if (count >= 64) return Fix<P, R, L>::fromRaw(value < 0 ? -1 : 0);
-  return Fix<P, R, L>::fromRaw(value >> count);
+  if constexpr (L == 128) {
+    return Fix<P, R, L>::fromRaw(
+        fixWideShrArith(a.rawValue(), static_cast<int>(count)));
+  } else {
+    const std::int64_t value = a.rawValue();
+    if (count >= 64) return Fix<P, R, L>::fromRaw(value < 0 ? -1 : 0);
+    return Fix<P, R, L>::fromRaw(value >> count);
+  }
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L>& operator++(Fix<P, R, L>& value) {
-  const std::int64_t step = fixIncrementRaw(P, R);
+  using W = typename Fix<P, R, L>::Wide;
+  const W step = FixRawCast<W>::to(fixIncrementRaw(P, R));
   value = Fix<P, R, L>::fromRaw(fixAddChecked(value.rawValue(), step));
   return value;
 }
@@ -1720,7 +2486,8 @@ Fix<P, R, L> operator++(Fix<P, R, L>& value, int) {
 }
 template <std::int64_t P, std::int64_t R, int L>
 Fix<P, R, L>& operator--(Fix<P, R, L>& value) {
-  const std::int64_t step = fixIncrementRaw(P, R);
+  using W = typename Fix<P, R, L>::Wide;
+  const W step = FixRawCast<W>::to(fixIncrementRaw(P, R));
   value = Fix<P, R, L>::fromRaw(fixSubChecked(value.rawValue(), step));
   return value;
 }
@@ -1782,7 +2549,7 @@ Fix<P, R, L>& operator>>=(Fix<P, R, L>& a, std::int64_t count) {
 }
 template <std::int64_t P, std::int64_t R, int L>
 bool operator==(const Fix<P, R, L>& a, std::int64_t b) {
-  return a.rawValue() == Fix<P, R, L>::fromInteger(b).rawValue();
+  return fixRawEqual(a.rawValue(), Fix<P, R, L>::fromInteger(b).rawValue());
 }
 template <std::int64_t P, std::int64_t R, int L>
 bool operator==(std::int64_t a, const Fix<P, R, L>& b) {
@@ -1798,11 +2565,11 @@ bool operator!=(std::int64_t a, const Fix<P, R, L>& b) {
 }
 template <std::int64_t P, std::int64_t R, int L>
 bool operator<(const Fix<P, R, L>& a, std::int64_t b) {
-  return a.rawValue() < Fix<P, R, L>::fromInteger(b).rawValue();
+  return fixRawLess(a.rawValue(), Fix<P, R, L>::fromInteger(b).rawValue());
 }
 template <std::int64_t P, std::int64_t R, int L>
 bool operator<(std::int64_t a, const Fix<P, R, L>& b) {
-  return Fix<P, R, L>::fromInteger(a).rawValue() < b.rawValue();
+  return fixRawLess(Fix<P, R, L>::fromInteger(a).rawValue(), b.rawValue());
 }
 template <std::int64_t P, std::int64_t R, int L>
 bool operator<=(const Fix<P, R, L>& a, std::int64_t b) {
@@ -1832,23 +2599,43 @@ template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
           std::int64_t P1, int L1, std::int64_t P2, int L2>
 Fix<TargetPower, TargetRadix, TargetLength> fixDivideTo(
     const Fix<P1, TargetRadix, L1>& a, const Fix<P2, TargetRadix, L2>& b) {
-  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(
-      fixDivideRaw(a.rawValue(), b.rawValue(), P1, P2, TargetPower,
-                   TargetRadix));
+  using Target = Fix<TargetPower, TargetRadix, TargetLength>;
+  if constexpr (TargetLength == 128 || L1 == 128 || L2 == 128) {
+    return Target::fromRawWideBits(fixDivideRaw(
+        fixRawToU128(a.rawValue()), fixRawToU128(b.rawValue()), P1, P2,
+        TargetPower, TargetRadix));
+  } else {
+    return Target::fromRaw(fixDivideRaw(a.rawValue(), b.rawValue(), P1, P2,
+                                        TargetPower, TargetRadix));
+  }
 }
 template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
           std::int64_t P1, int L1>
 Fix<TargetPower, TargetRadix, TargetLength> fixDivideIntTo(
     const Fix<P1, TargetRadix, L1>& a, std::int64_t b) {
-  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(
-      fixDivideRaw(a.rawValue(), b, P1, 0, TargetPower, TargetRadix));
+  using Target = Fix<TargetPower, TargetRadix, TargetLength>;
+  if constexpr (TargetLength == 128 || L1 == 128) {
+    return Target::fromRawWideBits(fixDivideRaw(
+        fixRawToU128(a.rawValue()), fixRawToU128(b), P1, 0, TargetPower,
+        TargetRadix));
+  } else {
+    return Target::fromRaw(
+        fixDivideRaw(a.rawValue(), b, P1, 0, TargetPower, TargetRadix));
+  }
 }
 template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
           std::int64_t P2, int L2>
 Fix<TargetPower, TargetRadix, TargetLength> fixIntDivideTo(
     std::int64_t a, const Fix<P2, TargetRadix, L2>& b) {
-  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(
-      fixDivideRaw(a, b.rawValue(), 0, P2, TargetPower, TargetRadix));
+  using Target = Fix<TargetPower, TargetRadix, TargetLength>;
+  if constexpr (TargetLength == 128 || L2 == 128) {
+    return Target::fromRawWideBits(fixDivideRaw(
+        fixRawToU128(a), fixRawToU128(b.rawValue()), 0, P2, TargetPower,
+        TargetRadix));
+  } else {
+    return Target::fromRaw(
+        fixDivideRaw(a, b.rawValue(), 0, P2, TargetPower, TargetRadix));
+  }
 }
 inline std::int64_t fixPowerDivisor(std::int64_t radix,
                                     std::int64_t exponent) {
@@ -1873,77 +2660,131 @@ template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
           std::int64_t P1, int L1, std::int64_t P2, int L2>
 Fix<TargetPower, TargetRadix, TargetLength> fixMultiplyTo(
     const Fix<P1, TargetRadix, L1>& a, const Fix<P2, TargetRadix, L2>& b) {
-  const std::int64_t naturalPower = P1 + P2;
-  std::int64_t value = 0;
-  if (TargetPower <= naturalPower) {
-    const std::int64_t divisor =
-        fixPowerDivisor(TargetRadix, naturalPower - TargetPower);
-    value = fixMulWideRounded(a.rawValue(), b.rawValue(), divisor);
+  using Target = Fix<TargetPower, TargetRadix, TargetLength>;
+  if constexpr (TargetLength == 128 || L1 == 128 || L2 == 128) {
+    return Target::fromRawWideBits(fixMultiplyToWide(
+        fixRawToU128(a.rawValue()), fixRawToU128(b.rawValue()), TargetRadix,
+        TargetPower, P1 + P2));
   } else {
-    value = fixLongDoubleToRaw(
-        static_cast<long double>(a.rawValue()) * b.rawValue() *
-        fixScaleLD(TargetRadix, TargetPower - naturalPower));
+    const std::int64_t naturalPower = P1 + P2;
+    std::int64_t value = 0;
+    if (TargetPower <= naturalPower) {
+      const std::int64_t divisor =
+          fixPowerDivisor(TargetRadix, naturalPower - TargetPower);
+      value = fixMulWideRounded(a.rawValue(), b.rawValue(), divisor);
+    } else {
+      value = fixLongDoubleToRaw(
+          static_cast<long double>(a.rawValue()) * b.rawValue() *
+          fixScaleLD(TargetRadix, TargetPower - naturalPower));
+    }
+    return Target::fromRaw(value);
   }
-  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(value);
 }
 template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
           std::int64_t P1, int L1>
 Fix<TargetPower, TargetRadix, TargetLength> fixMultiplyIntTo(
     const Fix<P1, TargetRadix, L1>& a, std::int64_t b) {
-  std::int64_t value = 0;
-  if (TargetPower <= P1) {
-    const std::int64_t divisor = fixPowerDivisor(TargetRadix, P1 - TargetPower);
-    value = fixMulWideRounded(a.rawValue(), b, divisor);
+  using Target = Fix<TargetPower, TargetRadix, TargetLength>;
+  if constexpr (TargetLength == 128 || L1 == 128) {
+    return Target::fromRawWideBits(fixMultiplyToWide(
+        fixRawToU128(a.rawValue()), fixRawToU128(b), TargetRadix, TargetPower,
+        P1));
   } else {
-    value = fixLongDoubleToRaw(
-        static_cast<long double>(a.rawValue()) * b *
-        fixScaleLD(TargetRadix, TargetPower - P1));
+    std::int64_t value = 0;
+    if (TargetPower <= P1) {
+      const std::int64_t divisor =
+          fixPowerDivisor(TargetRadix, P1 - TargetPower);
+      value = fixMulWideRounded(a.rawValue(), b, divisor);
+    } else {
+      value = fixLongDoubleToRaw(
+          static_cast<long double>(a.rawValue()) * b *
+          fixScaleLD(TargetRadix, TargetPower - P1));
+    }
+    return Target::fromRaw(value);
   }
-  return Fix<TargetPower, TargetRadix, TargetLength>::fromRaw(value);
 }
 template <std::int64_t TargetPower, std::int64_t TargetRadix, int TargetLength,
           std::int64_t P2, int L2>
 Fix<TargetPower, TargetRadix, TargetLength> fixIntMultiplyTo(
     std::int64_t a, const Fix<P2, TargetRadix, L2>& b) {
-  return fixMultiplyIntTo<TargetPower, TargetRadix, TargetLength>(
-      b, a);
+  using Target = Fix<TargetPower, TargetRadix, TargetLength>;
+  if constexpr (TargetLength == 128 || L2 == 128) {
+    return Target::fromRawWideBits(fixMultiplyToWide(
+        fixRawToU128(a), fixRawToU128(b.rawValue()), TargetRadix, TargetPower,
+        P2));
+  } else {
+    return fixMultiplyIntTo<TargetPower, TargetRadix, TargetLength>(b, a);
+  }
 }
 template <std::int64_t Power, std::int64_t Radix, int Length>
 void print(const Fix<Power, Radix, Length>& value) {
   static_assert(Radix >= 2 && Radix <= 36,
                 "fix print supports radix 2..36");
   const std::uint64_t base = static_cast<std::uint64_t>(Radix);
-  const std::int64_t raw = value.rawValue();
-  const bool negative = raw < 0;
-  const std::uint64_t magnitude = fixAbsU(raw);
-  std::string whole;
-  std::string fraction;
-  if (Power >= 0) {
-    const std::uint64_t denominator =
-        static_cast<std::uint64_t>(Fix<Power, Radix, Length>::scale);
-    whole = fixBaseDigits(magnitude / denominator, base);
-    std::uint64_t remainder = magnitude % denominator;
-    const char* alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
-    for (std::int64_t i = 0; i < Power; ++i) {
-      remainder *= base;
-      fraction.push_back(alphabet[remainder / denominator]);
-      remainder %= denominator;
+  if constexpr (Length == 128) {
+    const UInt128 raw = value.rawValue();
+    const bool negative = fixWideNegative(raw);
+    const UInt128 magnitude = negative ? fixWideNegate(raw) : raw;
+    std::string whole;
+    std::string fraction;
+    if (Power >= 0) {
+      const std::uint64_t denominator =
+          static_cast<std::uint64_t>(Fix<Power, Radix, Length>::scale);
+      whole = fixBaseDigitsWide(fixWideDivSmall(magnitude, denominator), base);
+      UInt128 remainder = fixWideModSmall(magnitude, denominator);
+      const char* alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+      for (std::int64_t i = 0; i < Power; ++i) {
+        remainder = fixWideMulSmall(remainder, base);
+        const UInt128 digitValue = fixWideDivSmall(remainder, denominator);
+        fraction.push_back(alphabet[static_cast<std::size_t>(digitValue.lo)]);
+        remainder = fixWideModSmall(remainder, denominator);
+      }
+      while (!fraction.empty() && fraction.back() == '0') {
+        fraction.pop_back();
+      }
+    } else {
+      const std::uint64_t factor =
+          static_cast<std::uint64_t>(Fix<Power, Radix, Length>::scale);
+      whole = fixBaseDigitsWide(fixWideMulSmallChecked(magnitude, factor), base);
     }
-    while (!fraction.empty() && fraction.back() == '0') {
-      fraction.pop_back();
-    }
+    if (negative) std::cout << '-';
+    std::cout << whole;
+    if (!fraction.empty()) std::cout << '.' << fraction;
+    std::cout << '\n';
+    return;
   } else {
-    const std::uint64_t factor =
-        static_cast<std::uint64_t>(Fix<Power, Radix, Length>::scale);
-    if (magnitude > std::numeric_limits<std::uint64_t>::max() / factor) {
-      fixOverflow();
+    const std::int64_t raw = value.rawValue();
+    const bool negative = raw < 0;
+    const std::uint64_t magnitude = fixAbsU(raw);
+    std::string whole;
+    std::string fraction;
+    if (Power >= 0) {
+      const std::uint64_t denominator =
+          static_cast<std::uint64_t>(Fix<Power, Radix, Length>::scale);
+      whole = fixBaseDigits(magnitude / denominator, base);
+      std::uint64_t remainder = magnitude % denominator;
+      const char* alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+      for (std::int64_t i = 0; i < Power; ++i) {
+        remainder *= base;
+        fraction.push_back(alphabet[remainder / denominator]);
+        remainder %= denominator;
+      }
+      while (!fraction.empty() && fraction.back() == '0') {
+        fraction.pop_back();
+      }
+    } else {
+      const std::uint64_t factor =
+          static_cast<std::uint64_t>(Fix<Power, Radix, Length>::scale);
+      if (magnitude > std::numeric_limits<std::uint64_t>::max() / factor) {
+        fixOverflow();
+      }
+      whole = fixBaseDigits(magnitude * factor, base);
     }
-    whole = fixBaseDigits(magnitude * factor, base);
+    if (negative) std::cout << '-';
+    std::cout << whole;
+    if (!fraction.empty()) std::cout << '.' << fraction;
+    std::cout << '\n';
   }
-  if (negative) std::cout << '-';
-  std::cout << whole;
-  if (!fraction.empty()) std::cout << '.' << fraction;
-  std::cout << '\n';
 }
 )COORD";
 
@@ -2933,8 +3774,14 @@ void CppEmitter::emitConst(const Decl& decl) {
   if (isFix) {
     const std::string fixName = cppTypeName(decl.resolvedType);
     if (decl.init != nullptr && decl.init->fixLiteral) {
-      out_ << fixName << "::fromRaw(static_cast<std::int64_t>("
-           << decl.init->fixRaw << "))";
+      if (decl.init->fixRawWide) {
+        out_ << fixName << "::fromRawBits("
+             << formatCppHex64(decl.init->fixRawHigh) << ", "
+             << formatCppHex64(decl.init->fixRawLow) << ")";
+      } else {
+        out_ << fixName << "::fromRaw(static_cast<std::int64_t>("
+             << decl.init->fixRaw << "))";
+      }
     } else if (value != nullptr && value->kind == Value::Kind::Int) {
       out_ << fixName << "::fromInteger(static_cast<std::int64_t>("
            << value->intValue << "))";
@@ -3829,8 +4676,13 @@ void CppEmitter::emitExpr(const Expr* expr) {
           expr->resolvedType->kind == TypeKind::Fix) {
         out_ << "coord_rt::Fix<" << expr->resolvedType->power << ", "
              << expr->resolvedType->radix << ", "
-             << expr->resolvedType->length << ">::fromRaw(" << expr->fixRaw
-             << "LL)";
+             << expr->resolvedType->length << ">::";
+        if (expr->fixRawWide) {
+          out_ << "fromRawBits(" << formatCppHex64(expr->fixRawHigh) << ", "
+               << formatCppHex64(expr->fixRawLow) << ")";
+        } else {
+          out_ << "fromRaw(" << expr->fixRaw << "LL)";
+        }
         return;
       }
       std::ostringstream stream;

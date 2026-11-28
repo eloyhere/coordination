@@ -1,0 +1,8 @@
+// A container element type cannot carry @Length/@Radix/@Power, so a fix shape
+// change into Array<fix> is E2109 instead of an implicit storage conversion.
+integer main() {
+    @Power(2) fix price = 1.5;
+    Array<fix> values = [price];
+    print(values[0]);
+    return 0;
+}

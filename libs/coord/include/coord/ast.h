@@ -86,6 +86,10 @@ struct Expr : Node {
   /// Set by Sema when a fractional literal is converted to a static-scale fix
   /// type: the encoded raw integer and the resolved target type.
   std::int64_t fixRaw = 0;
+  /// @Length(128) raw bits (two's complement); used when `fixRawWide` is set.
+  std::uint64_t fixRawHigh = 0;
+  std::uint64_t fixRawLow = 0;
+  bool fixRawWide = false;
   bool fixLiteral = false;
   /// Target fix type for a division whose power is overridden by an explicit
   /// target annotation (`@Power(n) fix y = x / 2;`).

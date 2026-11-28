@@ -1,0 +1,24 @@
+// @Length(128) fix: 128-bit literals, products and quotients go through
+// 256-bit intermediates so a 128x128 multiply or divide never truncates.
+integer main() {
+    @Length(128) @Power(0) fix max = 170141183460469231731687303715884105727.0;
+    print(max);
+    @Length(128) @Power(0) fix one = 1.0;
+    print(max - one);
+    print(max / 3);
+    print(max % 3);
+    print(one << 100);
+    @Length(128) @Power(0) fix minusTwo = -2.0;
+    print(minusTwo >> 1);
+    @Length(128) @Power(2) fix big = 1000000000000000000.0;
+    @Length(128) @Power(2) fix square = big * big;
+    print(square);
+    @Length(128) @Power(0) fix a = 100000000000000000000.0;
+    @Length(128) @Power(0) fix b = 1000000000000000000.0;
+    print(a * b);
+    @Length(128) @Radix(2) @Power(0) fix bits = 255.0;
+    print(bits);
+    @Length(128) @Radix(16) @Power(0) fix hex = 4095.0;
+    print(hex);
+    return 0;
+}

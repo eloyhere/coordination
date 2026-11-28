@@ -1,0 +1,23 @@
+// Target annotations drive @Length(128) fix conversion: @Length/@Radix/@Power
+// on the destination select the converted raw shape.
+integer main() {
+    @Length(128) @Power(2) fix price = 1.5;
+    @Length(128) @Power(4) fix fine = price;
+    print(fine);
+    @Length(128) @Radix(2) @Power(4) fix binary = price;
+    print(binary);
+    @Length(64) @Power(2) fix narrow = price;
+    print(narrow);
+    @Length(128) @Power(2) fix widened = narrow;
+    print(widened);
+    @Length(128) @Power(0) fix whole = 1000000000000000000.0;
+    @Length(128) @Power(2) fix scaled = whole;
+    print(scaled);
+    @Length(128) @Radix(10) @Power(0) fix three = 3.0;
+    @Length(128) @Radix(2) @Power(0) fix asBinary = three;
+    print(asBinary);
+    @Length(128) @Power(2) fix divisor = 3.0;
+    @Length(128) @Power(4) fix third = price / divisor;
+    print(third);
+    return 0;
+}

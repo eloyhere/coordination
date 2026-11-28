@@ -1,0 +1,7 @@
+// A 128-bit raw overflow is checked at runtime, never wrapped or truncated.
+integer main() {
+    @Length(128) @Power(0) fix max = 170141183460469231731687303715884105727.0;
+    @Length(128) @Power(0) fix one = 1.0;
+    print(max + one);
+    return 0;
+}

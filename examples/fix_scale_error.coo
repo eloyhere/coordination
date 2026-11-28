@@ -1,0 +1,7 @@
+// The static scale of @Power must still fit a signed 64-bit integer: radix-10
+// powers above 18 are rejected with E2102, independent of @Length(128).
+integer main() {
+    @Power(20) fix tooFine = 1.5;
+    print(tooFine);
+    return 0;
+}

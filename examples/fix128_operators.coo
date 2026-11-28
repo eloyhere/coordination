@@ -1,0 +1,33 @@
+// @Length(128) fix: operators keep the static-scale raw semantics; raw =
+// semantic * radix^power with a signed 128-bit raw and no runtime scale.
+integer main() {
+    @Length(128) @Power(2) fix a = 1.5;
+    @Length(128) @Power(2) fix b = 0.4;
+    print(a);
+    print(b);
+    print(a + b);
+    print(a - b);
+    @Length(128) @Power(2) fix product = a * b;
+    print(product);
+    @Length(128) @Power(4) fix fineProduct = a * b;
+    print(fineProduct);
+    @Length(128) @Power(2) fix quotient = a / b;
+    print(quotient);
+    @Length(128) @Power(2) fix remainder = a % b;
+    print(remainder);
+    print(-a);
+    print(a > b);
+    print(a & b);
+    print(a | b);
+    print(a ^ b);
+    print(~a);
+    print(a << 1);
+    print(a >> 1);
+    a++;
+    print(a);
+    ++a;
+    print(a);
+    a--;
+    print(a);
+    return 0;
+}

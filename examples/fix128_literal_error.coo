@@ -1,0 +1,7 @@
+// A @Length(128) fix literal beyond the signed 128-bit raw range is a
+// compile-time E2105 instead of a runtime truncation.
+integer main() {
+    @Length(128) @Power(0) fix tooLarge = 170141183460469231731687303715884105728.0;
+    print(tooLarge);
+    return 0;
+}

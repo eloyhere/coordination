@@ -1,0 +1,7 @@
+// 128-bit fix division by zero is checked at runtime.
+integer main() {
+    @Length(128) @Power(0) fix zero = 0.0;
+    @Length(128) @Power(0) fix one = 1.0;
+    print(one / zero);
+    return 0;
+}

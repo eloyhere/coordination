@@ -1,0 +1,41 @@
+// Same canonical fix shape copies need no target annotation: a local copy, a
+// parameter, a return value, a field and a container element are all plain
+// storage copies. A shape change still requires @Length/@Radix/@Power (E2109).
+class Wallet {
+public:
+    @Power(2) fix balance;
+    Wallet() { balance = 0.0; }
+}
+
+@Power(2) fix passThrough(@Power(2) fix value) {
+    return value;
+}
+
+@Power(2) fix make() {
+    return 1.5;
+}
+
+integer main() {
+    @Power(2) fix source = 1.5;
+    @Power(2) fix copy = source;
+    print(copy);
+    print(passThrough(source));
+    print(make());
+
+    Wallet wallet = Wallet();
+    wallet.balance = source;
+    print(wallet.balance);
+    @Power(2) fix fromField = wallet.balance;
+    print(fromField);
+
+    fix plain = 3;
+    fix plainCopy = plain;
+    fix[2] fixed;
+    fixed[0] = plainCopy;
+    print(fixed[0]);
+
+    Array<fix> values = [plain, plainCopy];
+    values[0] = fixed[0];
+    print(values[0]);
+    return 0;
+}

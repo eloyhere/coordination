@@ -6,7 +6,7 @@ Coordination is a statically typed systems language with **no macros**: compile-
 
 - Source files `.coo`; module interfaces `.coox`; compiler `coorc`.
 - Package manifests `coordination.toml` / `coord.pkg`; lockfile `coord.lock`.
-- Current baseline: **205 CTest cases**, with **205/205 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
+- Current baseline: **213 CTest cases**, with **213/213 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
 - The language and toolchain are wrapping up M3; [framework.md](framework.md) / [framework.zh-CN.md](framework.zh-CN.md) are authoritative, while this document focuses on usage.
 
 ## 1 Run It in 30 Seconds
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows uses presets derived from `windows-base` (Ninja + cl); Linux/macOS use `linux-release`/`macos-release`/`linux-debug`.
-- `ctest` registers **205 tests** (1 unit test plus 204 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
+- `ctest` registers **213 tests** (1 unit test plus 212 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
 - Sanitizers: `cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` builds with ASan + UBSan; `linux-sanitize` preset is provided. Run tests with `ASAN_OPTIONS=detect_leaks=0` when leak checks are not relevant.
 - Parser/compiler fuzzing: build with Clang and `-DCOORD_FUZZ=ON`; see [tests/fuzz/README.md](tests/fuzz/README.md). The parser fuzzer caught unbounded diagnostics; the compiler fuzzer exercises Sema/emitter and requires the `Checker` to outlive emission.
 - Always `--clean-first` after header changes; keep generated C++ for inspection with `coorc --emit-cpp out\x.cpp file.coo`.
@@ -499,11 +499,12 @@ integer main() {
 }
 ```
 
-- `fix` is static fixed point: `raw = semantic × radix^power`, represented as `coord_rt::Fix<Power, Radix, Length>` with one 8/16/32/64-bit raw integer (no runtime scale). Defaults are `@Length(64) @Radix(10) @Power(0)`.
-- `@Power` on an `integer` or `float` declaration promotes it to `fix`; `@Radix` alone does not. A fractional literal needs an explicit `@Power` to initialize a `fix` (otherwise `E2103`); it is encoded exactly at compile time, rounding half away from zero beyond the target scale.
-- Fix-to-fix conversion is target-driven: annotate the destination variable/field/parameter/return type (`@Power(4) fix fine = price;`, `@Radix(2) @Power(4) fix q = price;`, `@Length(16) ...`). A target without `@Length`/`@Radix`/`@Power` reports `E2109`. There are no `toRadix`/`toScale` methods; `toInteger()`/`toFloat()` only cross the fix storage boundary.
+- `fix` is static fixed point: `raw = semantic × radix^power`, represented as `coord_rt::Fix<Power, Radix, Length>` with one signed 8/16/32/64/128-bit raw integer (no runtime scale). Defaults are `@Length(64) @Radix(10) @Power(0)`.
+- `@Power` on an `integer` or `float` declaration promotes it to `fix`; `@Radix` alone does not. A fractional literal needs an explicit `@Power` to initialize a `fix` (otherwise `E2103`); it is encoded exactly at compile time, rounding half away from zero beyond the target scale. A `@Length(128)` literal is encoded into a signed 128-bit raw (e.g. `@Length(128) @Power(0) fix max = 170141183460469231731687303715884105727.0;`) and a literal beyond that range reports `E2105`.
+- Fix-to-fix conversion is target-driven: annotate the destination variable/field/parameter/return type (`@Power(4) fix fine = price;`, `@Radix(2) @Power(4) fix q = price;`, `@Length(16) ...`). A **copy between identical canonical shapes** (`@Length`/`@Radix`/`@Power` all equal, including the default `fix`) is a plain storage copy and needs no target annotation; a conversion that changes the shape without a target annotation reports `E2109`. The same rule applies to fields, parameters, return values, array/queue literals and map values, so no implicit cross-storage fix conversion is introduced by container operations. There are no `toRadix`/`toScale` methods; `toInteger()`/`toFloat()` only cross the fix storage boundary.
 - All operators work: `+ - * / %`, unary `-`, `++/--`, comparisons, `& | ^ ~ << >>`. Arithmetic/comparison is semantic (`+`/`-` align to the finer power, `*` adds powers, `/` uses `max(power1,power2)` and an explicit target can override it, `%` keeps the dividend sign); bitwise/shift operates on `raw` and requires identical radix/power/length (`E2111`).
-- `@Length` supports 8/16/32/64 with result-width widening (`+`/`-`: `max(len1,len2)+1`, `*`: `len1+len2`). An explicitly annotated `*` target uses a 64×64→128 product intermediate so a narrower target scale can be produced; `@Length(128)` remains deferred (`E2102`).
+- `@Length` supports 8/16/32/64/128 with result-width widening (`+`/`-`: `max(len1,len2)+1`, `*`: `len1+len2`; widths below 128 keep their previous result widths and a 128-bit operand widens the result to 128). A `*` or `/` assigned to an explicitly annotated target uses wider intermediates: 64×64→128 for the old widths and a portable 256-bit intermediate for 128×128, so a narrower target scale is produced without truncation.
+- The `@Length(128)` raw is a signed two's-complement 128-bit integer: the C++ backend uses a custom two-limb `coord_rt::UInt128` as the bit pattern with signed helpers, `__int128` on GCC/Clang for the 64×64→128 primitive and `_mul128` on 64-bit MSVC (portable 32-bit split fallback elsewhere); no non-standard library is required. Overflow, division by zero and out-of-range conversions are checked and abort with a `fix ...` diagnostic. The static `@Power` scale constant must still fit a signed 64-bit integer, so e.g. radix-10 `@Power(20)` remains `E2102` even for `@Length(128)`.
 - `print` renders the semantic value in the type's radix (2–36) and drops trailing zero digits.
 - `@Radix` accepts any integer `>= 2`; `0`, `1` and negatives report `E2100`. For `integer` it only changes generated C++ literal spelling for bases 2/8/16 (`0XFF`, `0B1010`, C++ octal `0100`); other bases spell decimal, and runtime `print` of an integer is unchanged.
 

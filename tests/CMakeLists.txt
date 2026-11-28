@@ -768,12 +768,76 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2111
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
-  add_test(NAME coord_e2e_fix_length_error
+  add_test(NAME coord_e2e_fix_scale_error
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>
-      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_length_error.coo
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_length_error
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_scale_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_scale_error
       -DEXPECT_SUBSTRING=E2102
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_fix128_operators
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix128_operators.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix128_operators
+      -DEXPECTED=1.5|0.4|1.9|1.1|0.6|0.6|3.75|0.3|-1.5|true|0|1.9|1.9|-1.51|3|0.75|2.5|3.5|2.5
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix128_integer
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix128_integer.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix128_integer
+      -DEXPECTED=170141183460469231731687303715884105727|170141183460469231731687303715884105726|56713727820156410577229101238628035242|1|1267650600228229401496703205376|-1|1000000000000000000000000000000000000|100000000000000000000000000000000000000|11111111|fff
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix128_conversion
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix128_conversion.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix128_conversion
+      -DEXPECTED=1.5|1.1|1.5|1.5|1000000000000000000|11|0.5
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix128_overflow
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix128_overflow.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix128_overflow
+      -DEXPECT_STDERR=fix overflow
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/runtime_fail.cmake)
+
+  add_test(NAME coord_e2e_fix128_divzero
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix128_divzero.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix128_divzero
+      -DEXPECT_STDERR=fix division by zero
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/runtime_fail.cmake)
+
+  add_test(NAME coord_e2e_fix128_literal_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix128_literal_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix128_literal_error
+      -DEXPECT_SUBSTRING=E2105
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_fix_copy
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_copy.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_copy
+      -DEXPECTED=1.5|1.5|1.5|1.5|1.5|3|3
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix_container_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_container_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_container_error
+      -DEXPECT_SUBSTRING=E2109
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
   add_test(NAME coord_e2e_determinism_reflection

@@ -1,5 +1,0 @@
-integer main() {
-    @Length(128) @Power(2) fix wide = 1.5;
-    print(wide);
-    return 0;
-}

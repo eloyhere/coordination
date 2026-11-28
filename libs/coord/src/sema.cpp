@@ -107,6 +107,473 @@ void fixRawRange(int length, std::int64_t& minimum, std::int64_t& maximum) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Compile-time 128/256-bit helpers for @Length(128) fix literal encoding.
+//
+// The backend raw of an @Length(128) fix is a signed two's-complement 128-bit
+// integer. Literals still have to be encoded exactly at compile time (raw =
+// round(semantic * radix^power)), so the encoder carries portable unsigned
+// 128-bit values plus 256-bit products/quotients (two/four 64-bit limbs, no
+// __int128 and no bignum library). Only the literal path needs the 256-bit
+// intermediate; the generated runtime has its own copy.
+// ---------------------------------------------------------------------------
+
+struct FixU128 {
+  std::uint64_t hi = 0;
+  std::uint64_t lo = 0;
+};
+
+FixU128 makeFixU128(std::uint64_t value) { return FixU128{0, value}; }
+
+bool fixU128Zero(const FixU128& value) {
+  return value.hi == 0 && value.lo == 0;
+}
+
+FixU128 fixU128Negate(const FixU128& value) {
+  FixU128 result;
+  result.lo = ~value.lo + 1;
+  result.hi = ~value.hi + (result.lo == 0 ? std::uint64_t{1} : std::uint64_t{0});
+  return result;
+}
+
+/// 64x64 -> 128 multiply without intrinsics (32-bit halves).
+std::uint64_t fixMul64(std::uint64_t left, std::uint64_t right,
+                       std::uint64_t& high) {
+  const std::uint64_t leftLow = left & 0xffffffffULL;
+  const std::uint64_t leftHigh = left >> 32;
+  const std::uint64_t rightLow = right & 0xffffffffULL;
+  const std::uint64_t rightHigh = right >> 32;
+  const std::uint64_t lowLow = leftLow * rightLow;
+  const std::uint64_t lowHigh = leftLow * rightHigh;
+  const std::uint64_t highLow = leftHigh * rightLow;
+  const std::uint64_t highHigh = leftHigh * rightHigh;
+  const std::uint64_t middle = (lowLow >> 32) + (lowHigh & 0xffffffffULL) +
+                               (highLow & 0xffffffffULL);
+  high = highHigh + (lowHigh >> 32) + (highLow >> 32) + (middle >> 32);
+  return (lowLow & 0xffffffffULL) | (middle << 32);
+}
+
+FixU128 fixU128MulU64(const FixU128& value, std::uint64_t factor,
+                      bool& overflow) {
+  std::uint64_t productHigh = 0;
+  const std::uint64_t productLow = fixMul64(value.lo, factor, productHigh);
+  std::uint64_t highHigh = 0;
+  const std::uint64_t highLow = fixMul64(value.hi, factor, highHigh);
+  if (highHigh != 0) {
+    overflow = true;
+  }
+  std::uint64_t nextHigh = highLow + productHigh;
+  if (nextHigh < highLow) {
+    overflow = true;
+  }
+  FixU128 result;
+  result.lo = productLow;
+  result.hi = nextHigh;
+  return result;
+}
+
+FixU128 fixU128AddU64(const FixU128& value, std::uint64_t addend,
+                      bool& overflow) {
+  FixU128 result;
+  result.lo = value.lo + addend;
+  result.hi = value.hi + (result.lo < value.lo ? std::uint64_t{1}
+                                               : std::uint64_t{0});
+  if (result.hi < value.hi) {
+    overflow = true;
+  }
+  return result;
+}
+
+struct FixU256 {
+  std::uint64_t words[4] = {0, 0, 0, 0};
+};
+
+FixU256 makeFixU256(std::uint64_t value) {
+  FixU256 result;
+  result.words[0] = value;
+  return result;
+}
+
+FixU256 fixU256FromU128(const FixU128& value) {
+  FixU256 result;
+  result.words[0] = value.lo;
+  result.words[1] = value.hi;
+  return result;
+}
+
+bool fixU256Zero(const FixU256& value) {
+  return value.words[0] == 0 && value.words[1] == 0 &&
+         value.words[2] == 0 && value.words[3] == 0;
+}
+
+int fixU256Compare(const FixU256& left, const FixU256& right) {
+  for (int index = 3; index >= 0; --index) {
+    if (left.words[index] != right.words[index]) {
+      return left.words[index] < right.words[index] ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+FixU256 fixU256Sub(const FixU256& left, const FixU256& right) {
+  FixU256 result;
+  std::uint64_t borrow = 0;
+  for (int index = 0; index < 4; ++index) {
+    const std::uint64_t difference = left.words[index] - right.words[index];
+    const std::uint64_t nextBorrow =
+        left.words[index] < right.words[index] ? std::uint64_t{1}
+                                               : std::uint64_t{0};
+    result.words[index] = difference - borrow;
+    if (difference < borrow) {
+      borrow = 1;
+    } else {
+      borrow = nextBorrow;
+    }
+  }
+  return result;
+}
+
+FixU256 fixU256Shl1(const FixU256& value) {
+  FixU256 result;
+  result.words[0] = value.words[0] << 1;
+  result.words[1] = (value.words[1] << 1) | (value.words[0] >> 63);
+  result.words[2] = (value.words[2] << 1) | (value.words[1] >> 63);
+  result.words[3] = (value.words[3] << 1) | (value.words[2] >> 63);
+  return result;
+}
+
+bool fixU256Bit(const FixU256& value, int index) {
+  if (index < 0 || index >= 256) {
+    return false;
+  }
+  return ((value.words[index / 64] >> (index % 64)) & 1ULL) != 0;
+}
+
+void fixU256SetBit(FixU256& value, int index) {
+  if (index < 0 || index >= 256) {
+    return;
+  }
+  value.words[index / 64] |= (std::uint64_t{1} << (index % 64));
+}
+
+bool fixU256FitsU128(const FixU256& value, FixU128& out) {
+  if (value.words[2] != 0 || value.words[3] != 0) {
+    return false;
+  }
+  out.hi = value.words[1];
+  out.lo = value.words[0];
+  return true;
+}
+
+FixU256 fixU256AddOne(const FixU256& value, bool& overflow) {
+  FixU256 result = value;
+  for (int index = 0; index < 4; ++index) {
+    ++result.words[index];
+    if (result.words[index] != 0) {
+      return result;
+    }
+  }
+  overflow = true;
+  return result;
+}
+
+FixU256 fixU256MulU64(const FixU256& value, std::uint64_t factor,
+                      bool& overflow) {
+  FixU256 result;
+  std::uint64_t carry = 0;
+  for (int index = 0; index < 4; ++index) {
+    std::uint64_t productHigh = 0;
+    const std::uint64_t productLow = fixMul64(value.words[index], factor,
+                                              productHigh);
+    std::uint64_t sum = productLow + carry;
+    if (sum < productLow) {
+      ++productHigh;
+    }
+    result.words[index] = sum;
+    carry = productHigh;
+  }
+  if (carry != 0) {
+    overflow = true;
+  }
+  return result;
+}
+
+/// Exact 128x128 -> 256 product.
+FixU256 fixU256MulU128(const FixU128& left, const FixU128& right) {
+  std::uint64_t high00 = 0;
+  const std::uint64_t low00 = fixMul64(left.lo, right.lo, high00);
+  std::uint64_t high01 = 0;
+  const std::uint64_t low01 = fixMul64(left.lo, right.hi, high01);
+  std::uint64_t high10 = 0;
+  const std::uint64_t low10 = fixMul64(left.hi, right.lo, high10);
+  std::uint64_t high11 = 0;
+  const std::uint64_t low11 = fixMul64(left.hi, right.hi, high11);
+  FixU256 result;
+  result.words[0] = low00;
+  // word1 = high00 + low01 + low10 (with carries into word2).
+  std::uint64_t middle = high00 + low01;
+  std::uint64_t carry = middle < high00 ? 1 : 0;
+  const std::uint64_t middlePlus = middle + low10;
+  carry += middlePlus < middle ? 1 : 0;
+  result.words[1] = middlePlus;
+  // word2 = high01 + high10 + low11 + carry (with carries into word3).
+  std::uint64_t upper = high01 + high10;
+  std::uint64_t upperCarry = upper < high01 ? 1 : 0;
+  const std::uint64_t upperPlus = upper + low11;
+  upperCarry += upperPlus < upper ? 1 : 0;
+  const std::uint64_t upperCarryPlus = upperPlus + carry;
+  upperCarry += upperCarryPlus < upperPlus ? 1 : 0;
+  result.words[2] = upperCarryPlus;
+  result.words[3] = high11 + upperCarry;
+  return result;
+}
+
+/// Exact unsigned 256/256 division. The divisor must be non-zero.
+void fixU256DivMod(const FixU256& numerator, const FixU256& divisor,
+                   FixU256& quotient, FixU256& remainder) {
+  quotient = FixU256{};
+  remainder = FixU256{};
+  if (fixU256Zero(divisor)) {
+    return;
+  }
+  if ((divisor.words[3] >> 63) != 0) {
+    // divisor >= 2^255: the quotient is 0 or 1; a bitwise shift loop would
+    // need a 257-bit remainder.
+    if (fixU256Compare(numerator, divisor) >= 0) {
+      quotient = makeFixU256(1);
+      remainder = fixU256Sub(numerator, divisor);
+    } else {
+      remainder = numerator;
+    }
+    return;
+  }
+  for (int bit = 255; bit >= 0; --bit) {
+    remainder = fixU256Shl1(remainder);
+    if (fixU256Bit(numerator, bit)) {
+      fixU256SetBit(remainder, 0);
+    }
+    if (fixU256Compare(remainder, divisor) >= 0) {
+      remainder = fixU256Sub(remainder, divisor);
+      fixU256SetBit(quotient, bit);
+    }
+  }
+}
+
+/// Parsed form of a fractional literal: value = (-1)^negative * digits *
+/// 10^exponent. `digits` has leading zeros removed and is empty for zero.
+struct FixLiteralParts {
+  bool valid = false;
+  bool negative = false;
+  std::string digits;
+  std::int64_t exponent = 0;
+};
+
+FixLiteralParts parseFixLiteral(std::string_view text) {
+  FixLiteralParts parts;
+  std::size_t position = 0;
+  if (position < text.size() &&
+      (text[position] == '+' || text[position] == '-')) {
+    parts.negative = text[position] == '-';
+    ++position;
+  }
+  std::int64_t exponent = 0;
+  bool inExponent = false;
+  bool negativeExponent = false;
+  bool sawExponentSign = false;
+  for (; position < text.size(); ++position) {
+    const char character = text[position];
+    if (character == 'e' || character == 'E') {
+      if (inExponent) {
+        return parts;
+      }
+      inExponent = true;
+      continue;
+    }
+    if (inExponent) {
+      if (character == '+' || character == '-') {
+        if (sawExponentSign) {
+          return parts;
+        }
+        sawExponentSign = true;
+        negativeExponent = character == '-';
+        continue;
+      }
+      if (character < '0' || character > '9') {
+        return parts;
+      }
+      exponent = exponent * 10 + (character - '0');
+      if (exponent > 100000) {
+        return parts;
+      }
+      continue;
+    }
+    if (character == '.' || character == '_') {
+      continue;
+    }
+    if (character < '0' || character > '9') {
+      return parts;
+    }
+    parts.digits.push_back(character);
+  }
+  if (negativeExponent) {
+    exponent = -exponent;
+  }
+  // Fold the number of mantissa fraction digits into the exponent.
+  std::size_t dot = text.find('.');
+  std::size_t end = text.find_first_of("eE");
+  if (end == std::string_view::npos) {
+    end = text.size();
+  }
+  if (dot != std::string_view::npos && dot < end) {
+    for (std::size_t index = dot + 1; index < end; ++index) {
+      if (text[index] >= '0' && text[index] <= '9') {
+        --exponent;
+      }
+    }
+  }
+  parts.exponent = exponent;
+  const std::size_t first = parts.digits.find_first_not_of('0');
+  if (first == std::string::npos) {
+    parts.digits.clear();
+  } else {
+    parts.digits.erase(0, first);
+  }
+  parts.valid = true;
+  return parts;
+}
+
+/// Encodes a fractional literal as the raw integer of a @Length(128) fix type,
+/// rounding half away from zero. Returns false when the literal does not fit a
+/// signed 128-bit raw.
+bool encodeFixLiteral128(std::string_view text, int radix, int power,
+                         std::uint64_t& high, std::uint64_t& low) {
+  const FixLiteralParts parts = parseFixLiteral(text);
+  if (!parts.valid) {
+    return false;
+  }
+  high = 0;
+  low = 0;
+  if (parts.digits.empty()) {
+    return true;
+  }
+  // Normalize trailing zeros back into the exponent so that spellings such as
+  // "170141183460469231731687303715884105727.0" carry 39 significant digits.
+  std::string digits = parts.digits;
+  std::int64_t exponent = parts.exponent;
+  while (!digits.empty() && digits.back() == '0') {
+    digits.pop_back();
+    ++exponent;
+  }
+  if (digits.empty()) {
+    return true;
+  }
+  // A signed 128-bit raw has at most 39 decimal digits (2^128 ~ 3.4e38); a
+  // longer mantissa cannot survive the final range check, so reject it before
+  // building 256-bit intermediates.
+  if (digits.size() > 39) {
+    return false;
+  }
+  FixU128 mantissa = makeFixU128(0);
+  for (char digit : digits) {
+    bool overflow = false;
+    mantissa = fixU128MulU64(mantissa, 10, overflow);
+    if (overflow) {
+      return false;
+    }
+    mantissa = fixU128AddU64(mantissa, static_cast<std::uint64_t>(digit - '0'),
+                             overflow);
+    if (overflow) {
+      return false;
+    }
+  }
+  FixU256 numerator = fixU256FromU128(mantissa);
+  FixU256 denominator = makeFixU256(1);
+  bool denominatorTooLarge = false;
+  const auto scale = [](FixU256& value, std::uint64_t factor,
+                        std::int64_t count, bool& overflow) {
+    for (std::int64_t index = 0; index < count; ++index) {
+      value = fixU256MulU64(value, factor, overflow);
+      if (overflow) {
+        return;
+      }
+    }
+  };
+  if (exponent >= 0) {
+    bool overflow = false;
+    scale(numerator, 10, exponent, overflow);
+    if (overflow) {
+      return false;
+    }
+  } else {
+    bool overflow = false;
+    scale(denominator, 10, -exponent, overflow);
+    denominatorTooLarge = overflow;
+  }
+  if (!denominatorTooLarge) {
+    if (power >= 0) {
+      bool overflow = false;
+      scale(numerator, static_cast<std::uint64_t>(radix), power, overflow);
+      if (overflow) {
+        return false;
+      }
+    } else {
+      bool overflow = false;
+      scale(denominator, static_cast<std::uint64_t>(radix), -power, overflow);
+      denominatorTooLarge = overflow;
+    }
+  }
+  FixU256 quotient;
+  FixU256 remainder;
+  if (denominatorTooLarge) {
+    // denominator > 2^256-1; a numerator with bit 255 clear is less than half
+    // the denominator, so the value rounds to zero. Larger numerators are
+    // rejected rather than rounded ambiguously.
+    if ((numerator.words[3] >> 63) != 0) {
+      return false;
+    }
+    quotient = FixU256{};
+    remainder = FixU256{};
+  } else {
+    fixU256DivMod(numerator, denominator, quotient, remainder);
+    if (!fixU256Zero(remainder)) {
+      bool roundUp = false;
+      if (fixU256Bit(remainder, 255)) {
+        roundUp = true;
+      } else {
+        const FixU256 twice = fixU256Shl1(remainder);
+        roundUp = fixU256Compare(twice, denominator) >= 0;
+      }
+      if (roundUp) {
+        bool overflow = false;
+        quotient = fixU256AddOne(quotient, overflow);
+        if (overflow) {
+          return false;
+        }
+      }
+    }
+  }
+  // Signed 128-bit range: positive <= 2^127-1, negative <= 2^127.
+  FixU256 limit;
+  limit.words[1] = parts.negative ? 0x8000000000000000ULL
+                                  : 0x7fffffffffffffffULL;
+  limit.words[0] = parts.negative ? 0 : 0xffffffffffffffffULL;
+  if (fixU256Compare(quotient, limit) > 0) {
+    return false;
+  }
+  FixU128 magnitude;
+  if (!fixU256FitsU128(quotient, magnitude)) {
+    // The limit already fits 128 bits, so this cannot happen; reject rather
+    // than truncate silently.
+    return false;
+  }
+  if (parts.negative && !fixU128Zero(magnitude)) {
+    magnitude = fixU128Negate(magnitude);
+  }
+  high = magnitude.hi;
+  low = magnitude.lo;
+  return true;
+}
+
 /// Encodes a fractional literal (e.g. "19.99", "1.5e-2") as the raw
 /// integer of a fix type with the given radix and power, rounding half away
 /// from zero. Returns false when the literal does not fit a 64-bit raw value.
@@ -298,6 +765,16 @@ void parseOptionalPolicy(const AnnotationUse& use, ProxyPolicy& policy,
 bool isComparisonOperator(const std::string& op) {
   return op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" ||
          op == ">=";
+}
+
+/// True when two fix types describe the same canonical static shape
+/// (@Length/@Radix/@Power). A copy between identical shapes is a plain storage
+/// copy and needs no target annotation; only a shape change is a conversion.
+bool sameFixShape(const Type* left, const Type* right) {
+  return left != nullptr && right != nullptr &&
+         left->kind == TypeKind::Fix && right->kind == TypeKind::Fix &&
+         left->length == right->length && left->radix == right->radix &&
+         left->power == right->power;
 }
 
 /// Recognizes a condition that proves an @Optional variable is present (or
@@ -1368,11 +1845,11 @@ Type* Checker::resolveNumericType(TypeExpr* type, Type* base) {
   const int targetPower =
       type->hasNumericPower ? power : (base->kind == TypeKind::Fix ? base->power : 0);
   if (targetLength != 8 && targetLength != 16 && targetLength != 32 &&
-      targetLength != 64) {
+      targetLength != 64 && targetLength != 128) {
     diagnostics_.error(type->span, "E2102",
                        "@Length(" + std::to_string(targetLength) +
                            ") for fix is not supported; fix raw widths are "
-                           "8, 16, 32 or 64");
+                           "8, 16, 32, 64 or 128");
     return base;
   }
   if (targetRadix < 2) {
@@ -1403,15 +1880,26 @@ int Checker::nextFixLength(int bits) {
   if (bits <= 32) {
     return 32;
   }
-  return 64;
+  if (bits <= 64) {
+    return 64;
+  }
+  return 128;
 }
 
 int Checker::fixAddLength(int left, int right) {
+  // Widths below 128 keep their historical result type; only an operand that
+  // is already 128-bit widens the result to 128.
+  if (left > 64 || right > 64) {
+    return 128;
+  }
   const int wider = left > right ? left : right;
   return nextFixLength(wider + 1);
 }
 
 int Checker::fixMulLength(int left, int right) {
+  if (left > 64 || right > 64) {
+    return 128;
+  }
   return nextFixLength(left + right);
 }
 
@@ -1429,8 +1917,12 @@ void Checker::checkFixTargetConversion(Type* from, Type* to,
                                        bool targetExplicit, Span span,
                                        const std::string& context) {
   if (from == nullptr || to == nullptr ||
-      from->kind != TypeKind::Fix || to->kind != TypeKind::Fix ||
-      from == to) {
+      from->kind != TypeKind::Fix || to->kind != TypeKind::Fix) {
+    return;
+  }
+  // Identical canonical shapes (canonical `fix` records with the same
+  // @Length/@Radix/@Power) are ordinary copies: no annotation is required.
+  if (sameFixShape(from, to)) {
     return;
   }
   if (!targetExplicit) {
@@ -1454,7 +1946,7 @@ void Checker::applyFixTargetContext(Expr* value, Type* target,
   }
   if (value->kind == ExprKind::Binary &&
       (value->op == "/" || value->op == "*")) {
-    if (natural != target) {
+    if (!sameFixShape(natural, target)) {
       checkFixTargetConversion(natural, target, targetExplicit, span,
                                value->op == "/" ? "division"
                                                 : "multiplication");
@@ -1492,6 +1984,27 @@ bool Checker::coerceFractionLiteral(Expr* expr, Type* target,
     return false;
   }
   std::int64_t raw = 0;
+  if (target->length == 128) {
+    std::uint64_t high = 0;
+    std::uint64_t low = 0;
+    if (!encodeFixLiteral128(literal->fractionText, target->radix,
+                            target->power, high, low)) {
+      diagnostics_.error(literal->span, "E2105",
+                         "fractional literal '" + literal->fractionText +
+                             "' does not fit a 128-bit fix raw at @Power(" +
+                             std::to_string(target->power) + "), @Radix(" +
+                             std::to_string(target->radix) + ")");
+      return false;
+    }
+    literal->fixRaw = 0;
+    literal->fixRawHigh = high;
+    literal->fixRawLow = low;
+    literal->fixRawWide = true;
+    literal->fixLiteral = true;
+    literal->resolvedType = target;
+    expr->resolvedType = target;
+    return true;
+  }
   if (!encodeFixLiteral(literal->fractionText, target->radix, target->power,
                         raw)) {
     diagnostics_.error(literal->span, "E2105",
@@ -1502,6 +2015,9 @@ bool Checker::coerceFractionLiteral(Expr* expr, Type* target,
     return false;
   }
   literal->fixRaw = raw;
+  literal->fixRawHigh = raw < 0 ? ~std::uint64_t{0} : 0;
+  literal->fixRawLow = static_cast<std::uint64_t>(raw);
+  literal->fixRawWide = false;
   literal->fixLiteral = true;
   std::int64_t minimum = 0;
   std::int64_t maximum = 0;
@@ -5925,6 +6441,8 @@ Type* Checker::checkCall(Expr* expr) {
           Type* key = checkExpr(expr->args[0].get());
           Type* value = checkExpr(expr->args[1].get());
           requireAssignable(key, keyType, expr->args[0]->span, "map key");
+          applyFixTargetContext(expr->args[1].get(), valueType,
+                                /*targetExplicit=*/false, expr->args[1]->span);
           requireAssignable(value, valueType, expr->args[1]->span,
                             "map value");
         }
@@ -6028,6 +6546,8 @@ Type* Checker::checkCall(Expr* expr) {
                              "'" + callee->name + "' takes one argument");
         } else {
           Type* value = checkExpr(expr->args[0].get());
+          applyFixTargetContext(expr->args[0].get(), baseType->pointee,
+                                /*targetExplicit=*/false, expr->args[0]->span);
           requireAssignable(value, baseType->pointee, expr->args[0]->span,
                             "queue element");
         }
@@ -6871,6 +7391,13 @@ void Checker::checkStmt(Stmt* stmt) {
         } else {
           for (const auto& element : stmt->expr->args) {
             Type* elementType = checkExpr(element.get());
+            // A fix element copy follows the same rule as a variable copy:
+            // identical canonical shapes need no annotation and a shape change
+            // requires one (the container element type cannot carry one here,
+            // so a shape change is rejected as E2109 instead of silently
+            // converting through the C++ converting constructor).
+            applyFixTargetContext(element.get(), type->pointee,
+                                  /*targetExplicit=*/false, element->span);
             requireAssignable(elementType, type->pointee, element->span,
                               "array element");
             checkClosureEscape(element.get(),

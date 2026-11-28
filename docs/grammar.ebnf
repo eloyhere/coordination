@@ -117,7 +117,22 @@ constraint       = type, [ "extends", type ] ;
    boolean and function. Numeric annotations @Length/@Radix/@Power target a
    type expression: when they precede a local/field/parameter/return type they
    bind to that type, and @Power on integer/float promotes the resolved type to
-   fix.                                                                       *)
+   fix.
+
+   fix numeric annotations:
+   - @Length(8 | 16 | 32 | 64 | 128) selects the raw width; default 64.
+     The raw is a signed two's-complement integer and the invariant is
+     raw = semantic * radix^power with no runtime scale.
+   - @Radix(>= 2) selects the scaling/printing base; @Power(n) selects the
+     static exponent. The static scale radix^|power| must fit a signed 64-bit
+     integer (E2102); @Length(128) raws use 128-bit literals and wider
+     intermediates instead.
+   - Copying between identical canonical shapes (same @Length/@Radix/@Power,
+     default fix included) is a plain storage copy and needs no target
+     annotation. A shape change is a conversion and requires an annotation on
+     the target variable/field/parameter/return type, otherwise E2109. A
+     container element type cannot carry these annotations, so a shape change
+     there is E2109 too (no implicit cross-storage conversion).              *)
 
 type             = union-type ;
 union-type       = intersect-type, { "|", intersect-type } ;
