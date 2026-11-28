@@ -1,0 +1,11 @@
+// Storing a by-reference closure in an outer-scope variable lets the closure
+// outlive the borrowed local.
+integer main() {
+    (integer) -> integer outer;
+    {
+        integer local = 7;
+        outer = [&local](integer value): integer -> value + local;
+    }
+    print(outer(1));
+    return 0;
+}

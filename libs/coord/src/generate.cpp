@@ -2959,10 +2959,11 @@ void CppEmitter::emitExpr(const Expr* expr) {
       out_ << ')';
       return;
     case ExprKind::Lambda: {
-      const std::string captures =
-          expr->lambda != nullptr && !expr->lambda->captureList.empty()
-              ? expr->lambda->captureList
-              : "[=]";
+      const bool implicitCaptures =
+          expr->lambda != nullptr && expr->lambda->captureList.empty();
+      const std::string captures = !implicitCaptures
+                                       ? expr->lambda->captureList
+                                       : "[=]";
       out_ << captures << '(';
       if (expr->lambda != nullptr) {
         for (std::size_t i = 0; i < expr->lambda->params.size(); ++i) {
@@ -2973,7 +2974,12 @@ void CppEmitter::emitExpr(const Expr* expr) {
                << sanitize(expr->lambda->params[i].name);
         }
       }
-      out_ << ") -> ";
+      out_ << ')';
+      if (implicitCaptures) {
+        // An omitted capture list copies by value and the copy is mutable.
+        out_ << " mutable";
+      }
+      out_ << " -> ";
       if (expr->lambda != nullptr) {
         out_ << typeToString(expr->lambda->returnType.get());
         out_ << " {";

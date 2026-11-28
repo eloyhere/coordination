@@ -93,6 +93,8 @@ struct Expr : Node {
   const Expr* optionalDefault = nullptr;
   std::string proxyMessage;
   int radix = 0;
+  /// Propagated borrow lifetime of a closure value (see LambdaInfo).
+  int borrowDepth = 0;
   bool weakValue = false;
   bool optionalField = false;
   bool optionalCall = false;
@@ -247,12 +249,26 @@ struct Initializer {
   Span span;
 };
 
+/// One entry of a lambda capture list. A default capture (`[=]` / `[&]`) has an
+/// empty `name`; `[this]` uses `Kind::This`.
+struct Capture {
+  enum class Kind { ByValue, ByRef, This };
+  Span span;
+  std::string name;
+  Kind kind = Kind::ByValue;
+};
+
 struct LambdaInfo {
   std::string captureList;
+  std::vector<Capture> captures;
   std::vector<Param> params;
   TypeExprPtr returnType;
   StmtPtr body;
   ExprPtr bodyExpr;
+  /// Non-zero when the closure holds a borrow: -1 means a call-scoped borrow
+  /// (a function-typed parameter), a positive value is the lexical scope depth
+  /// of the borrowed local. 0 means the closure owns everything it uses.
+  int borrowDepth = 0;
 };
 
 struct EnumVariant {

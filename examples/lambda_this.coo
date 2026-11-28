@@ -1,0 +1,20 @@
+// With an explicit capture list, accessing a member requires [this].
+class Counter {
+public:
+    integer value;
+
+    Counter(integer start) {
+        this.value = start;
+    }
+
+    integer applyFive() {
+        (integer) -> integer add = [](integer x): integer -> x + value;
+        return add(5);
+    }
+}
+
+integer main() {
+    Counter counter = Counter(10);
+    print(counter.applyFive());
+    return 0;
+}

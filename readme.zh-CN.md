@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**126 项 CTest**，Windows 全套 **126/126 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 当前基线：**132 项 CTest**，Windows 全套 **132/132 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **126 项**（1 个单元测试 + 125 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 注册 **132 项**（1 个单元测试 + 131 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -519,10 +519,10 @@ coorc build . -o out\app.exe
 
 ## 9 限制与已知问题
 
-- `lambda`、`if` 表达式、完整模式匹配、`@Native`/FFI、`@Copy`/`@Wrap` 语义、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 尚未实现；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
+- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口、方法引用、函数指针目标、链式调用与跨线程闭包逃逸仍属 ⏳。`if` 表达式与完整模式匹配尚未实现。`@Native`/FFI 为 v1 子集：无函数体、原始类型/string 参数与返回值，通过生成包装调用 C 符号；class/指针/header/library 与 C++ ABI 选择仍属 ⏳。`@Copy`/`@Wrap`、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 仍属 ⏳；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
 - `ProxyPolicy` 的执行主要验证了局部 `T*`/`@Unique`/`@Share` 变量（直接访问、收窄、局部 Optional 解构）与 `@Proxy` 的 `Skip`/`Abort`/`Error` 解构路径。字段/参数/返回值上的 `@Optional` 已解析/校验，但完整 policy 执行仍不完整；`@Proxy` 的 `Default(expr)` 构造/解构、runtime 构造前钩子、任意非默认构造类的 `Skip` 默认值仍属 🚧。
 - `@Constructure` 类型化/命名构造与 `@Retention(Compile/Runtime)` 代码块已实现基础版；编译期块不能依赖运行期局部状态，代码块上的 `Invocation`/`enum` 报 `E2044`；复杂构造重载消歧仍属 🚧。
-- 所有权与 borrow 检查仍是保守子集：`&` 不能返回/存字段，但跨线程/闭包逃逸检查待补。
+- 所有权与 borrow 检查仍是保守子集：`&` 不能返回/存字段/作容器元素；按引用闭包不能返回、存入字段/容器字面量或赋给外层作用域变量（`E2039`），跨线程逃逸与完整生命周期分析待补。函数类型参数按调用期借用处理：返回或存储它们会被拒绝。
 - 别名局部变量声明 `l.Payload p = ...` 有语法歧义，当前只完整支持参数/返回类型位置。
 - 包管理：workspace 只解析不递归安装；无 feature、git 依赖、包签名/信任链；`search` 依赖 `index.toml`。
 - 交叉编译：MSVC 宿主不能交叉编译，交叉目标不能运行。

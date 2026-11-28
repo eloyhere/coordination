@@ -1,0 +1,12 @@
+// A closure that captures a local by reference must not be returned.
+(integer) -> integer makeEscaping() {
+    integer captured = 41;
+    (integer) -> integer inner = [&captured](integer value): integer -> value + captured;
+    return inner;
+}
+
+integer main() {
+    (integer) -> integer fn = makeEscaping();
+    print(fn(1));
+    return 0;
+}

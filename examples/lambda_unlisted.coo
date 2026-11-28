@@ -1,0 +1,8 @@
+// With an explicit capture list, outer names that are not listed are invisible.
+integer main() {
+    integer a = 1;
+    integer b = 2;
+    (integer) -> integer f = [a](integer x): integer -> x + a + b;
+    print(f(1));
+    return 0;
+}

@@ -114,6 +114,29 @@ struct Type {
   }
 };
 
+/// Properties of an enclosing variable at the point a lambda references it.
+struct LambdaCaptureRef {
+  int scopeDepth = 0;
+  int borrowDepth = 0;
+};
+
+/// Capture bookkeeping for the lambda body currently being checked.
+struct LambdaContext {
+  bool explicitList = false;
+  bool hasDefault = false;
+  bool defaultByRef = false;
+  bool capturesThis = false;
+  std::size_t scopeBoundary = 0;
+  /// Explicitly named captures: name -> true when captured by reference.
+  std::unordered_map<std::string, bool> namedCaptures;
+  /// Effective capture mode of every name the lambda captures.
+  std::unordered_map<std::string, bool> captured;
+  /// Declaration properties of explicitly named captures.
+  std::unordered_map<std::string, LambdaCaptureRef> namedRefs;
+  /// Every enclosing name referenced from the body.
+  std::unordered_map<std::string, LambdaCaptureRef> refs;
+};
+
 class Checker {
 public:
   Checker(SourceManager& sources, DiagnosticEngine& diagnostics);
@@ -147,6 +170,12 @@ private:
     ProxyPolicy proxyPolicy = ProxyPolicy::Error;
     const Expr* optionalDefault = nullptr;
     const Decl* field = nullptr;
+    /// Lexical scope depth of the declaration; deeper scopes end earlier.
+    int scopeDepth = 0;
+    /// Borrow lifetime carried by a function-typed value (see LambdaInfo):
+    /// 0 owns everything, -1 is a call-scoped borrow, positive is the scope
+    /// depth of the borrowed local.
+    int borrowDepth = 0;
   };
 
   /// A lexical scope corresponds to one `{ ... }` block. Class bodies and the
@@ -179,6 +208,21 @@ private:
   void validateDoc(Decl& decl);
   Type* makeFunctionType(std::vector<Type*> params, Type* returnType);
   void checkLambda(Expr* expr, Type* expected);
+  /// Validates `[captures]`, records how outer names are captured, and computes
+  /// the closure's borrow lifetime. Mirrors checkLambda's lexical boundary.
+  void resolveLambdaCaptures(Expr* expr);
+  /// Records a reference to an enclosing variable from the current lambda body
+  /// and rejects unlisted names when the capture list is explicit.
+  void recordCaptureUse(const Expr* expr, const std::string& name,
+                        const Variable& variable, std::size_t scopeIndex);
+  /// Rejects implicit `this` access when an explicit capture list lacks [this].
+  void recordThisCapture(Span span);
+  /// Rejects assignment/++/-- through an explicit by-value capture (E2088).
+  void checkCaptureMutation(const Expr* target, Span span);
+  /// Computes the borrow lifetime of one lambda from its resolved captures.
+  [[nodiscard]] int evaluateLambdaBorrow(const LambdaContext& context) const;
+  /// Reports E2039 when a closure value would outlive its borrow.
+  void checkClosureEscape(const Expr* value, std::string_view where);
   void checkShareTypeCycles(ModuleAst& module);
   int resolveLength(const std::vector<AnnotationUse>& annotations, Type* type,
                     Span span);
@@ -222,7 +266,8 @@ private:
   void restoreOptionalNarrowing(
       std::vector<std::pair<std::string, bool>>& undo);
 
-  [[nodiscard]] Variable* lookupVariable(std::string_view name);
+  [[nodiscard]] Variable* lookupVariable(std::string_view name,
+                                         std::size_t* scopeIndex = nullptr);
   [[nodiscard]] const Decl* lookupFunction(std::string_view name,
                                            std::size_t argc) const;
   [[nodiscard]] const FieldInfo* lookupField(Type* type,
@@ -292,6 +337,7 @@ private:
 
   std::vector<Scope> scopes_;
   std::vector<std::unordered_map<std::string, Type*>> typeScopes_;
+  std::vector<LambdaContext> lambdaContexts_;
 
   Type* currentClass_ = nullptr;
   Decl* currentClassDecl_ = nullptr;

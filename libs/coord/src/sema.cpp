@@ -642,13 +642,18 @@ void Checker::declareVariable(const std::string& name, Type* type,
   variable.proxyPolicy = proxyPolicy;
   variable.optionalDefault = optionalDefault;
   variable.field = field;
+  variable.scopeDepth = static_cast<int>(scopes_.size());
   variables[name] = variable;
 }
 
-Checker::Variable* Checker::lookupVariable(std::string_view name) {
-  for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-    const auto found = it->variables.find(std::string(name));
-    if (found != it->variables.end()) {
+Checker::Variable* Checker::lookupVariable(std::string_view name,
+                                           std::size_t* scopeIndex) {
+  for (std::size_t i = scopes_.size(); i > 0; --i) {
+    const auto found = scopes_[i - 1].variables.find(std::string(name));
+    if (found != scopes_[i - 1].variables.end()) {
+      if (scopeIndex != nullptr) {
+        *scopeIndex = i - 1;
+      }
       return &found->second;
     }
   }
@@ -2152,6 +2157,11 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
+      if (paramType != nullptr && paramType->kind == TypeKind::Function) {
+        // A function-typed parameter is only guaranteed to live for the
+        // duration of the call; it must not be returned or stored.
+        declared->borrowDepth = -1;
+      }
     }
   }
   owner->methods.push_back(info);
@@ -2206,6 +2216,11 @@ void Checker::checkConstructorDecl(Decl& decl) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
+      if (paramType != nullptr && paramType->kind == TypeKind::Function) {
+        // A function-typed parameter is only guaranteed to live for the
+        // duration of the call; it must not be returned or stored.
+        declared->borrowDepth = -1;
+      }
     }
   }
 
@@ -2572,6 +2587,11 @@ void Checker::checkFunction(Decl& decl) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
+      if (paramType != nullptr && paramType->kind == TypeKind::Function) {
+        // A function-typed parameter is only guaranteed to live for the
+        // duration of the call; it must not be returned or stored.
+        declared->borrowDepth = -1;
+      }
     }
   }
 
@@ -2809,6 +2829,179 @@ void Checker::requireAssignable(Type* from, Type* to, Span span,
                          "', found '" + fromName + "'");
 }
 
+void Checker::checkClosureEscape(const Expr* value, std::string_view where) {
+  if (value == nullptr || value->borrowDepth == 0) {
+    return;
+  }
+  diagnostics_.error(
+      value->span, "E2039",
+      "a closure that captures by reference cannot " + std::string(where) +
+          "; capture by value, return a new closure, or keep the closure "
+          "inside the borrowed scope");
+}
+
+void Checker::resolveLambdaCaptures(Expr* expr) {
+  LambdaContext context;
+  context.explicitList = !expr->lambda->captureList.empty();
+  bool sawDefault = false;
+  for (std::size_t i = 0; i < expr->lambda->captures.size(); ++i) {
+    const Capture& capture = expr->lambda->captures[i];
+    if (capture.kind == Capture::Kind::This) {
+      if (currentClass_ == nullptr) {
+        diagnostics_.error(capture.span, "E2087",
+                           "'this' can only be captured inside a class");
+        continue;
+      }
+      if (context.capturesThis) {
+        diagnostics_.error(capture.span, "E2087",
+                           "duplicate 'this' capture");
+      }
+      context.capturesThis = true;
+      continue;
+    }
+    if (capture.name.empty()) {
+      if (sawDefault || i != 0) {
+        diagnostics_.error(
+            capture.span, "E2087",
+            "the default capture ('=' or '&') must appear once and first");
+        continue;
+      }
+      sawDefault = true;
+      context.hasDefault = true;
+      context.defaultByRef = capture.kind == Capture::Kind::ByRef;
+      continue;
+    }
+    if (context.namedCaptures.find(capture.name) !=
+        context.namedCaptures.end()) {
+      diagnostics_.error(capture.span, "E2087",
+                         "duplicate capture of '" + capture.name + "'");
+      continue;
+    }
+    const bool byRef = capture.kind == Capture::Kind::ByRef;
+    if (context.hasDefault && context.defaultByRef == byRef) {
+      diagnostics_.error(capture.span, "E2087",
+                         "capture '" + capture.name +
+                             "' cannot repeat the default capture mode");
+      continue;
+    }
+    Variable* variable = lookupVariable(capture.name);
+    if (variable == nullptr) {
+      diagnostics_.error(capture.span, "E2087",
+                         "cannot capture unknown identifier '" +
+                             capture.name + "'");
+      continue;
+    }
+    LambdaCaptureRef info{variable->scopeDepth, variable->borrowDepth};
+    context.namedCaptures[capture.name] = byRef;
+    context.captured[capture.name] = byRef;
+    context.namedRefs[capture.name] = info;
+    context.refs[capture.name] = info;
+  }
+  lambdaContexts_.push_back(std::move(context));
+}
+
+void Checker::recordCaptureUse(const Expr* expr, const std::string& name,
+                               const Variable& variable,
+                               std::size_t scopeIndex) {
+  for (auto it = lambdaContexts_.rbegin(); it != lambdaContexts_.rend(); ++it) {
+    if (scopeIndex >= it->scopeBoundary) {
+      break;
+    }
+    if (it->explicitList &&
+        it->namedCaptures.find(name) == it->namedCaptures.end() &&
+        !it->hasDefault) {
+      diagnostics_.error(
+          expr->span, "E2087",
+          "outer variable '" + name +
+              "' is not in the lambda capture list; list it explicitly or "
+              "use a default capture");
+      return;
+    }
+    const bool byRef = it->namedCaptures.find(name) != it->namedCaptures.end()
+                           ? it->namedCaptures[name]
+                           : it->defaultByRef;
+    it->refs[name] = LambdaCaptureRef{variable.scopeDepth,
+                                      variable.borrowDepth};
+    it->captured[name] = byRef;
+  }
+}
+
+void Checker::recordThisCapture(Span span) {
+  for (auto it = lambdaContexts_.rbegin(); it != lambdaContexts_.rend(); ++it) {
+    if (!it->explicitList || it->capturesThis) {
+      continue;
+    }
+    diagnostics_.error(
+        span, "E2087",
+        "'this' is used inside a lambda with an explicit capture list but is "
+        "not captured; add [this]");
+    it->capturesThis = true;
+  }
+}
+
+void Checker::checkCaptureMutation(const Expr* target, Span span) {
+  if (target == nullptr || target->kind != ExprKind::Name) {
+    return;
+  }
+  std::size_t scopeIndex = 0;
+  Variable* variable = lookupVariable(target->name, &scopeIndex);
+  if (variable == nullptr) {
+    return;
+  }
+  for (auto it = lambdaContexts_.rbegin(); it != lambdaContexts_.rend(); ++it) {
+    if (scopeIndex >= it->scopeBoundary) {
+      break;
+    }
+    if (!it->explicitList) {
+      continue;
+    }
+    const auto found = it->captured.find(target->name);
+    if (found != it->captured.end() && !found->second) {
+      diagnostics_.error(
+          span, "E2088",
+          "by-value capture '" + target->name +
+              "' is read-only in v0; capture it by reference with [&" +
+              target->name + "]");
+      return;
+    }
+  }
+}
+
+int Checker::evaluateLambdaBorrow(const LambdaContext& context) const {
+  int depth = 0;
+  const auto apply = [&depth](const LambdaCaptureRef& ref, bool byRef) {
+    int candidate = 0;
+    if (byRef) {
+      candidate = ref.borrowDepth != 0 ? ref.borrowDepth : ref.scopeDepth;
+    } else if (ref.borrowDepth != 0) {
+      candidate = ref.borrowDepth;
+    }
+    if (candidate == 0) {
+      return;
+    }
+    if (candidate < 0 || depth < 0) {
+      depth = -1;
+      return;
+    }
+    if (candidate > depth) {
+      depth = candidate;
+    }
+  };
+  for (const auto& entry : context.namedRefs) {
+    const auto mode = context.namedCaptures.find(entry.first);
+    apply(entry.second,
+          mode != context.namedCaptures.end() && mode->second);
+  }
+  for (const auto& entry : context.refs) {
+    if (context.namedCaptures.find(entry.first) !=
+        context.namedCaptures.end()) {
+      continue;
+    }
+    apply(entry.second, context.defaultByRef);
+  }
+  return depth;
+}
+
 void Checker::checkLambda(Expr* expr, Type* expected) {
   if (expr == nullptr || expr->lambda == nullptr) {
     return;
@@ -2823,7 +3016,9 @@ void Checker::checkLambda(Expr* expr, Type* expected) {
     diagnostics_.error(expr->span, "E2079",
                        "lambda parameter count does not match the target");
   }
+  resolveLambdaCaptures(expr);
   pushScope(Scope::Kind::Function);
+  lambdaContexts_.back().scopeBoundary = scopes_.size() - 1;
   const std::size_t count =
       std::min(expr->lambda->params.size(), expected->alternatives.size());
   for (std::size_t i = 0; i < count; ++i) {
@@ -2834,6 +3029,11 @@ void Checker::checkLambda(Expr* expr, Type* expected) {
                       "lambda parameter");
     declareVariable(param.name, paramType, false, nullptr, param.span, false,
                     ProxyPolicy::Error, nullptr);
+    if (Variable* declared = lookupVariable(param.name);
+        declared != nullptr && paramType != nullptr &&
+        paramType->kind == TypeKind::Function) {
+      declared->borrowDepth = -1;
+    }
   }
   Type* savedReturn = currentReturnType_;
   Decl* savedFunction = currentFunction_;
@@ -2851,7 +3051,10 @@ void Checker::checkLambda(Expr* expr, Type* expected) {
   currentReturnType_ = savedReturn;
   currentFunction_ = savedFunction;
   inDestructor_ = savedDestructor;
+  expr->lambda->borrowDepth = evaluateLambdaBorrow(lambdaContexts_.back());
+  expr->borrowDepth = expr->lambda->borrowDepth;
   popScope();
+  lambdaContexts_.pop_back();
   expr->resolvedType = expected;
 }
 
@@ -2883,13 +3086,16 @@ Type* Checker::checkExpr(Expr* expr) {
       expr->resolvedType = nullType_;
       return nullType_;
     case ExprKind::Name: {
-      if (Variable* variable = lookupVariable(expr->name)) {
+      std::size_t scopeIndex = 0;
+      if (Variable* variable = lookupVariable(expr->name, &scopeIndex)) {
         if (variable->moved) {
           diagnostics_.error(expr->span, "E2045",
                              "@Unique value '" + expr->name +
                                  "' was moved and can no longer be used");
         }
+        recordCaptureUse(expr, expr->name, *variable, scopeIndex);
         expr->resolvedType = variable->type;
+        expr->borrowDepth = variable->borrowDepth;
         expr->weakValue = variable->isWeak;
         return variable->type;
       }
@@ -2908,6 +3114,7 @@ Type* Checker::checkExpr(Expr* expr) {
             expr->resolvedType = errorType_;
             return errorType_;
           }
+          recordThisCapture(expr->span);
           expr->resolvedType = field->type;
           return field->type;
         }
@@ -2924,6 +3131,7 @@ Type* Checker::checkExpr(Expr* expr) {
         expr->resolvedType = errorType_;
         return errorType_;
       }
+      recordThisCapture(expr->span);
       expr->resolvedType = currentClass_;
       return currentClass_;
     case ExprKind::Super:
@@ -2972,6 +3180,7 @@ Type* Checker::checkExpr(Expr* expr) {
       return checkAssign(expr);
     case ExprKind::Inc: {
       Type* target = checkExpr(expr->lhs.get());
+      checkCaptureMutation(expr->lhs.get(), expr->span);
       if (target != nullptr && !target->isInteger()) {
         diagnostics_.error(expr->span, "E2005",
                            "operator '++' requires an integer lvalue");
@@ -3109,6 +3318,7 @@ Type* Checker::checkBinary(Expr* expr) {
 
 Type* Checker::checkAssign(Expr* expr) {
   Type* lhs = checkExpr(expr->lhs.get());
+  checkCaptureMutation(expr->lhs.get(), expr->span);
   bool optional = false;
   if (expr->lhs->kind == ExprKind::Name) {
     if (Variable* variable = lookupVariable(expr->lhs->name)) {
@@ -3176,6 +3386,32 @@ Type* Checker::checkAssign(Expr* expr) {
     }
   } else {
     requireAssignable(rhs, lhs, expr->span, "assignment");
+  }
+  if (expr->rhs != nullptr && expr->lhs != nullptr) {
+    const int borrowDepth = expr->rhs->borrowDepth;
+    if (borrowDepth != 0 &&
+        (expr->lhs->kind == ExprKind::Member ||
+         expr->lhs->kind == ExprKind::Index)) {
+      checkClosureEscape(expr->rhs.get(),
+                         expr->lhs->kind == ExprKind::Member
+                             ? "be stored in a field"
+                             : "be stored in a container element");
+    } else if (expr->lhs->kind == ExprKind::Name) {
+      std::size_t destinationScope = 0;
+      Variable* destination =
+          lookupVariable(expr->lhs->name, &destinationScope);
+      if (destination != nullptr) {
+        if (borrowDepth > 0 &&
+            static_cast<int>(destinationScope) < borrowDepth) {
+          diagnostics_.error(
+              expr->span, "E2039",
+              "closure captures a local by reference and would outlive it in "
+              "'" + expr->lhs->name +
+                  "'; declare the target in the same or a deeper scope");
+        }
+        destination->borrowDepth = borrowDepth;
+      }
+    }
   }
   expr->resolvedType = lhs;
   return lhs;
@@ -4639,6 +4875,8 @@ void Checker::checkStmt(Stmt* stmt) {
             }
             Type* value = checkExpr(field.value.get());
             requireAssignable(value, info->type, field.span, "object field");
+            checkClosureEscape(field.value.get(),
+                               "be stored in an object field");
           }
           stmt->expr->resolvedType = type;
         }
@@ -4688,6 +4926,8 @@ void Checker::checkStmt(Stmt* stmt) {
               requireAssignable(argType, type->fields[i].type,
                                 stmt->initArgs[i]->span,
                                 "brace initializer");
+              checkClosureEscape(stmt->initArgs[i].get(),
+                                 "be stored in a field");
             }
           }
         }
@@ -4714,6 +4954,8 @@ void Checker::checkStmt(Stmt* stmt) {
             Type* elementType = checkExpr(element.get());
             requireAssignable(elementType, type->pointee, element->span,
                               "array element");
+            checkClosureEscape(element.get(),
+                               "be stored in a container literal");
           }
           stmt->expr->resolvedType = type;
         }
@@ -4842,6 +5084,8 @@ void Checker::checkStmt(Stmt* stmt) {
         declared->isUnique = stmt->isUnique;
         declared->isShare = stmt->isShare;
           declared->isWeak = stmt->isWeak;
+          declared->borrowDepth =
+              stmt->expr != nullptr ? stmt->expr->borrowDepth : 0;
       }
       return;
     }
@@ -5165,6 +5409,7 @@ void Checker::checkStmt(Stmt* stmt) {
         } else {
           actual = checkExpr(stmt->expr.get());
         }
+        checkClosureEscape(stmt->expr.get(), "be returned from the function");
         if (stmt->expr->kind == ExprKind::Unary && stmt->expr->op == "&") {
           diagnostics_.error(stmt->span, "E2039",
                              "returning '&' is not allowed; return the value "

@@ -1,0 +1,59 @@
+// Closure capture semantics: by-reference captures alias the original local,
+// explicit by-value captures are read-only copies, and an omitted capture list
+// copies by value into a mutable closure.
+integer applyTwice((integer) -> integer fn, integer value) {
+    return fn(fn(value));
+}
+
+class Counter {
+public:
+    integer value;
+
+    Counter(integer start) {
+        this.value = start;
+    }
+
+    integer applyFive() {
+        (integer) -> integer add = [this](integer x): integer -> x + this.value;
+        return add(5);
+    }
+}
+
+integer main() {
+    integer total = 0;
+    (integer) -> integer addTo = [&total](integer value): integer -> {
+        total = total + value;
+        return total;
+    };
+    print(addTo(5));
+    print(addTo(7));
+
+    // A by-reference closure may be passed to a function that only invokes it
+    // during the call.
+    print(applyTwice([&total](integer value): integer -> {
+        total = total + value;
+        return total;
+    }, 3));
+
+    integer copy = 100;
+    (integer) -> integer readCopy = [copy](integer value): integer -> value + copy;
+    print(readCopy(1));
+
+    // Omitted capture list: the referenced local is copied and the copy is
+    // mutable, so the original is unchanged.
+    integer counter = 0;
+    (integer) -> integer bumpCopy = (integer value): integer -> {
+        counter = counter + value;
+        return counter;
+    };
+    print(bumpCopy(4));
+    print(counter);
+
+    integer seed = 10;
+    (integer) -> integer addSeed = [&seed](integer value): integer -> value + seed;
+    print(addSeed(5));
+
+    Counter counted = Counter(10);
+    print(counted.applyFive());
+    return 0;
+}

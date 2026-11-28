@@ -1008,4 +1008,52 @@ if(MSVC)
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda
       -DEXPECTED=42|15|16|21|20|10
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_lambda_capture
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda_capture.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda_capture
+      -DEXPECTED=5|12|30|101|4|0|15|15
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_lambda_this
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda_this.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda_this
+      -DEXPECT_SUBSTRING=E2087
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lambda_escape
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda_escape.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda_escape
+      -DEXPECT_SUBSTRING=E2039
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lambda_escape_scope
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda_escape_scope.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda_escape_scope
+      -DEXPECT_SUBSTRING=E2039
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lambda_unlisted
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda_unlisted.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda_unlisted
+      -DEXPECT_SUBSTRING=E2087
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lambda_readonly
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda_readonly.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda_readonly
+      -DEXPECT_SUBSTRING=E2088
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 endif()

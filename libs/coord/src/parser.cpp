@@ -1942,22 +1942,32 @@ ExprPtr Parser::parseLambda() {
         captures += ", ";
       }
       first = false;
+      Capture capture;
+      capture.span = current().span;
       if (match(TokKind::Equal)) {
+        capture.kind = Capture::Kind::ByValue;
         captures += "=";
       } else if (match(TokKind::Amp)) {
+        capture.kind = Capture::Kind::ByRef;
         if (check(TokKind::Identifier)) {
-          captures += "&" + std::string(advance().text);
+          capture.name = advance().text;
+          captures += "&" + capture.name;
         } else {
           captures += "&";
         }
       } else if (match(TokKind::KwThis)) {
+        capture.kind = Capture::Kind::This;
         captures += "this";
       } else if (check(TokKind::Identifier)) {
-        captures += std::string(advance().text);
+        capture.kind = Capture::Kind::ByValue;
+        capture.name = advance().text;
+        captures += capture.name;
       } else {
         error(current(), "expected a lambda capture");
         advance();
+        continue;
       }
+      expr->lambda->captures.push_back(capture);
       if (!match(TokKind::Comma)) {
         break;
       }
