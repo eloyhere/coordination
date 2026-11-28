@@ -1369,6 +1369,30 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2095
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_copy_deep_unique_chain
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_deep_unique_chain.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_deep_unique_chain
+      -DEXPECTED=1|9
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_copy_deep_nested_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_deep_nested_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_deep_nested_error
+      -DEXPECT_SUBSTRING=E2095
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_copy_explicit_shell_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_explicit_shell_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_explicit_shell_error
+      -DEXPECT_SUBSTRING=E2095
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lock_capture_deep
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

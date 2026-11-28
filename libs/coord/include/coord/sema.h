@@ -244,7 +244,12 @@ private:
   /// against its field types.
   void validateCopyClass(Decl& decl);
   [[nodiscard]] bool classRequiresExplicitCopy(const Type* type) const;
-  [[nodiscard]] bool classHasOwningFields(const Type* type) const;  void checkEnum(Decl& decl);
+  [[nodiscard]] bool classHasOwningFields(const Type* type) const;
+  [[nodiscard]] bool isDeepCopyable(const Type* type,
+                                    std::set<const Type*>& visiting);
+  [[nodiscard]] bool needsExplicitCopy(const Type* type,
+                                       std::set<const Type*>& visiting) const;
+  std::unordered_map<const Type*, bool> deepCopyCache_;  void checkEnum(Decl& decl);
   void checkInterface(Decl& decl);
   void checkAnnotation(Decl& decl);
   void checkFunction(Decl& decl);

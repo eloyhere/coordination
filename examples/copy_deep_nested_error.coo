@@ -1,0 +1,20 @@
+// @Copy(Deep) recursively rejects a nested non-deep-copyable field.
+class Payload {
+public:
+    integer value;
+
+    Payload() {
+        value = 0;
+    }
+}
+
+class Inner {
+public:
+    @Share Payload payload;
+}
+
+@Copy(Deep)
+class Outer {
+public:
+    Inner inner;
+}

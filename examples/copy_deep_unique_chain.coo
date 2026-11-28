@@ -1,0 +1,38 @@
+// @Copy(Deep) follows a self-recursive @Unique chain.
+@Copy(Deep)
+class Link {
+public:
+    @Unique Link next;
+    integer value;
+
+    Link() {
+        value = 1;
+    }
+}
+
+@Copy(Deep)
+class Holder {
+public:
+    @Unique Link head;
+
+    Holder() {
+        head = Link();
+    }
+
+    integer get() {
+        return head.value;
+    }
+
+    void set(integer value) {
+        head.value = value;
+    }
+}
+
+integer main() {
+    Holder a = Holder();
+    Holder b = a;
+    b.set(9);
+    print(a.get());
+    print(b.get());
+    return 0;
+}

@@ -1,0 +1,16 @@
+// A value shell around a class with owning fields also needs explicit @Copy.
+class Inner {
+public:
+    @Unique Inner owned;
+}
+
+class Outer {
+public:
+    Inner inner;
+}
+
+integer main() {
+    Outer a;
+    Outer b = a;
+    return 0;
+}

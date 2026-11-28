@@ -1526,7 +1526,8 @@ bool Checker::classHasOwningFields(const Type* type) const {
   return false;
 }
 
-bool Checker::classRequiresExplicitCopy(const Type* type) const {
+bool Checker::needsExplicitCopy(const Type* type,
+                                std::set<const Type*>& visiting) const {
   if (type == nullptr || type->kind != TypeKind::Class ||
       type->decl == nullptr) {
     return false;
@@ -1535,7 +1536,103 @@ bool Checker::classRequiresExplicitCopy(const Type* type) const {
       type->decl->copyKind == Decl::CopyKind::Shallow) {
     return false;
   }
-  return classHasOwningFields(type);
+  if (!visiting.insert(type).second) {
+    return false;
+  }
+  bool needs = classHasOwningFields(type);
+  if (!needs && type->base != nullptr && type->base->name != "class") {
+    needs = needsExplicitCopy(type->base, visiting);
+  }
+  if (!needs) {
+    for (const FieldInfo& field : type->fields) {
+      if (field.type != nullptr && field.type->kind == TypeKind::Class &&
+          needsExplicitCopy(field.type, visiting)) {
+        needs = true;
+        break;
+      }
+    }
+  }
+  visiting.erase(type);
+  return needs;
+}
+
+bool Checker::classRequiresExplicitCopy(const Type* type) const {
+  std::set<const Type*> visiting;
+  return needsExplicitCopy(type, visiting);
+}
+
+bool Checker::isDeepCopyable(const Type* type,
+                             std::set<const Type*>& visiting) {
+  if (type == nullptr) {
+    return false;
+  }
+  switch (type->kind) {
+    case TypeKind::Int:
+    case TypeKind::Decimal:
+    case TypeKind::Float:
+    case TypeKind::Bool:
+    case TypeKind::Char:
+    case TypeKind::String:
+    case TypeKind::Enum:
+      return true;
+    case TypeKind::Class:
+      break;
+    default:
+      return false;
+  }
+  const auto cached = deepCopyCache_.find(type);
+  if (cached != deepCopyCache_.end()) {
+    return cached->second;
+  }
+  if (type->decl == nullptr ||
+      type->decl->copyKind == Decl::CopyKind::Shallow ||
+      type->decl->copyKind == Decl::CopyKind::None) {
+    return false;
+  }
+  if (classHasOwningFields(type) &&
+      type->decl->copyKind != Decl::CopyKind::Deep) {
+    return false;
+  }
+  if (!visiting.insert(type).second) {
+    return false;
+  }
+  bool copyable = true;
+  for (const FieldInfo& field : type->fields) {
+    if (!copyable) {
+      break;
+    }
+    if (field.decl != nullptr && field.decl->isShare) {
+      copyable = false;
+    } else if (field.decl != nullptr && field.decl->isUnique) {
+      if (field.type == nullptr || field.type->kind != TypeKind::Class) {
+        copyable = false;
+      } else if (field.type == type &&
+                 type->decl->copyKind == Decl::CopyKind::Deep) {
+        // Self-recursive @Unique chain: finite at runtime (null terminates).
+      } else if (!isDeepCopyable(field.type, visiting)) {
+        copyable = false;
+      }
+    } else if (field.type != nullptr &&
+               (field.type->kind == TypeKind::Pointer ||
+                field.type->kind == TypeKind::Thread ||
+                field.type->kind == TypeKind::ScopedThread ||
+                field.type->kind == TypeKind::Mutex ||
+                field.type->kind == TypeKind::ScopedLock ||
+                field.type->kind == TypeKind::Atomic)) {
+      copyable = false;
+    } else if (field.type != nullptr &&
+               field.type->kind == TypeKind::Class &&
+               !isDeepCopyable(field.type, visiting)) {
+      copyable = false;
+    }
+  }
+  if (copyable && type->base != nullptr && type->base->name != "class" &&
+      type->base->kind == TypeKind::Class) {
+    copyable = isDeepCopyable(type->base, visiting);
+  }
+  visiting.erase(type);
+  deepCopyCache_[type] = copyable;
+  return copyable;
 }
 
 void Checker::validateCopyClass(Decl& decl) {
@@ -1593,6 +1690,22 @@ void Checker::validateCopyClass(Decl& decl) {
                            "E2095",
                            "@Copy(Deep) cannot contain @Copy(Shallow) field '" +
                                field.name + "'");
+      }
+    }
+    std::set<const Type*> visiting;
+    if (type->base != nullptr && type->base->name != "class" &&
+        !isDeepCopyable(type->base, visiting)) {
+      diagnostics_.error(decl.span, "E2095",
+                         "@Copy(Deep) base class is not deep-copyable");
+    }
+    for (const FieldInfo& field : type->fields) {
+      if (field.type != nullptr && field.type->kind == TypeKind::Class &&
+          !isDeepCopyable(field.type, visiting)) {
+        diagnostics_.error(
+            field.decl != nullptr ? field.decl->span : decl.span, "E2095",
+            "@Copy(Deep) field '" + field.name +
+                "' is not deep-copyable (needs value fields or @Unique "
+                "chains, no @Share/pointer/thread/mutex/atomic fields)");
       }
     }
   } else if (decl.copyKind == Decl::CopyKind::Shallow) {
