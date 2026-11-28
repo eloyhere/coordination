@@ -13,24 +13,24 @@ namespace coord {
 
 /// A compile-time value. Runtime values are not modelled here.
 struct Value {
-  enum class Kind { Void, Bool, Int, Decimal, Char, String };
+  enum class Kind { Void, Bool, Int, Fraction, Char, String };
 
   Kind kind = Kind::Void;
   bool boolValue = false;
   std::int64_t intValue = 0;
-  double decimalValue = 0.0;
+  double fractionValue = 0.0;
   char32_t charValue = 0;
   std::string stringValue;
 
   [[nodiscard]] static Value makeVoid();
   [[nodiscard]] static Value makeBool(bool value);
   [[nodiscard]] static Value makeInt(std::int64_t value);
-  [[nodiscard]] static Value makeDecimal(double value);
+  [[nodiscard]] static Value makeFraction(double value);
   [[nodiscard]] static Value makeChar(char32_t value);
   [[nodiscard]] static Value makeString(std::string value);
 
   [[nodiscard]] bool isNumeric() const {
-    return kind == Kind::Int || kind == Kind::Decimal;
+    return kind == Kind::Int || kind == Kind::Fraction;
   }
   [[nodiscard]] double asDouble() const;
   [[nodiscard]] std::string toString() const;

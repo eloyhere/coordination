@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**194 项 CTest**，Windows 全套 **194/194 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 当前基线：**199 项 CTest**，Windows 全套 **199/199 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -78,7 +78,7 @@ integer main(integer argc, Array<string> args) {
 }
 ```
 
-- `void main()`、`decimal main()`、任意其他参数形式报 `E2052`；
+- `void main()`、`fix main()`、任意其他参数形式报 `E2052`；
 - `@Result<T>` 只改变错误传播，不改变“必须返回 `integer`”；
 - 生成的 C++ 入口会把结果转成进程退出码。
 
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **194 项**（1 个单元测试 + 193 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 注册 **199 项**（1 个单元测试 + 198 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -475,24 +475,27 @@ integer main() {
 - `@Retention(Runtime)` 块不在编译期执行，运行时正常执行。
 - 代码块只允许 `Compile`/`Runtime`；`Invocation`/`enum` 报 `E2044`。
 
-### 7.4 数字进制
+### 7.4 数字进制与静态定点
 
 ```coo
-@Radix(16)
-const integer MASK = 255;
-
 integer main() {
+    @Power(2) fix price = 19.99;      // raw 1999，打印 19.99
+    @Power(2) integer cents = 19.99;  // integer + @Power 提升为 fix
+    @Power(2) @Radix(2) fix half = 0.5; // 以 2 进制打印 0.1
     @Radix(2)
-    integer flags = 10;
-    @Radix(8)
-    integer mode = 64;
-    print(MASK + flags + mode); // 值仍是 255、10、64
+    integer flags = 10;               // 仅影响整数字面量写法
+    print(price);
+    print(cents);
+    print(half);
     return 0;
 }
 ```
 
-- `@Radix(2|8|10|16)` 是类型注解，只改变生成的 C++ 在声明初始化、字段默认值和 `const` 值中的整数字面量写法：`0XFF`、`0B1010`、C++ 八进制 `0100`。
-- 它不改变源码字面量解析，也不改变运行期 `print`；非法进制或非整数目标报 `E2066`。
+- `fix` 是静态定点数：`raw = semantic × radix^power`，表示为 `coord_rt::Fix<Power, Radix>`，只有一个 64 位 raw 整数（无运行期 scale）。默认 `@Length(64) @Radix(10) @Power(0)`。
+- `@Power` 作用于 `integer` 或 `float` 声明时提升为 `fix`；`@Radix` 单独不提升。小数字面量初始化 `fix` 必须显式给出 `@Power`（否则 `E2103`），编译期精确编码，超过目标 scale 时按 half away from zero 舍入。
+- 同一 radix 下 `+`/`-` 对齐到更细的 power，`*` 的 power 相加；比较与 `print` 可用，`toInteger()`/`toFloat()` 是显式转出。`@Length` 结果宽度规则（`max(len1,len2)+1`、`len1+len2`、64×64→128 中间值）以及 `fix` 的除法/取余/位运算/移位在 11B 前报 `E2104`/`E2102`。
+- `print` 按该类型的 radix（2–36）输出语义值并去掉无意义尾零。
+- `@Radix` 接受任意整数 `>= 2`；`0`、`1` 与负数报 `E2100`。作用于 `integer` 时只改变生成 C++ 的字面量写法（2/8/16 进制：`0XFF`、`0B1010`、C++ 八进制 `0100`），其他进制退回十进制；运行期打印整数不变。
 
 ### 7.5 注解处理器
 

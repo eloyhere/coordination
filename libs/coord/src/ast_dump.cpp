@@ -118,8 +118,8 @@ void dumpExpr(const Expr* expr, std::ostream& out, int depth) {
     case ExprKind::IntLit:
       out << "IntLit " << expr->intValue << '\n';
       return;
-    case ExprKind::DecimalLit:
-      out << "DecimalLit " << expr->decimalValue << '\n';
+    case ExprKind::FractionLit:
+      out << "FractionLit " << expr->fractionValue << '\n';
       return;
     case ExprKind::CharLit:
       out << "CharLit U+" << std::hex
@@ -368,8 +368,8 @@ std::string describeExprKind(ExprKind kind) {
   switch (kind) {
     case ExprKind::IntLit:
       return "IntLit";
-    case ExprKind::DecimalLit:
-      return "DecimalLit";
+    case ExprKind::FractionLit:
+      return "FractionLit";
     case ExprKind::CharLit:
       return "CharLit";
     case ExprKind::BoolLit:

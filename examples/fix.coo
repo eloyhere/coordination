@@ -1,0 +1,32 @@
+// `fix` is static fixed point: raw = semantic * radix^power.
+// The default shape is @Length(64) @Radix(10) @Power(0).
+integer main() {
+    @Power(2) fix price = 19.99;   // raw 1999; prints 19.99
+    @Power(2) fix tax = 0.01;
+
+    print(price);
+    print(price + tax);            // 20.00 -> trailing zeros dropped
+    print(price - tax);            // 19.98
+    print(price > tax);            // true
+    print(price > 19);             // true: integer compares after scaling
+
+    @Power(2) fix trailing = 2.50; // trailing literal zero ignored
+    print(trailing);               // 2.5
+
+    @Power(3) fix finer = 1.500;
+    print(price + finer);          // add auto-aligns to the finer power: 21.49
+    @Power(2) fix half = 1.50;
+    print(half == finer);          // true: same radix, aligned power
+
+    @Power(2) integer cents = 19.99; // integer + @Power promotes to fix
+    print(cents);
+    @Power(2) float ratio = 1.5;     // float + @Power promotes to fix
+    print(ratio);
+    fix whole = 3;                   // default @Power(0)
+    print(whole);
+
+    @Power(2) fix a = 1.5;
+    @Power(2) fix b = 2.0;
+    print(a * b);                    // natural power 4: 3
+    return 0;
+}

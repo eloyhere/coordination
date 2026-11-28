@@ -1,0 +1,5 @@
+integer main() {
+    fix amount = 19.99;
+    print(amount);
+    return 0;
+}

@@ -66,7 +66,7 @@ Coordination 把“编译期计算”当作一等能力，而不是外挂一个�
 | D22 | 生成程序跨平台：C++20 + 条件 `<windows.h>`；Windows/MSVC 用 `wmain` + UTF-16→UTF-8 argv + UTF-8 控制台；POSIX 用 `main` | 源码/路径/控制台在三大平台行为一致；平台差异只进入生成前导。 |
 | D23 | 交叉编译：`--target <triple>`（clang `--target`）、`--sysroot <path>`、GCC 交叉工具链用 `--cxx`；MSVC 不支持交叉编译；交叉目标不能 `run` | 复用宿主 C++ 工具链，不内建代码生成器。 |
 | D24 | `@Constructure`（`@Target(constructor)`）支持类型化/命名字面量构造；`@Destructure` 既是 `ProxyHandler` trap，也是带引用输出的目标类方法 | 构造与解构保持用户定义，不做隐式结构转换。 |
-| D25 | 类型注解（`@Optional`、`@Unique`、`@Share`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Weak`）的目标是 `type`；`@Constructure` 的目标是 `constructor`；`@Target` 接受这两个名字 | 注解附着在类型上而不是声明上，别名与组合类型共享同一语义。 |
+| D25 | 类型注解（`@Optional`、`@Unique`、`@Share`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power`、`@Weak`）的目标是 `type`；`@Constructure` 的目标是 `constructor`；`@Target` 接受这两个名字 | 注解附着在类型上而不是声明上，别名与组合类型共享同一语义。 |
 
 ### 1.4 用什么替代宏
 
@@ -91,7 +91,7 @@ Coordination 把“编译期计算”当作一等能力，而不是外挂一个�
 | --- | --- | --- | --- | --- |
 | `integer` | 整数根/基本类型 | 运行期 | 默认 64 位有符号；`@Unsigned` 无符号，`@Signed` 显式有符号，`@Length(N)` 指定位宽 | 定宽整数 |
 | `float` | 二进制浮点根 | 运行期 | `float`（C++ `double`），规划中的 `f32`/`f64` | IEEE-754 |
-| `decimal` | 十进制定点根 | 运行期 | `decimal`（value + scale），`@Length` 收窄存储 | 定点 |
+| `fix` | 静态定点根 | 运行期 | 64 位 raw 整数 + 编译期 `@Power`/`@Radix`；`integer`/`float` + `@Power` 提升为 `fix` | `coord_rt::Fix<Power, Radix>` |
 | `character` | Unicode 标量根 | 运行期 | `char`（32 位标量） | UTF-32 码点 |
 | `boolean` | 布尔根 | 运行期 | `bool` | 1 字节 |
 | `Enumeration` | 枚举根 | 运行期 | 具体 `enumerate` 类型 | 整数 + 可选旁路名字表 |
@@ -105,7 +105,7 @@ Coordination 把“编译期计算”当作一等能力，而不是外挂一个�
 | `proxy` | 行为代理根 | 编译期展开或运行期保留 | `@Proxy(Handler)`；默认零开销 | 默认无对象；保留模式为包装 |
 | `string` | UTF-8 文本 | 运行期 | 独立文本类型，不属于元数据五层 | `std::string` |
 
-计数口径：根类型 14 个（`integer` … `proxy`），加上独立运行期文本类型 `string`，合计 15 项。`float` 是二进制浮点数（C++ `double`）；`decimal` 是 `value + scale` 十进制定点数。`string` 是**独立**的：它不是 `description` 的别称，不参与反射与保留表，不能承载编译期元数据。
+计数口径：根类型 14 个（`integer` … `proxy`），加上独立运行期文本类型 `string`，合计 15 项。`float` 是二进制浮点数（C++ `double`）；`fix` 是静态定点数（一个 raw 整数加编译期 power/radix）。`string` 是**独立**的：它不是 `description` 的别称，不参与反射与保留表，不能承载编译期元数据。
 
 辅助类型：`void`（单元类型）、`interface`（由 `class` 根类型覆盖的名义接口）、`Result<T, E>` 与 `Expect<T, E>`。
 
@@ -114,19 +114,20 @@ Coordination 把“编译期计算”当作一等能力，而不是外挂一个�
 ### 2.2 内建具体类型
 
 - 整数：`integer`（默认 64 位有符号）；`@Unsigned` 映射无符号，`@Signed` 显式有符号；`@Length(8/16/32/64/128)` 指定位宽，默认 64。没有 `int`、`i8`、`usize` 等别名。
-- 浮点：`float` 是二进制浮点数（C++ `double`）；`decimal` 是十进制定点数（value + scale）；`f32`/`f64` 为规划中的显式宽度写法。
+- 浮点：`float` 是二进制浮点数（C++ `double`）；`f32`/`f64` 为规划中的显式宽度写法。
+- 定点：`fix` 用一个有符号 64 位 raw 整数存储，编译期默认 `@Length(64) @Radix(10) @Power(0)`。`@Power` 作用于 `integer` 或 `float` 声明时提升为 `fix`；`@Radix` 单独不提升。不存在 `decimal` 类型或别名。
 - 文本：`char`（32 位 Unicode 标量，不是字节）、`string`（不可变 UTF-8 字节序列，运行期）。
 - 其他：`bool`、`void`、`record`/`Record`；规划：`Result<T, Error>`、`Expect<T, Error>`、`Error`、`@Unique`/`@Share` 所有权注解、`T[N]`、`Array<T>` 及其视图。
-- 标准库风格的大写类型名（`Integer`、`String`、`Character`、`Boolean`、`Float`、`Decimal`、`Record`）与对应小写关键字解析到同一个 `Type*`，诊断与反射使用规范名。
+- 标准库风格的大写类型名（`Integer`、`String`、`Character`、`Boolean`、`Float`、`Fix`、`Record`）与对应小写关键字解析到同一个 `Type*`，诊断与反射使用规范名。
 
-`decimal` 的定点规则：后端表示为 `coord_rt::Decimal { value; scale; }`；`+`/`-`/`%` 先对齐 scale；`*` 的 scale 相加；`/` 保留左操作数 scale；位运算先对齐 scale；`<<`/`>>` 只移动 value、scale 不变；`print` 去掉多余尾零。`@Length(8/16/32/64)` 会把 value/scale 字段收窄到对应宽度，算术时提升到 64 位再写回；`@Length(128)` decimal 尚不支持。
+`fix` 的定点规则：后端表示为 `coord_rt::Fix<Power, Radix>`，只含一个有符号 64 位 `raw` 字段，没有运行期 scale。不变量为 `raw = semantic × radix^power`，即 `semantic = raw / radix^power`。默认 `@Length(64) @Radix(10) @Power(0)`；`@Power(0)` 作用于 `integer`/`float` 也会提升为 `fix`（无缩放）。小数字面量默认 `float`；赋给 `fix` 需要显式 `@Power`（`E2103`），并在编译期精确编码为 raw 整数；小数位超过目标 scale 时按 half away from zero 舍入。`print` 按该类型的 radix（2–36）输出语义值并去掉无意义尾零。`+`/`-` 在同一 radix 内对齐到更细的 power；`*` 的 power 相加并对 64 位 raw 乘积做溢出检查；`/` 需要显式目标 `@Power`，推到 11B（`E2104`），`fix` 的位运算/移位同样推到 11B。本切片 `fix` 的 `@Length` 只支持 64 位 raw（8/16/32/128 报 `E2102`），因此计划中的长度结果规则（加法 `max(len1,len2)+1`、乘法 `len1+len2`、64×64→128 中间值）留给 11B；溢出 checked，打印 `fix overflow` 并终止，不做静默 wrap。`fix → integer` / `fix → float` 需显式调用 `toInteger()` / `toFloat()`；`float → fix` 需显式转换（目标类型转换留待后续），`integer → fix` 与 `integer → float` 隐式，修改 fix 的 radix/power 需显式转换。
 
 ### 2.3 子类型与可赋值
 
 - 名义子类型：`S <: T` 当且仅当 `S == T`、`S` 的基类链包含 `T`、`S` 实现了接口 `T`，或 `S` 是 `T` 的联合/交集成员。
 - 泛型默认不变；`N extends integer` 表示 `N` 的每个实例都必须是 `integer` 的子类型；`class` 根类型是名义类型的上界。
 - 联合 `A | B`、交集 `A & B` 用于类型与约束；`&` 在参数类型位置是引用，在约束位置是交集（上下文消歧）。
-- 可赋值：子类型关系成立即合法；此外 `integer` 可隐式赋给 `decimal`，数值类型之间允许加宽；指针按被指类型协变（M0 行为）。
+- 可赋值：子类型关系成立即合法；此外 `integer` 可隐式赋给 `float` 与 `fix`；`fix → float`、`float → fix`、`fix → integer` 以及 fix 的 radix/power 改变都需显式转换；指针按被指类型协变（M0 行为）。`fix` 与 `float` 不允许隐式混合运算。
 - 规划：`where` 结构约束、const 泛型（数组长度）、泛型接口、union/intersection 的完整检查与 `match` 收窄（⏳）。
 
 ### 2.4 可空性与 ProxyPolicy
@@ -236,7 +237,7 @@ Visible(b) ∩ Visible(c) = 公共祖先声明（经遮蔽后）
 - 源文件：`.coo`；模块接口 `.coox`。支持 UTF-8、UTF-16LE/BE、UTF-32LE/BE；BOM 可选，读取时剥离；内部统一 UTF-8。`Span` 是规范化 UTF-8 字节偏移（半开区间）；非法码点替换为 U+FFFD，不中断词法分析。
 - 注释：`//` 行注释；`/* ... */` 块注释，可嵌套；`///` 与 `/** */` 文档注释挂到下一个声明，Sema 校验 `@parameter`/`@param`、`@return`、`@template`，未知或重复标签报 `E2076`。
 - 标识符：Unicode 字母/`_` 开头，后续 Unicode 字母、数字、`_`；关键字为 ASCII，保留字不可作标识符。M0 实现更宽松：非 ASCII 码点只要不是 Unicode 空白/控制字符即可；收紧到“字母/数字”属后续工作。
-- 关键字：`module import export as class interface implements extends annotation function void const static virtual override final operator where if else switch while for in return break continue true false null this is match extern unsafe new delete integer decimal float record character boolean enumerate public private protected`。`descriptor`/`description`/`reflection`/`reflector`/`proxy` 不是关键字。“词法保留”不等于“已实现”：`is`/`extern`/`unsafe`/`new`/`delete` 仍是保留字（使用报 `E1101` 或语义未实现）；`match` 已对枚举生效；`operator`/`where` 可解析，完整语义 ⏳。
+- 关键字：`module import export as class interface implements extends annotation function void const static virtual override final operator where if else switch while for in return break continue true false null this is match extern unsafe new delete integer fix float record character boolean enumerate public private protected`。`descriptor`/`description`/`reflection`/`reflector`/`proxy` 不是关键字。“词法保留”不等于“已实现”：`is`/`extern`/`unsafe`/`new`/`delete` 仍是保留字（使用报 `E1101` 或语义未实现）；`match` 已对枚举生效；`operator`/`where` 可解析，完整语义 ⏳。
 - 字面量：整数（十进制、`0x`/`0b`/`0o`，允许 `_`）；十进制小数与指数（`1e10`）；字符 `'a'`、`'\u{...}'`；字符串 `"..."`；`true`/`false`。数字后缀不支持（`E1001`）。
 - 运算符：`+ - * / % = += -= *= /= %= == != < <= > >= && || ! & | ^ ~ &= |= ^= << >> ++ -- -> => . .. ..= :: ? @ #`。`**` 未进入 token 表；`<<`/`>>` 在表达式层合并相邻 `<`/`>`，不破坏嵌套泛型；表达式语义以 C++ 同优先级子集为准。
 - `this` 指当前实例；**不使用 `self`**。
@@ -262,7 +263,7 @@ public:
 - 构造与析构不能失败；需要失败语义时用返回 `Result` 的工厂函数（⏳）。
 - 初始化形式：`A a{}` 是逐属性聚合初始化（要求聚合类，否则 `E2049`）；`A a()` 走构造函数；`A a = b` 走可访问的单参数转换构造；`A a = { ... }` 用类型化/命名条目选择 `@Constructure` 构造（§4.3.1、§4.8.2）。
 - `@Constructure` 是 `@Target(constructor)` 注解，只能标在目标类的构造函数上；被标构造参与类型化/命名字面量构造，构造函数体仍由用户定义并负责实际转换。普通位置 `Type{1, 2}` 构造与它并存。
-- `@Radix(2|8|10|16)` 只改变声明初始化、字段默认值或 `const` 值在生成 C++ 中的整数字面量写法：`@Radix(16) integer mask = 255;` 生成 `static_cast<std::int64_t>(0XFF)`，2 进制生成 `0B...`，8 进制生成 C++ 八进制字面量（如 `0100`）。它不改变源码字面量解析，也不改变运行期 `print`；非法进制或非整数目标报 `E2066`。
+- `@Radix` 接受任意整数 `>= 2`（`0`、`1` 与负数报 `E2100`）。作用于 `integer` 声明时只改变生成 C++ 的整数字面量写法（进制 2/8/16：`@Radix(16) integer mask = 255;` 生成 `static_cast<std::int64_t>(0XFF)`，2 进制生成 `0B...`，8 进制生成 C++ 八进制字面量如 `0100`）；其他进制退回十进制写法，运行期 `print` 整数不变。作用于 `fix` 时它决定 raw 缩放基数（`raw = semantic × radix^power`）和 `print` 的进制；打印支持 2–36，超出报 `E2107`。`@Radix` 单独不会把 `integer`/`float` 提升为 `fix`。
 
 #### 4.2.2 接口
 
@@ -319,8 +320,8 @@ class Service {
 - 注解声明可带参数并实现 `AnnotationProcessor`；唯一的 `override void process(Description target)` 在编译期执行，接收目标的 `description`。
 - 只读、只增（完整规则见 §4.7）：应用不会覆盖/替换/修改先前注解，不能修改目标结构，处理器只能生成新的独立声明；默认同一目标上同类型注解只能出现一次，`@Repeatable` 才可重复。
 - 注解默认只存在于编译期，不能作为运行期字段/参数类型（`E2009`）；被 `@Retention` 标注的注解才物化为运行期只读元数据表与生成逻辑。处理器可调用唯一指令原语 `line(file, line)` 设置生成代码的 `#line` 映射。
-- 内建注解名（编译器识别，用户不能重定义同名内建）：`@Result`、`@Expect`、`@Invocation`、`@Proxy`、`@Get`、`@Set`、`@Destructure`、`@Construct`、`@Constructure`、`@Has`、`@Delete`、`@Keys`、`@Describe`、`@Call`、`@Copy`、`@Native`、`@FunctionalInterface`（已弃用）、`@Unique`、`@Share`、`@Weak`、`@Optional`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Lock`、`@ReadOnly`、`@Unsafe`、`@Safe`、`@Test`、`@Bench`。`@Wrap` 已移出声明并标为 deferred；`@Processor` 已删除。
-- **目标修正**：`@Optional`、`@Unique`、`@Share`、`@Weak`、`@Signed`、`@Unsigned`、`@Length`、`@Radix` 是 `@Target(type)` 注解，附着在声明位置的类型表达式上，而不是声明本身；`@Constructure` 是 `@Target(constructor)`。`@Native` 只允许 class/function/method（不再允许 `variable`）。其它注解保持原有的声明目标。
+- 内建注解名（编译器识别，用户不能重定义同名内建）：`@Result`、`@Expect`、`@Invocation`、`@Proxy`、`@Get`、`@Set`、`@Destructure`、`@Construct`、`@Constructure`、`@Has`、`@Delete`、`@Keys`、`@Describe`、`@Call`、`@Copy`、`@Native`、`@FunctionalInterface`（已弃用）、`@Unique`、`@Share`、`@Weak`、`@Optional`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power`、`@Lock`、`@ReadOnly`、`@Unsafe`、`@Safe`、`@Test`、`@Bench`。`@Wrap` 已移出声明并标为 deferred；`@Processor` 已删除。
+- **目标修正**：`@Optional`、`@Unique`、`@Share`、`@Weak`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power` 是 `@Target(type)` 注解，附着在局部变量/字段/参数/返回值位置的类型表达式上，而不是声明本身；`@Constructure` 是 `@Target(constructor)`。`@Native` 只允许 class/function/method（不再允许 `variable`）。其它注解保持原有的声明目标。
 - **分层原则**：元注解只有 6 个，只在 C++ 端实现；其余注解全部是标准库里的普通 Coo 声明（`lib/standard/annotations.coo`），按节组织（Meta / Processor interfaces / Proxy traps / Value protocols / Ownership-representation / Scope-capability / Native / Tooling）。编译器只保留按名字识别的语义 hook（如 `@Result` 的返回包装、`@Unsigned` 的存储映射），不维护第二套内建注解表。`Descriptor`/`Reflection` 是该文件中的普通类，`Description`/`Reflector<T>` 由编译器特殊处理。
 - `@Native(header: string, library: string, symbol: string = "", abi: "c" | "c++" = "c")`：标注无 body 的 class/function/method；编译器在生成的 C++ 中 `#include` header，并在链接阶段把 library 传给宿主链接器。没有运行期 FFI/dlopen；声明不引入 Scope，也不参与运行期反射。
 
@@ -356,7 +357,7 @@ const answer = 42;                               // 类型可推断
 
 - `if` / `match` 目标是**表达式**；块的值是最后一个表达式（`if` 表达式 ⏳，`match` 表达式 ⏳）。
 - 语句：块、变量声明、`if`/`else`、`while`、`for`、`for ... in`、`switch`、`match`、`return`、`break`、`continue`、`~this.member;`、表达式语句。
-- `++value`、`value++`、`--value`、`value--` 仅接受 integer/decimal lvalue；前缀/后缀的值语义按 C++。`<<`/`>>` 作为位移运算符在表达式层合并相邻 `<`/`>` token。
+- `++value`、`value++`、`--value`、`value--` 仅接受 integer lvalue；前缀/后缀的值语义按 C++。`<<`/`>>` 作为位移运算符在表达式层合并相邻 `<`/`>` token。
 - 本地 `T&` / `const T&` 已实现；绑定临时量时后端生成隐藏临时对象并把引用绑定到它，生命周期覆盖该引用变量。
 - 运算符优先级与 C++ 一致；`<` 在类型上下文解析为泛型实参，在表达式上下文解析为小于。字面量与纯函数调用在 ConstEval 阶段折叠。
 
@@ -632,7 +633,7 @@ class Holder {
 ```
 
 - 成员类型是用户定义的 `class` 时，必须写 `~this.member;`；漏写产生 warning `W0001`（`-Werror` 升级为错误）。
-- 基本数据类型（`integer`/`decimal`/`character`/`boolean`/`string`/指针等）不需要也不应显式析构；写了产生 `W0002`。
+- 基本数据类型（`integer`/`fix`/`character`/`boolean`/`string`/指针等）不需要也不应显式析构；写了产生 `W0002`。
 - 同一成员重复写析构声明时**只有最后一次生效**（保证恰好一次），重复给 `W0003`。
 - `~this.member;` 是**析构声明**，不是第二次析构：C++ 后端把它擦除（只留注释），成员仍由 C++ 在析构体之后逆序析构，从而避免二次析构。
 - 基类析构由编译器负责，不在用户析构体中写；`~this.member;` 只能出现在析构函数体内，且必须命名当前类的字段（否则 `E2008`）。
@@ -742,7 +743,7 @@ JPA cascade 映射：
 
 注解应用的目标集合：`class`、`interface`、`annotation`、`function`、`method`、`field`、`variable`、`parameter`、`module`、`enumerate`、`enum_value`、`type`、`constructor`、`block`。应用顺序按源码出现顺序；同一目标的处理器按注解应用顺序执行。
 
-- `type` 目标是类型表达式：`@Optional`、`@Unique`、`@Share`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Weak` 是类型注解，附着在局部变量/字段/参数/返回值位置的类型上，而不是上述声明目标。
+- `type` 目标是类型表达式：`@Optional`、`@Unique`、`@Share`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power`、`@Weak` 是类型注解，附着在局部变量/字段/参数/返回值位置的类型上，而不是上述声明目标。
 - `constructor` 目标是构造函数声明：`@Constructure` 标记目标类中参与类型化/命名字面量构造的构造函数。
 - `block` 目标是语句级 `{ ... }` 代码块，用于 `@Retention(Compile)` / `@Retention(Runtime)` 的执行控制。
 - 其它名字保持声明语义（`@Result`/`@Expect` 用于函数/方法，`@Destructure` 用于方法，`@Retention` 用于注解/枚举等）。`@Target` 校验接受 `type`、`constructor` 与 `block`。
@@ -797,7 +798,7 @@ annotation Serializable implements AnnotationProcessor {
 - Sema 契约是恰好一个 `override void process(Description target)`：`E2058`（返回类型不是 void）、`E2059`（参数不是单个 `Description`）、`E2060`（缺少/重复 process、缺少 `override`、非 annotation 实现者）。已删除的 `@Processor` 方法注解会报 `E2061` 并给出迁移提示。
 - 固定五阶段：Meta 定稿 → 应用校验 → `@Inherit` 展开 → 普通处理器按应用顺序执行 → Retention 物化。普通处理器只拿 description，不能改目标结构；description 内部 API 属 P4（解析与基础执行已实现）。
 - Processor executor 在 Sema 前运行，依据 annotation 声明的 `implements AnnotationProcessor` 与名为 `process` 的成员识别处理器，不依赖已解析的 TypeExpr。处理器绑定 description，支持局部变量/if/description 查询/`line`，通过 `addFunction`/`addFunctionReturning`/`addConstant`/`addAnnotatedFunction` 生成声明；生成声明参与下一轮，轮次上限默认 8，超限报 `E2068`。
-- **Intrinsic 的可见性**：用户可以在自己的声明上**应用**标准库 Intrinsic 注解（`@Result`、`@Expect`、`@Unsigned`、`@Signed`、`@Length`、`@Native`、`@Unique`、`@Share`、`@Optional`、`@Proxy`、`@Invocation` 等），并接受其目标/重复性/Retention 校验；但用户**不能定义**新的 Intrinsic，也不能让自己的注解获得 lowering/ABI hook。Intrinsic 的名字到 C++ hook 的映射是封闭表。
+- **Intrinsic 的可见性**：用户可以在自己的声明上**应用**标准库 Intrinsic 注解（`@Result`、`@Expect`、`@Unsigned`、`@Signed`、`@Length`、`@Radix`、`@Power`、`@Native`、`@Unique`、`@Share`、`@Optional`、`@Proxy`、`@Invocation` 等），并接受其目标/重复性/Retention 校验；但用户**不能定义**新的 Intrinsic，也不能让自己的注解获得 lowering/ABI hook。Intrinsic 的名字到 C++ hook 的映射是封闭表。
 
 `@Inherit` 的解析规则（与“注解不能覆盖”一致）：先收集目标上**直接声明**的注解（按源码顺序）；若注解类型带 `@Inherit`，再沿继承关系收集（class 走基类链 → 接口列表；interface 走父接口；method 走被覆写的 virtual 方法链）；**直接注解优先**，同类型直接注解已存在时不再加入继承的那一份；不同类型全部共存，非 `@Repeatable` 类型只保留最近的一份；`effective_annotations()` 返回“直接 + 继承”的只读视图并标注每项的 `is_inherited`，源码/`description` 上的直接注解列表不被修改。
 
@@ -1238,7 +1239,7 @@ coorc CLI
 
 - **SourceManager / Span**：每个文件一个 `std::unique_ptr<SourceFile>`，地址稳定，`string_view` 安全；预计算 `lineStarts`，`lineCol(Span)` 用 `upper_bound` 定位。`Span { file, begin, end }` 贯穿 lexer/parser/sema/diagnostics，偏移是规范化 UTF-8 字节偏移。
 - **DiagnosticEngine**：诊断 = `{severity, code, message, span}`；渲染格式为 `path:line:col: error[E2030]: ...` + 源码行 + `^~~~`（行号/列号 1 基）。`-Werror` 把 warning 提升为 error；warning 仍保留代码（`W0001` 等）便于抑制。
-- **Interpreter**：值域 `Void / Bool / Int / Decimal / Char / String`；Scope 栈与 Sema 同构（函数调用压 Function Scope，函数体再压 Block）；`return`/`break`/`continue` 用内部信号实现，回卷时必须弹出 Scope。
+- **Interpreter**：值域 `Void / Bool / Int / Fraction / Char / String`；Scope 栈与 Sema 同构（函数调用压 Function Scope，函数体再压 Block）；`return`/`break`/`continue` 用内部信号实现，回卷时必须弹出 Scope。
 - **Unicode/编码**：源文件 UTF-8、UTF-16LE/BE、UTF-32LE/BE；BOM 可选，检测后剥离（UTF-32LE BOM 先于 UTF-16LE 检测）；内部统一 UTF-8；非法码点替换为 U+FFFD。`char` 是 32 位标量（后端 `char32_t`）。`Character` 提供 `isAscii`、`isDigit`、`isLetter`、`isWhitespace`、`isControl`、`toUtf8`、`decode`。
 - **Stream / File**：内部 LF；读时 CRLF/CR 归一；写回一律 LF，因此行号/字节偏移跨平台一致。**Stream 的行索引 0 基**（诊断显示的行号则是 1 基），`readByLine` 返回不含换行的行内容；`lineCount` 按 LF 计数。`readByStream`/`writeByStream` 读写整段文本；`readByByteOffset(offset)` 返回到末尾的文本；`writeByByteOffset(offset, content)` 从 `offset` 覆盖写入，越界追加；`writeByLine(index, content)` 只替换已存在的行且 `content` 不得含换行。`File` 提供 `readAll`、`writeAll`、`exists` 与 Stream 方法。
 - **Concurrency**：`Thread` 是 RAII 线程边界；`Atomic<T>` 提供无锁原子操作；工具链不使用全局可变状态，保证并行测试/构建可重复。
@@ -1261,7 +1262,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **194 项**：`coord_unit` 加 193 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、AnnotationProcessor 生成声明与处理器契约、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为注解处理器切片 `coord_e2e_annotation_processor`、`coord_e2e_annotation_processor_class_error`、`coord_e2e_annotation_processor_missing_process_error`、`coord_e2e_annotation_processor_signature_error`、`coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`，以及函数值切片 `coord_e2e_method_ref`、`coord_e2e_method_ref_escape`、`coord_e2e_method_ref_unbound`，以及函数式接口切片 `coord_e2e_functional_interface`、`coord_e2e_functional_interface_error`、`coord_e2e_functional_interface_arity_error`、`coord_e2e_functional_interface_methods_error`，以及线程切片 `coord_e2e_thread`、`coord_e2e_thread_capture_error`、`coord_e2e_thread_this_error`、`coord_e2e_thread_copy_error`，以及 Mutex 切片 `coord_e2e_mutex`、`coord_e2e_mutex_copy_error`、`coord_e2e_mutex_assign_error`，以及 ScopedLock/Atomic/@Lock 切片 `coord_e2e_atomic`、`coord_e2e_scopedlock_copy_error`、`coord_e2e_atomic_copy_error`、`coord_e2e_atomic_assign_error`、`coord_e2e_lock_annotation`、`coord_e2e_lock_annotation_error`，以及 ScopedThread/Atomic-ops 切片 `coord_e2e_scoped_thread`、`coord_e2e_atomic_ops`、`coord_e2e_scopedthread_copy_error`、`coord_e2e_scopedthread_assign_error`、`coord_e2e_scopedthread_capture_error`、`coord_e2e_scopedthread_this_error`，以及 @Lock 能力切片 `coord_e2e_lock_capture`、`coord_e2e_lock_capture_uncaptured_write`、`coord_e2e_lock_capture_const_write`、`coord_e2e_lock_capture_readonly_method`、`coord_e2e_lock_capture_value_class`、`coord_e2e_lock_capture_escape`、`coord_e2e_lock_legacy_error`、`coord_e2e_lock_nested_error`、`coord_e2e_lock_capture_uncaptured_call`、`coord_e2e_lock_capture_value_return`，以及 @Copy 切片 `coord_e2e_copy_deep`、`coord_e2e_copy_deep_unique`、`coord_e2e_copy_shallow`、`coord_e2e_copy_deep_share_error`、`coord_e2e_copy_shallow_unique_error`、`coord_e2e_copy_explicit_required_error`、`coord_e2e_copy_bad_mode_error`、`coord_e2e_lock_capture_deep`、`coord_e2e_lock_capture_shallow_error`、`coord_e2e_copy_deep_unique_chain`、`coord_e2e_copy_deep_nested_error`、`coord_e2e_copy_explicit_shell_error`，以及 Safe/Unsafe 切片 `coord_e2e_unsafe_ffi_error`、`coord_e2e_unsafe_ffi_block`、`coord_e2e_unsafe_pointer_error`、`coord_e2e_unsafe_safe_override_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 当前注册 **199 项**：`coord_unit` 加 198 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、`fix`/`@Power`（默认/显式 Power、integer/float 提升、radix 2/10/3、`E2100`–`E2108` 负例）、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、AnnotationProcessor 生成声明与处理器契约、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为注解处理器切片 `coord_e2e_annotation_processor`、`coord_e2e_annotation_processor_class_error`、`coord_e2e_annotation_processor_missing_process_error`、`coord_e2e_annotation_processor_signature_error`、`coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_fix`、`coord_e2e_fix_radix`、`coord_e2e_fix_power_error`、`coord_e2e_fix_division_error`、`coord_e2e_fix_length_error`、`coord_e2e_radix`、`coord_e2e_radix_error`、`coord_e2e_radix_zero_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`，以及函数值切片 `coord_e2e_method_ref`、`coord_e2e_method_ref_escape`、`coord_e2e_method_ref_unbound`，以及函数式接口切片 `coord_e2e_functional_interface`、`coord_e2e_functional_interface_error`、`coord_e2e_functional_interface_arity_error`、`coord_e2e_functional_interface_methods_error`，以及线程切片 `coord_e2e_thread`、`coord_e2e_thread_capture_error`、`coord_e2e_thread_this_error`、`coord_e2e_thread_copy_error`，以及 Mutex 切片 `coord_e2e_mutex`、`coord_e2e_mutex_copy_error`、`coord_e2e_mutex_assign_error`，以及 ScopedLock/Atomic/@Lock 切片 `coord_e2e_atomic`、`coord_e2e_scopedlock_copy_error`、`coord_e2e_atomic_copy_error`、`coord_e2e_atomic_assign_error`、`coord_e2e_lock_annotation`、`coord_e2e_lock_annotation_error`，以及 ScopedThread/Atomic-ops 切片 `coord_e2e_scoped_thread`、`coord_e2e_atomic_ops`、`coord_e2e_scopedthread_copy_error`、`coord_e2e_scopedthread_assign_error`、`coord_e2e_scopedthread_capture_error`、`coord_e2e_scopedthread_this_error`，以及 @Lock 能力切片 `coord_e2e_lock_capture`、`coord_e2e_lock_capture_uncaptured_write`、`coord_e2e_lock_capture_const_write`、`coord_e2e_lock_capture_readonly_method`、`coord_e2e_lock_capture_value_class`、`coord_e2e_lock_capture_escape`、`coord_e2e_lock_legacy_error`、`coord_e2e_lock_nested_error`、`coord_e2e_lock_capture_uncaptured_call`、`coord_e2e_lock_capture_value_return`，以及 @Copy 切片 `coord_e2e_copy_deep`、`coord_e2e_copy_deep_unique`、`coord_e2e_copy_shallow`、`coord_e2e_copy_deep_share_error`、`coord_e2e_copy_shallow_unique_error`、`coord_e2e_copy_explicit_required_error`、`coord_e2e_copy_bad_mode_error`、`coord_e2e_lock_capture_deep`、`coord_e2e_lock_capture_shallow_error`、`coord_e2e_copy_deep_unique_chain`、`coord_e2e_copy_deep_nested_error`、`coord_e2e_copy_explicit_shell_error`，以及 Safe/Unsafe 切片 `coord_e2e_unsafe_ffi_error`、`coord_e2e_unsafe_ffi_block`、`coord_e2e_unsafe_pointer_error`、`coord_e2e_unsafe_safe_override_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1860,8 +1861,9 @@ coorc config list|get|set
 | `@Signed integer` | `std::int64_t` |
 | `@Length(8/16/32/64)` | `std::uint8_t`…`std::uint64_t` / `std::int8_t`…`std::int64_t` |
 | `@Length(128)` | `coord_rt::UInt128` / `Int128` |
+| `fix` | `coord_rt::Fix<Power, Radix>`（静态 scale，64 位 raw） |
+| `integer`/`float` + `@Power(N)` | 提升为 `coord_rt::Fix<N, 10>` |
 | `float` | `double` |
-| `decimal` | `coord_rt::Decimal`（value + scale 定点） |
 | `record` / `Record` | `coord_rt::Record`（根类型） |
 | `char` / `string` | `char32_t` / `std::string` |
 | `Enumeration` / 具体 `enumerate` | `enum class`（底层 `std::int64_t`），带方法/接口时为同布局包装 |
@@ -1981,7 +1983,16 @@ coorc config list|get|set
 | `E2054` | `@Signed`/`@Unsigned` 用于非 `integer` 类型 |
 | `E2055` | `@Expect` 结果未消费（被当作语句丢弃） |
 | `E2056` | `@Length` 不是 8/16/32/64/128 位 |
-| `E2057` | `@Length` 用于非基本数值类型，或 `@Length(128)` 不是 integer |
+| `E2057` | `@Length` 用于非数值类型 |
+| `E2100` | `@Radix` 不是整数 `>= 2`（0/1/负数） |
+| `E2101` | `@Length`/`@Radix`/`@Power` 用于非数值类型 |
+| `E2102` | 不支持的数值组合：fix 的 `@Length` 非 64、float 宽度或 `@Power` scale 溢出 |
+| `E2103` | 小数字面量赋给没有显式 `@Power` 的 `fix` |
+| `E2104` | 11A 未实现的 fix 除法/取余/位运算/移位 |
+| `E2105` | 小数字面量无法表示进目标 integer 或 64 位 fix raw（不静默截断） |
+| `E2106` | `@Power` 参数不是整数字面量 |
+| `E2107` | `print` 的 fix 类型 `@Radix` 超出 2–36 |
+| `E2108` | fix 操作数 radix 不一致，或 fix 与 float 未显式转换 |
 | `E2058` | `AnnotationProcessor.process` 返回类型不是 void |
 | `E2059` | `AnnotationProcessor.process` 参数不是单个 `Description` |
 | `E2060` | AnnotationProcessor 契约错误：缺少/重复 `process`、缺少 `override`、非 annotation 实现者，或 class/interface/enumerate 实现 `AnnotationProcessor` |
@@ -2054,6 +2065,7 @@ coorc config list|get|set
 | 元注解 `@Inherit/@Repeatable/@Target/@Meta/@Retention/@Documented` | ✅ | 校验 + `@Inherit` effective 列表 |
 | Runtime/Enum 保留表 / 注解注释物化 | ✅ | `kRetainedAnnotations` / `k<Enum>Variants`；Invocation hook P4 |
 | `integer` `@Length` 8/16/32/64/128 + `@Signed/@Unsigned` | ✅ | 128 位用 `coord_rt::UInt128` |
+| `fix` + `@Power`/`@Radix`/`@Length` | ✅/🚧 | 静态 64 位 raw 的加减乘、字面量、打印、比较与 integer 提升；除法、fix↔float 隐式转换、8/16/32/128 位 raw 与目标类型转换 ⏳（`E2102`/`E2104`） |
 | `Result` / `Expect` | ✅ | 类型实参校验、独立类型、消费检查 |
 | 注解处理器、`line`、proxy、反射五层 | ✅/🚧 | `AnnotationProcessor.process` + `line`、proxy class/annotation/runtime、`@Invocation`、`Reflector` 已可用；完整 descriptor API/运行期反射仍推进 |
 | `.coox`、多模块链接、标准库 | 🚧 | 相对 import、工程目录、`.coox` 读写、outline/hint、`@Test`、`coorc deps`、容器已可用；标准库其余 API 待做 |
@@ -2090,9 +2102,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器、注解处理器层级以及 lambda/match/线程/同步/复制/安全等切片落地后的 194 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器、注解处理器层级、lambda/match/线程/同步/复制/安全等切片以及静态定点（`fix`/`@Power`）切片落地后的 199 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-28）**：`ctest` 注册 **194 项**，Windows 全套 **194/194 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
+**基线（2026-11-28）**：`ctest` 注册 **199 项**，Windows 全套 **199/199 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表、静态定点（`fix`/`@Power`）已具备。
 
 **最终验收**：
 

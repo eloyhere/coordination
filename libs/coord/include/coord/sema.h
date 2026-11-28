@@ -18,7 +18,7 @@ enum class TypeKind {
   Void,
   Bool,
   Int,
-  Decimal,
+  Fix,
   Float,
   Record,
   Char,
@@ -59,6 +59,9 @@ struct FieldInfo {
   const Decl* decl = nullptr;
   Access access = Access::Default;
   Type* owner = nullptr;
+  /// True when the field declaration carries an explicit @Power; a fix field
+  /// without it cannot receive a fractional literal.
+  bool hasFixPower = false;
 };
 
 struct MethodInfo {
@@ -98,6 +101,12 @@ struct Type {
   Type* base = nullptr;
   Type* pointee = nullptr;
   std::int64_t arrayLength = 0;
+  /// Static numeric metadata. `length` is the raw integer width (0 = default),
+  /// `radix` the raw scaling base (0 = 10) and `power` the fixed-point power
+  /// (raw = semantic * radix^power). Only TypeKind::Fix carries radix/power.
+  int length = 0;
+  int radix = 0;
+  int power = 0;
   const Decl* decl = nullptr;
   Type* returnType = nullptr;
   bool builtin = false;
@@ -118,7 +127,7 @@ struct Type {
     return kind == TypeKind::Int;
   }
   [[nodiscard]] bool isNumeric() const {
-    return kind == TypeKind::Int || kind == TypeKind::Decimal ||
+    return kind == TypeKind::Int || kind == TypeKind::Fix ||
            kind == TypeKind::Float;
   }
 };
@@ -177,6 +186,9 @@ private:
     bool isWeak = false;
     bool moved = false;
     bool narrowed = false;
+    /// True when the declaration site carried an explicit @Power; needed to
+    /// reject fractional literals assigned to a default-power fix variable.
+    bool hasFixPower = false;
     ProxyPolicy proxyPolicy = ProxyPolicy::Error;
     const Expr* optionalDefault = nullptr;
     const Decl* field = nullptr;
@@ -199,6 +211,23 @@ private:
 
   void initializeBuiltins();
   Type* makeType(TypeKind kind, std::string name, Type* base);
+  /// Canonical static-scale fix type for (raw width, radix, power); the
+  /// default `fix` type is (64, 10, 0).
+  Type* makeFixType(int length, int radix, int power);
+  /// Applies @Length/@Radix/@Power metadata from a type expression to its
+  /// resolved base type, performing integer/float -> fix promotion.
+  Type* resolveNumericType(TypeExpr* type, Type* base);
+  /// Encodes a fractional literal into the target fix type's raw integer and
+  /// returns true when the expression was coerced. Reports E2103 when the
+  /// target has no explicit @Power and E2105 when the literal cannot be
+  /// represented.
+  bool coerceFractionLiteral(Expr* expr, Type* target, bool targetPowerExplicit,
+                             Span span);
+  [[nodiscard]] static bool isFractionLiteral(const Expr* expr);
+  [[nodiscard]] static bool hasFractionLiteralOperand(const Expr* expr);
+  /// Looks up whether a variable/field/parameter target carried @Power.
+  [[nodiscard]] bool targetHasFixPower(const Expr* target);
+  void checkIntegerLiteralTarget(const Expr* value, Type* target, Span span);
   Type* makePointerType(Type* pointee);
   Type* makeSharePtrType(Type* pointee);
   Type* makeArrayType(Type* element, std::int64_t length);
@@ -367,7 +396,7 @@ private:
   Type* classType_ = nullptr;
   Type* enumerationType_ = nullptr;
   Type* intType_ = nullptr;
-  Type* decimalType_ = nullptr;
+  Type* fixType_ = nullptr;
   Type* floatType_ = nullptr;
   Type* recordType_ = nullptr;
   Type* charType_ = nullptr;

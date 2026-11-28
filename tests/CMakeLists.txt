@@ -688,13 +688,45 @@ if(MSVC)
       -DEXPECTED=1.5|3.25|3.25
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 
-  add_test(NAME coord_e2e_decimal_fixed
+  add_test(NAME coord_e2e_fix
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>
-      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/decimal_fixed.coo
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_decimal_fixed
-      -DEXPECTED=1.75|1.25|0.375|6|true|0.868928|3.131072|2.262144|6|1.5|1.5
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix
+      -DEXPECTED=19.99|20|19.98|true|true|2.5|21.49|true|19.99|1.5|3|3
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix_radix
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_radix.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_radix
+      -DEXPECTED=10|0.1|0.5|0.12|12
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_fix_power_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_power_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_power_error
+      -DEXPECT_SUBSTRING=E2103
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_fix_division_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_division_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_division_error
+      -DEXPECT_SUBSTRING=E2104
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_fix_length_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/fix_length_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_fix_length_error
+      -DEXPECT_SUBSTRING=E2102
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
   add_test(NAME coord_e2e_determinism_reflection
     COMMAND ${CMAKE_COMMAND}
@@ -909,7 +941,15 @@ if(MSVC)
       -DCOORC=$<TARGET_FILE:coorc>
       -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/radix_error.coo
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_radix_error
-      -DEXPECT_SUBSTRING=E2066
+      -DEXPECT_SUBSTRING=E2100
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_radix_zero_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/radix_zero_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_radix_zero_error
+      -DEXPECT_SUBSTRING=E2100
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
   add_test(NAME coord_e2e_default_init

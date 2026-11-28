@@ -49,7 +49,7 @@ struct ObjectField {
 
 enum class ExprKind {
   IntLit,
-  DecimalLit,
+  FractionLit,
   CharLit,
   BoolLit,
   StringLit,
@@ -79,7 +79,14 @@ struct Expr : Node {
   std::string name;  // Name / Member / callee
   std::string op;    // Unary / Binary / Assign
   std::int64_t intValue = 0;
-  double decimalValue = 0.0;
+  double fractionValue = 0.0;
+  /// Cleaned source spelling of a fractional literal, used to encode an exact
+  /// fixed-point raw value when Sema lowers the literal to `fix`.
+  std::string fractionText;
+  /// Set by Sema when a fractional literal is converted to a static-scale fix
+  /// type: the encoded raw integer and the resolved target type.
+  std::int64_t fixRaw = 0;
+  bool fixLiteral = false;
   char32_t charValue = 0;
   bool boolValue = false;
   std::string stringValue;
@@ -176,6 +183,19 @@ struct TypeExpr : Node {
   ExprPtr arraySize;
   bool constRef = false;
   Type* resolved = nullptr;
+  /// Numeric metadata attached to this type expression by a leading
+  /// @Length/@Radix/@Power annotation. The values are 0 when absent; a
+  /// negative sentinel means the annotation was present but its argument was
+  /// not an integer literal (reported by Sema).
+  int numericLength = 0;
+  int numericRadix = 0;
+  int numericPower = 0;
+  Span numericLengthSpan;
+  Span numericRadixSpan;
+  Span numericPowerSpan;
+  bool hasNumericLength = false;
+  bool hasNumericRadix = false;
+  bool hasNumericPower = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -253,6 +273,8 @@ struct Stmt : Node {  StmtKind kind = StmtKind::Block;
   bool optionalDestructureNarrowed = false;
   ProxyPolicy proxyPolicy = ProxyPolicy::Error;
   int radix = 0;
+  int power = 0;
+  bool hasPower = false;
   ExprPtr optionalDefault;
   const Expr* optionalDefaultRef = nullptr;
   std::string letName;
@@ -294,6 +316,8 @@ struct Param {
   ExprPtr defaultValue;
   std::vector<AnnotationUse> annotations;
   int radix = 0;
+  int power = 0;
+  bool hasPower = false;
   bool isUnique = false;
   bool isShare = false;
   bool isWeak = false;
@@ -379,6 +403,8 @@ struct Decl : Node {
   bool isOptional = false;
   int length = 0;
   int radix = 0;
+  int power = 0;
+  bool hasPower = false;
   bool isCore = false;
   bool isStandard = false;
   std::string doc;

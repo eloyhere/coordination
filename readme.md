@@ -6,7 +6,7 @@ Coordination is a statically typed systems language with **no macros**: compile-
 
 - Source files `.coo`; module interfaces `.coox`; compiler `coorc`.
 - Package manifests `coordination.toml` / `coord.pkg`; lockfile `coord.lock`.
-- Current baseline: **194 CTest cases**, with **194/194 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
+- Current baseline: **199 CTest cases**, with **199/199 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
 - The language and toolchain are wrapping up M3; [framework.md](framework.md) / [framework.zh-CN.md](framework.zh-CN.md) are authoritative, while this document focuses on usage.
 
 ## 1 Run It in 30 Seconds
@@ -78,7 +78,7 @@ integer main(integer argc, Array<string> args) {
 }
 ```
 
-- `void main()`, `decimal main()` and any other parameter form report `E2052`;
+- `void main()`, `fix main()` and any other parameter form report `E2052`;
 - `@Result<T>` changes error propagation only, never the "must return `integer`" rule;
 - the generated C++ entry converts the result into the process exit code.
 
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows uses presets derived from `windows-base` (Ninja + cl); Linux/macOS use `linux-release`/`macos-release`/`linux-debug`.
-- `ctest` registers **194 tests** (1 unit test plus 193 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
+- `ctest` registers **199 tests** (1 unit test plus 198 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
 - Sanitizers: `cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` builds with ASan + UBSan; `linux-sanitize` preset is provided. Run tests with `ASAN_OPTIONS=detect_leaks=0` when leak checks are not relevant.
 - Parser/compiler fuzzing: build with Clang and `-DCOORD_FUZZ=ON`; see [tests/fuzz/README.md](tests/fuzz/README.md). The parser fuzzer caught unbounded diagnostics; the compiler fuzzer exercises Sema/emitter and requires the `Checker` to outlive emission.
 - Always `--clean-first` after header changes; keep generated C++ for inspection with `coorc --emit-cpp out\x.cpp file.coo`.
@@ -474,24 +474,27 @@ integer main() {
 - `@Retention(Runtime)` blocks are not executed at compile time and run normally.
 - Only `Compile`/`Runtime` are valid on blocks; `Invocation`/`enum` report `E2044`.
 
-### 7.4 Numeric Radix
+### 7.4 Numeric Radix and Static Fixed Point
 
 ```coo
-@Radix(16)
-const integer MASK = 255;
-
 integer main() {
+    @Power(2) fix price = 19.99;      // raw 1999, prints 19.99
+    @Power(2) integer cents = 19.99;  // integer + @Power promotes to fix
+    @Power(2) @Radix(2) fix half = 0.5; // prints 0.1 in base 2
     @Radix(2)
-    integer flags = 10;
-    @Radix(8)
-    integer mode = 64;
-    print(MASK + flags + mode); // values are still 255, 10, 64
+    integer flags = 10;               // integer literal spelling only
+    print(price);
+    print(cents);
+    print(half);
     return 0;
 }
 ```
 
-- `@Radix(2|8|10|16)` is a type annotation that changes only how generated C++ spells integer literals in declaration initializers, field defaults and `const` values: `0XFF`, `0B1010`, C++ octal `0100`.
-- It does not change source literal parsing or runtime `print`; unsupported bases/types report `E2066`.
+- `fix` is static fixed point: `raw = semantic × radix^power`, represented as `coord_rt::Fix<Power, Radix>` with one 64-bit raw integer (no runtime scale). Defaults are `@Length(64) @Radix(10) @Power(0)`.
+- `@Power` on an `integer` or `float` declaration promotes it to `fix`; `@Radix` alone does not. A fractional literal needs an explicit `@Power` to initialize a `fix` (otherwise `E2103`); it is encoded exactly at compile time, rounding half away from zero beyond the target scale.
+- `+`/`-` align to the finer power within one radix, `*` adds powers, comparisons and `print` work, and `toInteger()`/`toFloat()` are the explicit conversions out of `fix`. `@Length` result-width rules (`max(len1,len2)+1`, `len1+len2`, 64×64→128 intermediates) and division/remainder/bitwise/shift on `fix` report `E2104`/`E2102` until slice 11B.
+- `print` renders the semantic value in the type's radix (2–36) and drops trailing zero digits.
+- `@Radix` accepts any integer `>= 2`; `0`, `1` and negatives report `E2100`. For `integer` it only changes generated C++ literal spelling for bases 2/8/16 (`0XFF`, `0B1010`, C++ octal `0100`); other bases spell decimal, and runtime `print` of an integer is unchanged.
 
 ### 7.5 Annotation Processors
 

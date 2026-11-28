@@ -142,7 +142,7 @@ const std::unordered_map<std::string_view, TokKind>& keywordTable() {
       {"new", TokKind::KwNew},
       {"delete", TokKind::KwDelete},
       {"integer", TokKind::KwInteger},
-      {"decimal", TokKind::KwDecimal},
+      {"fix", TokKind::KwFix},
       {"float", TokKind::KwFloat},
       {"record", TokKind::KwRecord},
       {"character", TokKind::KwCharacter},
@@ -298,7 +298,7 @@ Token Lexer::lexIdentifierOrKeyword() {
 Token Lexer::lexNumber() {
   const std::uint32_t begin = static_cast<std::uint32_t>(pos_);
   int base = 10;
-  bool isDecimal = false;
+  bool isFraction = false;
 
   if (peek() == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
     base = 16;
@@ -337,13 +337,13 @@ Token Lexer::lexNumber() {
   if (base == 10) {
     // Fractional part: only when '.' is followed by a digit (so `1..2` works).
     if (peek() == '.' && isDigit(peek(1))) {
-      isDecimal = true;
+      isFraction = true;
       cleaned.push_back('.');
       ++pos_;
       consumeDigits();
     }
     if (peek() == 'e' || peek() == 'E') {
-      isDecimal = true;
+      isFraction = true;
       cleaned.push_back('e');
       ++pos_;
       if (peek() == '+' || peek() == '-') {
@@ -367,19 +367,20 @@ Token Lexer::lexNumber() {
             "numeric literal suffixes are not supported yet");
   }
 
-  Token token = makeToken(isDecimal ? TokKind::DecimalLiteral
+  Token token = makeToken(isFraction ? TokKind::FractionLiteral
                                     : TokKind::IntegerLiteral,
                           begin);
 
-  if (isDecimal) {
+  if (isFraction) {
     double value = 0.0;
     const auto result =
         std::from_chars(cleaned.data(), cleaned.data() + cleaned.size(), value);
     if (result.ec != std::errc{}) {
       errorAt(begin, static_cast<std::uint32_t>(pos_),
-              "decimal literal is out of range");
+              "fractional literal is out of range");
     }
-    token.decimalValue = value;
+    token.fractionValue = value;
+    token.fractionText = cleaned;
   } else {
     std::uint64_t value = 0;
     const auto result = std::from_chars(

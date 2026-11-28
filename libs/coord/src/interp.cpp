@@ -23,10 +23,10 @@ Value Value::makeInt(std::int64_t value) {
   return v;
 }
 
-Value Value::makeDecimal(double value) {
+Value Value::makeFraction(double value) {
   Value v;
-  v.kind = Kind::Decimal;
-  v.decimalValue = value;
+  v.kind = Kind::Fraction;
+  v.fractionValue = value;
   return v;
 }
 
@@ -45,7 +45,7 @@ Value Value::makeString(std::string value) {
 }
 
 double Value::asDouble() const {
-  return kind == Kind::Int ? static_cast<double>(intValue) : decimalValue;
+  return kind == Kind::Int ? static_cast<double>(intValue) : fractionValue;
 }
 
 std::string Value::toString() const {
@@ -56,9 +56,9 @@ std::string Value::toString() const {
       return boolValue ? "true" : "false";
     case Kind::Int:
       return std::to_string(intValue);
-    case Kind::Decimal: {
+    case Kind::Fraction: {
       std::ostringstream stream;
-      stream << decimalValue;
+      stream << fractionValue;
       return stream.str();
     }
     case Kind::Char: {
@@ -226,7 +226,7 @@ std::optional<Value> Interpreter::evalUnary(Expr* expr) {
   if (expr->op == "-") {
     return operand->kind == Value::Kind::Int
                ? Value::makeInt(-operand->intValue)
-               : Value::makeDecimal(-operand->decimalValue);
+               : Value::makeFraction(-operand->fractionValue);
   }
   if (expr->op == "+") {
     return operand;
@@ -356,20 +356,20 @@ std::optional<Value> Interpreter::evalBinary(Expr* expr) {
   }
 
   if (expr->op == "+") {
-    return Value::makeDecimal(a + b);
+    return Value::makeFraction(a + b);
   }
   if (expr->op == "-") {
-    return Value::makeDecimal(a - b);
+    return Value::makeFraction(a - b);
   }
   if (expr->op == "*") {
-    return Value::makeDecimal(a * b);
+    return Value::makeFraction(a * b);
   }
   if (expr->op == "/") {
     if (b == 0.0) {
       error(expr->span, "division by zero in constant expression");
       return std::nullopt;
     }
-    return Value::makeDecimal(a / b);
+    return Value::makeFraction(a / b);
   }
   return std::nullopt;
 }
@@ -457,8 +457,8 @@ std::optional<Value> Interpreter::evalExpr(Expr* expr) {
   switch (expr->kind) {
     case ExprKind::IntLit:
       return Value::makeInt(expr->intValue);
-    case ExprKind::DecimalLit:
-      return Value::makeDecimal(expr->decimalValue);
+    case ExprKind::FractionLit:
+      return Value::makeFraction(expr->fractionValue);
     case ExprKind::CharLit:
       return Value::makeChar(expr->charValue);
     case ExprKind::BoolLit:
@@ -541,7 +541,7 @@ void Interpreter::execStmt(Stmt* stmt) {
                              : (condition->isNumeric() &&
                                 (condition->kind == Value::Kind::Int
                                      ? condition->intValue != 0
-                                     : condition->decimalValue != 0.0));
+                                     : condition->fractionValue != 0.0));
       if (truth) {
         execStmt(stmt->thenBranch.get());
       } else {

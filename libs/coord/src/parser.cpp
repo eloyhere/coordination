@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -30,6 +31,77 @@ int annotationRadix(const std::vector<AnnotationUse>& annotations,
   return 0;
 }
 
+/// One numeric type-annotation argument (`@Length`, `@Radix`, `@Power`).
+struct NumericAnnotation {
+  bool present = false;
+  bool valid = false;
+  int value = 0;
+  Span span;
+};
+
+NumericAnnotation findNumericAnnotation(
+    const std::vector<AnnotationUse>& annotations, std::string_view name) {
+  NumericAnnotation result;
+  for (const AnnotationUse& use : annotations) {
+    if (use.name != name) {
+      continue;
+    }
+    result.present = true;
+    result.span = use.span;
+    const Expr* literal =
+        use.args.size() == 1 ? use.args[0].get() : nullptr;
+    bool negative = false;
+    while (literal != nullptr && literal->kind == ExprKind::Unary &&
+           (literal->op == "+" || literal->op == "-")) {
+      if (literal->op == "-") {
+        negative = !negative;
+      }
+      literal = literal->lhs.get();
+    }
+    if (literal != nullptr && literal->kind == ExprKind::IntLit) {
+      const std::int64_t magnitude = literal->intValue;
+      const std::int64_t value = negative ? -magnitude : magnitude;
+      if (value >= -2147483647LL && value <= 2147483647LL) {
+        result.valid = true;
+        result.value = static_cast<int>(value);
+      }
+    }
+    break;
+  }
+  return result;
+}
+
+/// Binds leading @Length/@Radix/@Power annotations to the type expression that
+/// follows them, so numeric metadata lives on the type rather than only on the
+/// enclosing declaration.
+void bindNumericAnnotations(const std::vector<AnnotationUse>& annotations,
+                            TypeExpr* type) {
+  if (type == nullptr) {
+    return;
+  }
+  const NumericAnnotation length = findNumericAnnotation(annotations, "Length");
+  if (length.present) {
+    type->hasNumericLength = true;
+    type->numericLength =
+        length.valid ? length.value : std::numeric_limits<int>::min();
+    type->numericLengthSpan = length.span;
+  }
+  const NumericAnnotation radix = findNumericAnnotation(annotations, "Radix");
+  if (radix.present) {
+    type->hasNumericRadix = true;
+    type->numericRadix =
+        radix.valid ? radix.value : std::numeric_limits<int>::min();
+    type->numericRadixSpan = radix.span;
+  }
+  const NumericAnnotation power = findNumericAnnotation(annotations, "Power");
+  if (power.present) {
+    type->hasNumericPower = true;
+    type->numericPower =
+        power.valid ? power.value : std::numeric_limits<int>::min();
+    type->numericPowerSpan = power.span;
+  }
+}
+
 Span join(Span begin, Span end) {
   return Span{begin.file, begin.begin, end.end};
 }
@@ -38,7 +110,7 @@ bool isTypeKeyword(TokKind kind) {
   switch (kind) {
     case TokKind::KwVoid:
     case TokKind::KwInteger:
-    case TokKind::KwDecimal:
+    case TokKind::KwFix:
     case TokKind::KwFloat:
     case TokKind::KwRecord:
     case TokKind::KwCharacter:
@@ -69,8 +141,8 @@ std::string keywordTypeName(TokKind kind) {
       return "void";
     case TokKind::KwInteger:
       return "integer";
-    case TokKind::KwDecimal:
-      return "decimal";
+    case TokKind::KwFix:
+      return "fix";
     case TokKind::KwFloat:
       return "float";
     case TokKind::KwRecord:
@@ -478,6 +550,11 @@ Param Parser::parseParam() {
     }
   }
   param.type = parseType(true);
+  bindNumericAnnotations(param.annotations, param.type.get());
+  if (param.type != nullptr && param.type->hasNumericPower) {
+    param.hasPower = true;
+    param.power = param.type->numericPower;
+  }
   if (check(TokKind::Identifier)) {
     param.name = std::string(advance().text);
   } else {
@@ -907,6 +984,7 @@ DeclPtr Parser::parseClassMember(const std::string& className) {
   }
 
   TypeExprPtr type = parseType(true);
+  bindNumericAnnotations(annotations, type.get());
   if (!check(TokKind::Identifier)) {
     error(current(), "expected member name");
     if (!atEnd() && !check(TokKind::RBrace)) {
@@ -1038,6 +1116,7 @@ DeclPtr Parser::parseFunction(std::vector<AnnotationUse> annotations,
   decl->span = current().span;
 
   decl->type = parseType(true);
+  bindNumericAnnotations(decl->annotations, decl->type.get());
 
   if (match(TokKind::KwOperator)) {
     if (check(TokKind::Identifier)) {
@@ -1095,6 +1174,7 @@ DeclPtr Parser::parseConst(std::vector<AnnotationUse> annotations,
     decl->name = std::string(advance().text);
   } else {
     decl->type = parseType(true);
+    bindNumericAnnotations(decl->annotations, decl->type.get());
     if (!check(TokKind::Identifier)) {
       error(current(), "expected constant name");
       return nullptr;
@@ -1305,6 +1385,19 @@ StmtPtr Parser::parseVarDecl() {
     stmt->name = std::string(advance().text);
   } else {
     stmt->type = parseType(true);
+    bindNumericAnnotations(annotations, stmt->type.get());
+    if (stmt->type != nullptr) {
+      if (stmt->type->hasNumericLength && stmt->type->numericLength > 0) {
+        stmt->length = stmt->type->numericLength;
+      }
+      if (stmt->type->hasNumericRadix && stmt->type->numericRadix > 0) {
+        stmt->radix = stmt->type->numericRadix;
+      }
+      if (stmt->type->hasNumericPower) {
+        stmt->hasPower = true;
+        stmt->power = stmt->type->numericPower;
+      }
+    }
     if (!check(TokKind::Identifier)) {
       error(current(), "expected variable name");
       return nullptr;
@@ -2120,9 +2213,11 @@ ExprPtr Parser::parsePrimary() {
     expr->intValue = advance().intValue;
     return expr;
   }
-  if (check(TokKind::DecimalLiteral)) {
-    expr->kind = ExprKind::DecimalLit;
-    expr->decimalValue = advance().decimalValue;
+  if (check(TokKind::FractionLiteral)) {
+    const Token& token = advance();
+    expr->kind = ExprKind::FractionLit;
+    expr->fractionValue = token.fractionValue;
+    expr->fractionText = token.fractionText;
     return expr;
   }
   if (check(TokKind::CharacterLiteral)) {

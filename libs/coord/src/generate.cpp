@@ -157,10 +157,16 @@ std::string CppEmitter::literal(const Value& value) const {
       return value.boolValue ? "true" : "false";
     case Value::Kind::Int:
       return "static_cast<std::int64_t>(" + std::to_string(value.intValue) + ")";
-    case Value::Kind::Decimal: {
+    case Value::Kind::Fraction: {
       std::ostringstream stream;
-      stream << std::setprecision(17) << value.decimalValue;
-      return stream.str();
+      stream << std::setprecision(17) << value.fractionValue;
+      std::string text = stream.str();
+      if (text.find('.') == std::string::npos &&
+          text.find('e') == std::string::npos &&
+          text.find('E') == std::string::npos) {
+        text += ".0";
+      }
+      return text;
     }
     case Value::Kind::Char:
       return charLiteral(value.charValue);
@@ -226,6 +232,10 @@ std::string CppEmitter::cppTypeName(const Type* type) const {
   if (type->kind == TypeKind::Atomic) {
     return "std::atomic<std::int64_t>";
   }
+  if (type->kind == TypeKind::Fix) {
+    return "coord_rt::Fix<" + std::to_string(type->power) + ", " +
+           std::to_string(type->radix) + ">";
+  }
   const std::string& name = type->name;
   if (name == "integer") {
     return "std::int64_t";
@@ -239,8 +249,8 @@ std::string CppEmitter::cppTypeName(const Type* type) const {
   if (name == "string") {
     return "std::string";
   }
-  if (name == "decimal") {
-    return "coord_rt::Decimal";
+  if (name == "fix") {
+    return "coord_rt::Fix<0, 10>";
   }
   if (name == "float") {
     return "double";
@@ -257,6 +267,10 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
   }
   switch (type->kind) {
     case TypeExprKind::Named: {
+      if (type->resolved != nullptr &&
+          type->resolved->kind == TypeKind::Fix) {
+        return cppTypeName(type->resolved);
+      }
       if (type->resolved != nullptr &&
           type->resolved->kind == TypeKind::Function) {
         return cppTypeName(type->resolved);
@@ -308,7 +322,7 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
           {"usize", "std::size_t"},
           {"f32", "float"},
           {"f64", "double"},
-          {"decimal", "coord_rt::Decimal"},
+          {"fix", "coord_rt::Fix<0, 10>"},
           {"float", "double"},
           {"record", "coord_rt::Record"},
           {"Record", "coord_rt::Record"},
@@ -317,7 +331,7 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
           {"Character", "char32_t"},
           {"Boolean", "bool"},
           {"Float", "double"},
-          {"Decimal", "coord_rt::Decimal"},
+          {"Fix", "coord_rt::Fix<0, 10>"},
           {"integer", "std::int64_t"},
           {"character", "char32_t"},
           {"boolean", "bool"},
@@ -440,6 +454,11 @@ void CppEmitter::emitStorageType(const TypeExpr* type, bool isUnsigned,
     emitType(type);
     return;
   }
+  if (type->resolved != nullptr &&
+      type->resolved->kind == TypeKind::Fix) {
+    out_ << cppTypeName(type->resolved);
+    return;
+  }
   const std::string& name = type->resolved->name;
   if (name == "integer") {
     const int bits = length != 0 ? length : 64;
@@ -458,14 +477,6 @@ void CppEmitter::emitStorageType(const TypeExpr* type, bool isUnsigned,
       out_ << "char16_t";
     } else {
       out_ << "char32_t";
-    }
-    return;
-  }
-  if (name == "decimal") {
-    if (length == 8 || length == 16 || length == 32 || length == 64) {
-      out_ << "coord_rt::DecimalT<std::int" << length << "_t>";
-    } else {
-      out_ << "coord_rt::Decimal";
     }
     return;
   }
@@ -500,6 +511,7 @@ void CppEmitter::emitPrelude() {
   out_ << "#include <unordered_set>\n";
   out_ << "#include <utility>\n";
   out_ << "#include <cstdint>\n";
+  out_ << "#include <cmath>\n";
   out_ << "#include <iostream>\n";
   out_ << "#include <string>\n";
   out_ << "#include <cstring>\n";
@@ -1096,124 +1108,344 @@ void CppEmitter::emitPrelude() {
   out_ << "  auto it = map.find(key);\n";
   out_ << "  return it == map.end() ? nullptr : &it->second;\n";
   out_ << "}\n";
-  out_ << "template <class T>\n";
-  out_ << "struct DecimalT {\n";
-  out_ << "  T value{};\n";
-  out_ << "  T scale{};\n";
-  out_ << "  DecimalT() = default;\n";
-  out_ << "  DecimalT(std::int64_t v) : value(static_cast<T>(v)), scale(0) {}\n";
-  out_ << "  DecimalT(T v, T s) : value(v), scale(s) {}\n";
-  out_ << "  template <class U>\n";
-  out_ << "  DecimalT(const DecimalT<U>& other)\n";
-  out_ << "      : value(static_cast<T>(other.value)),\n";
-  out_ << "        scale(static_cast<T>(other.scale)) {}\n";
-  out_ << "  DecimalT(double v) {\n";
-  out_ << "    scale = 6;\n";
-  out_ << "    value = static_cast<T>(v * 1000000.0);\n";
-  out_ << "  }\n";
-  out_ << "  operator double() const {\n";
-  out_ << "    double divisor = 1.0;\n";
-  out_ << "    for (std::int64_t i = 0; i < scale; ++i) divisor *= 10.0;\n";
-  out_ << "    return static_cast<double>(value) / divisor;\n";
-  out_ << "  }\n";
-  out_ << "};\n";
-  out_ << "using Decimal = DecimalT<std::int64_t>;\n";
+  out_ << R"COORD(
+constexpr std::int64_t fixIPow(std::int64_t base, std::int64_t exponent) {
+  std::int64_t result = 1;
+  for (std::int64_t i = 0; i < exponent; ++i) result *= base;
+  return result;
+}
+[[noreturn]] inline void fixOverflow() {
+  std::cerr << "fix overflow\n";
+  std::abort();
+}
+inline std::uint64_t fixAbsU(std::int64_t value) {
+  return value < 0 ? static_cast<std::uint64_t>(-(value + 1)) + 1
+                   : static_cast<std::uint64_t>(value);
+}
+inline std::int64_t fixAddChecked(std::int64_t a, std::int64_t b) {
+  if ((b > 0 && a > std::numeric_limits<std::int64_t>::max() - b) ||
+      (b < 0 && a < std::numeric_limits<std::int64_t>::min() - b)) {
+    fixOverflow();
+  }
+  return a + b;
+}
+inline std::int64_t fixSubChecked(std::int64_t a, std::int64_t b) {
+  if ((b < 0 && a > std::numeric_limits<std::int64_t>::max() + b) ||
+      (b > 0 && a < std::numeric_limits<std::int64_t>::min() + b)) {
+    fixOverflow();
+  }
+  return a - b;
+}
+inline std::int64_t fixNegChecked(std::int64_t value) {
+  if (value == std::numeric_limits<std::int64_t>::min()) fixOverflow();
+  return -value;
+}
+inline std::int64_t fixMulChecked(std::int64_t a, std::int64_t b) {
+  if (a == 0 || b == 0) return 0;
+  const bool negative = (a < 0) != (b < 0);
+  const std::uint64_t am = fixAbsU(a);
+  const std::uint64_t bm = fixAbsU(b);
+  const std::uint64_t limit =
+      negative ? static_cast<std::uint64_t>(
+                     std::numeric_limits<std::int64_t>::max()) + 1
+               : static_cast<std::uint64_t>(
+                     std::numeric_limits<std::int64_t>::max());
+  if (am > limit / bm) fixOverflow();
+  const std::uint64_t product = am * bm;
+  if (negative) {
+    return product ==
+                   static_cast<std::uint64_t>(
+                       std::numeric_limits<std::int64_t>::max()) + 1
+               ? std::numeric_limits<std::int64_t>::min()
+               : -static_cast<std::int64_t>(product);
+  }
+  return static_cast<std::int64_t>(product);
+}
+inline std::int64_t fixTruncDiv(std::int64_t value, std::int64_t divisor) {
+  if (divisor == 0) fixOverflow();
+  const bool negative = (value < 0) != (divisor < 0);
+  const std::uint64_t magnitude = fixAbsU(value);
+  const std::uint64_t denominator = fixAbsU(divisor);
+  const std::uint64_t quotient = magnitude / denominator;
+  if (negative) {
+    return quotient ==
+                   static_cast<std::uint64_t>(
+                       std::numeric_limits<std::int64_t>::max()) + 1
+               ? std::numeric_limits<std::int64_t>::min()
+               : -static_cast<std::int64_t>(quotient);
+  }
+  if (quotient >
+      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+    fixOverflow();
+  }
+  return static_cast<std::int64_t>(quotient);
+}
+inline std::int64_t fixRoundDiv(std::int64_t value, std::int64_t divisor) {
+  if (divisor == 0) fixOverflow();
+  const bool negative = (value < 0) != (divisor < 0);
+  const std::uint64_t magnitude = fixAbsU(value);
+  const std::uint64_t denominator = fixAbsU(divisor);
+  std::uint64_t quotient = magnitude / denominator;
+  const std::uint64_t remainder = magnitude % denominator;
+  if (remainder != 0 && remainder >= denominator - remainder) ++quotient;
+  if (negative) {
+    return quotient ==
+                   static_cast<std::uint64_t>(
+                       std::numeric_limits<std::int64_t>::max()) + 1
+               ? std::numeric_limits<std::int64_t>::min()
+               : -static_cast<std::int64_t>(quotient);
+  }
+  if (quotient >
+      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+    fixOverflow();
+  }
+  return static_cast<std::int64_t>(quotient);
+}
+inline std::int64_t fixRescale(std::int64_t raw, std::int64_t fromPower,
+                               std::int64_t toPower, std::int64_t radix) {
+  if (fromPower == toPower) return raw;
+  const bool up = toPower > fromPower;
+  const std::int64_t steps = up ? toPower - fromPower : fromPower - toPower;
+  std::int64_t factor = 1;
+  for (std::int64_t i = 0; i < steps; ++i) {
+    if (factor >
+        std::numeric_limits<std::int64_t>::max() / radix) {
+      fixOverflow();
+    }
+    factor *= radix;
+  }
+  return up ? fixMulChecked(raw, factor) : fixRoundDiv(raw, factor);
+}
+inline std::string fixBaseDigits(std::uint64_t value, std::uint64_t base) {
+  if (value == 0) return "0";
+  const char* alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+  std::string digits;
+  while (value != 0) {
+    digits.push_back(alphabet[value % base]);
+    value /= base;
+  }
+  std::reverse(digits.begin(), digits.end());
+  return digits;
+}
+template <std::int64_t Power, std::int64_t Radix>
+struct Fix {
+  static_assert(Radix >= 2, "fix radix must be >= 2");
+  static_assert(Power >= -63 && Power <= 63,
+                "fix power must fit a 64-bit scale");
+  static constexpr std::int64_t power = Power;
+  static constexpr std::int64_t radix = Radix;
+  static constexpr std::int64_t absPower = Power < 0 ? -Power : Power;
+  static constexpr std::int64_t scale = fixIPow(Radix, absPower);
+  static constexpr std::int64_t numerator = Power < 0 ? 1 : scale;
+  static constexpr std::int64_t denominator = Power < 0 ? scale : 1;
+  std::int64_t raw = 0;
+  Fix() = default;
+  static constexpr Fix fromRaw(std::int64_t value) {
+    Fix result;
+    result.raw = value;
+    return result;
+  }
+  static Fix fromInteger(std::int64_t value) {
+    if (Power >= 0) return fromRaw(fixMulChecked(value, numerator));
+    return fromRaw(fixRoundDiv(value, denominator));
+  }
+  static Fix fromDouble(double value) {
+    const long double scaled =
+        static_cast<long double>(value) *
+        static_cast<long double>(numerator) /
+        static_cast<long double>(denominator);
+    if (!std::isfinite(static_cast<double>(scaled)) ||
+        scaled > 9223372036854775807.0L ||
+        scaled < -9223372036854775808.0L) {
+      fixOverflow();
+    }
+    return fromRaw(static_cast<std::int64_t>(std::llroundl(scaled)));
+  }
+  Fix(std::int64_t value) : raw(fromInteger(value).raw) {}
+  Fix& operator=(std::int64_t value) {
+    raw = fromInteger(value).raw;
+    return *this;
+  }
+  std::int64_t toInteger() const {
+    if (Power >= 0) return fixTruncDiv(raw, numerator);
+    return fixMulChecked(raw, denominator);
+  }
+  double toFloat() const {
+    return static_cast<double>(raw) *
+           (static_cast<double>(denominator) /
+            static_cast<double>(numerator));
+  }
+  template <std::int64_t FromPower>
+  static std::int64_t alignFrom(std::int64_t value) {
+    return fixRescale(value, FromPower, Power, Radix);
+  }
+};
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+Fix<(P1 > P2 ? P1 : P2), R> operator+(const Fix<P1, R>& a,
+                                      const Fix<P2, R>& b) {
+  using Result = Fix<(P1 > P2 ? P1 : P2), R>;
+  return Result::fromRaw(
+      fixAddChecked(Result::template alignFrom<P1>(a.raw),
+                    Result::template alignFrom<P2>(b.raw)));
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+Fix<(P1 > P2 ? P1 : P2), R> operator-(const Fix<P1, R>& a,
+                                      const Fix<P2, R>& b) {
+  using Result = Fix<(P1 > P2 ? P1 : P2), R>;
+  return Result::fromRaw(
+      fixSubChecked(Result::template alignFrom<P1>(a.raw),
+                    Result::template alignFrom<P2>(b.raw)));
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+bool operator==(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+  using Result = Fix<(P1 > P2 ? P1 : P2), R>;
+  return Result::template alignFrom<P1>(a.raw) ==
+         Result::template alignFrom<P2>(b.raw);
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+bool operator!=(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+  return !(a == b);
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+bool operator<(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+  using Result = Fix<(P1 > P2 ? P1 : P2), R>;
+  return Result::template alignFrom<P1>(a.raw) <
+         Result::template alignFrom<P2>(b.raw);
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+bool operator<=(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+  return !(b < a);
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+bool operator>(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+  return b < a;
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+bool operator>=(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+  return !(a < b);
+}
+template <std::int64_t P1, std::int64_t P2, std::int64_t R>
+Fix<P1 + P2, R> operator*(const Fix<P1, R>& a, const Fix<P2, R>& b) {
+  return Fix<P1 + P2, R>::fromRaw(fixMulChecked(a.raw, b.raw));
+}
+template <std::int64_t P, std::int64_t R>
+Fix<P, R> operator+(const Fix<P, R>& a, std::int64_t b) {
+  return Fix<P, R>::fromRaw(
+      fixAddChecked(a.raw, Fix<P, R>::fromInteger(b).raw));
+}
+template <std::int64_t P, std::int64_t R>
+Fix<P, R> operator+(std::int64_t a, const Fix<P, R>& b) {
+  return b + a;
+}
+template <std::int64_t P, std::int64_t R>
+Fix<P, R> operator-(const Fix<P, R>& a, std::int64_t b) {
+  return Fix<P, R>::fromRaw(
+      fixSubChecked(a.raw, Fix<P, R>::fromInteger(b).raw));
+}
+template <std::int64_t P, std::int64_t R>
+Fix<P, R> operator-(std::int64_t a, const Fix<P, R>& b) {
+  return Fix<P, R>::fromRaw(
+      fixSubChecked(Fix<P, R>::fromInteger(a).raw, b.raw));
+}
+template <std::int64_t P, std::int64_t R>
+Fix<P, R> operator*(const Fix<P, R>& a, std::int64_t b) {
+  return Fix<P, R>::fromRaw(fixMulChecked(a.raw, b));
+}
+template <std::int64_t P, std::int64_t R>
+Fix<P, R> operator*(std::int64_t a, const Fix<P, R>& b) {
+  return Fix<P, R>::fromRaw(fixMulChecked(a, b.raw));
+}
+template <std::int64_t P, std::int64_t R>
+Fix<P, R> operator-(const Fix<P, R>& a) {
+  return Fix<P, R>::fromRaw(fixNegChecked(a.raw));
+}
+template <std::int64_t P, std::int64_t R>
+bool operator==(const Fix<P, R>& a, std::int64_t b) {
+  return a.raw == Fix<P, R>::fromInteger(b).raw;
+}
+template <std::int64_t P, std::int64_t R>
+bool operator==(std::int64_t a, const Fix<P, R>& b) {
+  return b == a;
+}
+template <std::int64_t P, std::int64_t R>
+bool operator!=(const Fix<P, R>& a, std::int64_t b) {
+  return !(a == b);
+}
+template <std::int64_t P, std::int64_t R>
+bool operator!=(std::int64_t a, const Fix<P, R>& b) {
+  return !(b == a);
+}
+template <std::int64_t P, std::int64_t R>
+bool operator<(const Fix<P, R>& a, std::int64_t b) {
+  return a.raw < Fix<P, R>::fromInteger(b).raw;
+}
+template <std::int64_t P, std::int64_t R>
+bool operator<(std::int64_t a, const Fix<P, R>& b) {
+  return Fix<P, R>::fromInteger(a).raw < b.raw;
+}
+template <std::int64_t P, std::int64_t R>
+bool operator<=(const Fix<P, R>& a, std::int64_t b) {
+  return !(b < a);
+}
+template <std::int64_t P, std::int64_t R>
+bool operator<=(std::int64_t a, const Fix<P, R>& b) {
+  return !(b < a);
+}
+template <std::int64_t P, std::int64_t R>
+bool operator>(const Fix<P, R>& a, std::int64_t b) {
+  return b < a;
+}
+template <std::int64_t P, std::int64_t R>
+bool operator>(std::int64_t a, const Fix<P, R>& b) {
+  return b < a;
+}
+template <std::int64_t P, std::int64_t R>
+bool operator>=(const Fix<P, R>& a, std::int64_t b) {
+  return !(a < b);
+}
+template <std::int64_t P, std::int64_t R>
+bool operator>=(std::int64_t a, const Fix<P, R>& b) {
+  return !(a < b);
+}
+template <std::int64_t Power, std::int64_t Radix>
+void print(const Fix<Power, Radix>& value) {
+  static_assert(Radix >= 2 && Radix <= 36,
+                "fix print supports radix 2..36");
+  const std::uint64_t base = static_cast<std::uint64_t>(Radix);
+  const bool negative = value.raw < 0;
+  const std::uint64_t magnitude = fixAbsU(value.raw);
+  std::string whole;
+  std::string fraction;
+  if (Power >= 0) {
+    const std::uint64_t denominator =
+        static_cast<std::uint64_t>(Fix<Power, Radix>::scale);
+    whole = fixBaseDigits(magnitude / denominator, base);
+    std::uint64_t remainder = magnitude % denominator;
+    const char* alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+    for (std::int64_t i = 0; i < Power; ++i) {
+      remainder *= base;
+      fraction.push_back(alphabet[remainder / denominator]);
+      remainder %= denominator;
+    }
+    while (!fraction.empty() && fraction.back() == '0') {
+      fraction.pop_back();
+    }
+  } else {
+    const std::uint64_t factor =
+        static_cast<std::uint64_t>(Fix<Power, Radix>::scale);
+    if (magnitude > std::numeric_limits<std::uint64_t>::max() / factor) {
+      fixOverflow();
+    }
+    whole = fixBaseDigits(magnitude * factor, base);
+  }
+  if (negative) std::cout << '-';
+  std::cout << whole;
+  if (!fraction.empty()) std::cout << '.' << fraction;
+  std::cout << '\n';
+}
+)COORD";
   out_ << "struct Record {};\n";
-  out_ << "inline Decimal decimalFromDouble(double v) {\n";
-  out_ << "  return Decimal(static_cast<std::int64_t>(v * 1000000.0), 6);\n";
-  out_ << "}\n";
-  out_ << "inline void print(const Decimal& value) {\n";
-  out_ << "  std::int64_t scale = value.scale;\n";
-  out_ << "  std::int64_t absolute = value.value < 0 ? -value.value : value.value;\n";
-  out_ << "  std::string digits = std::to_string(absolute);\n";
-  out_ << "  if (scale <= 0) { std::cout << value.value << '\\n'; return; }\n";
-  out_ << "  while (static_cast<std::int64_t>(digits.size()) <= scale) {\n";
-  out_ << "    digits.insert(digits.begin(), '0');\n";
-  out_ << "  }\n";
-  out_ << "  std::string whole = digits.substr(0, digits.size() - scale);\n";
-  out_ << "  std::string fraction = digits.substr(digits.size() - scale);\n";
-  out_ << "  while (!fraction.empty() && fraction.back() == '0') fraction.pop_back();\n";
-  out_ << "  if (value.value < 0) std::cout << '-';\n";
-  out_ << "  std::cout << whole;\n";
-  out_ << "  if (!fraction.empty()) std::cout << '.' << fraction;\n";
-  out_ << "  std::cout << '\\n';\n";
-  out_ << "}\n";
-  out_ << "inline std::int64_t decimalPow10(std::int64_t n) {\n";
-  out_ << "  std::int64_t result = 1;\n";
-  out_ << "  for (std::int64_t i = 0; i < n; ++i) result *= 10;\n";
-  out_ << "  return result;\n";
-  out_ << "}\n";
-  out_ << "inline void decimalAlign(const Decimal& a, const Decimal& b,\n";
-  out_ << "                         std::int64_t& av, std::int64_t& bv,\n";
-  out_ << "                         std::int64_t& scale) {\n";
-  out_ << "  scale = a.scale > b.scale ? a.scale : b.scale;\n";
-  out_ << "  av = a.value * decimalPow10(scale - a.scale);\n";
-  out_ << "  bv = b.value * decimalPow10(scale - b.scale);\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator+(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  std::int64_t av, bv, s; decimalAlign(a, b, av, bv, s);\n";
-  out_ << "  return Decimal{av + bv, s};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator-(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  std::int64_t av, bv, s; decimalAlign(a, b, av, bv, s);\n";
-  out_ << "  return Decimal{av - bv, s};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator*(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  return Decimal{a.value * b.value, a.scale + b.scale};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator/(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  if (b.value == 0) return Decimal{0, a.scale};\n";
-  out_ << "  return Decimal{(a.value * decimalPow10(b.scale)) / b.value,\n";
-  out_ << "                 a.scale};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator%(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  std::int64_t av, bv, s; decimalAlign(a, b, av, bv, s);\n";
-  out_ << "  return Decimal{bv == 0 ? 0 : av % bv, s};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator&(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  std::int64_t av, bv, s; decimalAlign(a, b, av, bv, s);\n";
-  out_ << "  return Decimal{av & bv, s};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator|(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  std::int64_t av, bv, s; decimalAlign(a, b, av, bv, s);\n";
-  out_ << "  return Decimal{av | bv, s};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator^(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  std::int64_t av, bv, s; decimalAlign(a, b, av, bv, s);\n";
-  out_ << "  return Decimal{av ^ bv, s};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator~(const Decimal& a) {\n";
-  out_ << "  return Decimal{~a.value, a.scale};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator<<(const Decimal& a, std::int64_t n) {\n";
-  out_ << "  return Decimal{a.value << n, a.scale};\n";
-  out_ << "}\n";
-  out_ << "inline Decimal operator>>(const Decimal& a, std::int64_t n) {\n";
-  out_ << "  return Decimal{a.value >> n, a.scale};\n";
-  out_ << "}\n";
-  out_ << "inline bool operator==(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  std::int64_t av, bv, s; decimalAlign(a, b, av, bv, s);\n";
-  out_ << "  return av == bv;\n";
-  out_ << "}\n";
-  out_ << "inline bool operator!=(const Decimal& a, const Decimal& b) { return !(a == b); }\n";
-  out_ << "inline bool operator<(const Decimal& a, const Decimal& b) {\n";
-  out_ << "  std::int64_t av, bv, s; decimalAlign(a, b, av, bv, s);\n";
-  out_ << "  return av < bv;\n";
-  out_ << "}\n";
-  out_ << "inline bool operator<=(const Decimal& a, const Decimal& b) { return a < b || a == b; }\n";
-  out_ << "inline bool operator>(const Decimal& a, const Decimal& b) { return b < a; }\n";
-  out_ << "inline bool operator>=(const Decimal& a, const Decimal& b) { return !(a < b); }\n";
-  out_ << "inline double operator+(double a, const Decimal& b) { return a + static_cast<double>(b); }\n";
-  out_ << "inline double operator+(const Decimal& a, double b) { return static_cast<double>(a) + b; }\n";
-  out_ << "inline double operator-(double a, const Decimal& b) { return a - static_cast<double>(b); }\n";
-  out_ << "inline double operator-(const Decimal& a, double b) { return static_cast<double>(a) - b; }\n";
-  out_ << "inline double operator*(double a, const Decimal& b) { return a * static_cast<double>(b); }\n";
-  out_ << "inline double operator*(const Decimal& a, double b) { return static_cast<double>(a) * b; }\n";
-  out_ << "inline double operator/(double a, const Decimal& b) { return a / static_cast<double>(b); }\n";
-  out_ << "inline double operator/(const Decimal& a, double b) { return static_cast<double>(a) / b; }\n";
-  out_ << "inline bool operator==(double a, const Decimal& b) { return a == static_cast<double>(b); }\n";
-  out_ << "inline bool operator<(double a, const Decimal& b) { return a < static_cast<double>(b); }\n";
-  out_ << "inline bool operator<(const Decimal& a, double b) { return static_cast<double>(a) < b; }\n";
+
   out_ << "template <class T>\n";
   out_ << "struct Result {\n";
   out_ << "  bool ok;\n";
@@ -1551,7 +1783,13 @@ void CppEmitter::emitParams(const std::vector<Param>& params) {
       out_ << smartPointerOpen(params[i].isUnique, params[i].isShare,
                                params[i].isWeak);
     }
-    emitType(params[i].type.get());
+    if (params[i].type != nullptr &&
+        params[i].type->kind == TypeExprKind::Named) {
+      emitStorageType(params[i].type.get(), false,
+                      params[i].type->numericLength);
+    } else {
+      emitType(params[i].type.get());
+    }
     if (smart) {
       out_ << '>';
     }
@@ -2183,10 +2421,29 @@ void CppEmitter::emitFunction(const Decl& decl) {
 void CppEmitter::emitConst(const Decl& decl) {
   emitAnnotations(decl.annotations);
   const Value* value = constant(decl.name);
-  out_ << (value != nullptr ? "constexpr " : "const ");
+  const bool isFix = decl.resolvedType != nullptr &&
+                     decl.resolvedType->kind == TypeKind::Fix;
+  out_ << ((value != nullptr && !isFix) ? "constexpr " : "const ");
   emitStorageType(decl.type.get(), decl.isUnsigned, decl.length);
   out_ << ' ' << sanitize(decl.name) << " = ";
-  if (value != nullptr) {
+  if (isFix) {
+    const std::string fixName = cppTypeName(decl.resolvedType);
+    if (decl.init != nullptr && decl.init->fixLiteral) {
+      out_ << fixName << "::fromRaw(static_cast<std::int64_t>("
+           << decl.init->fixRaw << "))";
+    } else if (value != nullptr && value->kind == Value::Kind::Int) {
+      out_ << fixName << "::fromInteger(static_cast<std::int64_t>("
+           << value->intValue << "))";
+    } else if (value != nullptr && value->kind == Value::Kind::Fraction) {
+      std::ostringstream stream;
+      stream << std::setprecision(17) << value->fractionValue;
+      out_ << fixName << "::fromDouble(" << stream.str() << ')';
+    } else if (decl.init != nullptr) {
+      emitInitializer(decl.init.get(), decl.radix);
+    } else {
+      out_ << "{}";
+    }
+  } else if (value != nullptr) {
     if (value->kind == Value::Kind::Int && decl.radix != 0) {
       out_ << "static_cast<std::int64_t>("
            << formatCppInteger(value->intValue, decl.radix) << ')';
@@ -3063,11 +3320,23 @@ void CppEmitter::emitExpr(const Expr* expr) {
       out_ << "static_cast<std::int64_t>("
            << formatCppInteger(expr->intValue, literalRadix_) << ')';
       return;
-    case ExprKind::DecimalLit: {
-      out_ << "coord_rt::decimalFromDouble(";
+    case ExprKind::FractionLit: {
+      if (expr->fixLiteral && expr->resolvedType != nullptr &&
+          expr->resolvedType->kind == TypeKind::Fix) {
+        out_ << "coord_rt::Fix<" << expr->resolvedType->power << ", "
+             << expr->resolvedType->radix << ">::fromRaw(" << expr->fixRaw
+             << "LL)";
+        return;
+      }
       std::ostringstream stream;
-      stream << std::setprecision(17) << expr->decimalValue;
-      out_ << stream.str() << ')';
+      stream << std::setprecision(17) << expr->fractionValue;
+      std::string text = stream.str();
+      if (text.find('.') == std::string::npos &&
+          text.find('e') == std::string::npos &&
+          text.find('E') == std::string::npos) {
+        text += ".0";
+      }
+      out_ << text;
       return;
     }
     case ExprKind::CharLit:

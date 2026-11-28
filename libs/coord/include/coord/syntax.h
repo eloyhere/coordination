@@ -15,7 +15,7 @@ namespace coord {
   X(Identifier, "identifier")        \
   X(DocComment, "doc comment")       \
   X(IntegerLiteral, "integer literal") \
-  X(DecimalLiteral, "decimal literal") \
+  X(FractionLiteral, "fractional literal") \
   X(CharacterLiteral, "character literal") \
   X(StringLiteral, "string literal") \
   X(KwModule, "'module'")            \
@@ -56,7 +56,7 @@ namespace coord {
   X(KwNew, "'new'")                  \
   X(KwDelete, "'delete'")            \
   X(KwInteger, "'integer'")          \
-  X(KwDecimal, "'decimal'")          \
+  X(KwFix, "'fix'")                  \
   X(KwFloat, "'float'")              \
   X(KwRecord, "'record'")            \
   X(KwCharacter, "'character'")      \
@@ -130,7 +130,9 @@ struct Token {
   std::string_view text;
   Span span;
   std::int64_t intValue = 0;
-  double decimalValue = 0.0;
+  double fractionValue = 0.0;
+  /// Cleaned source spelling of a fractional literal (no `_` separators).
+  std::string fractionText;
   char32_t charValue = 0;
   std::string stringValue;
   std::string docText;

@@ -1,0 +1,5 @@
+integer main() {
+    @Radix(0) integer zero = 1;
+    print(zero);
+    return 0;
+}

@@ -2,7 +2,7 @@ integer main() {
     Integer count = 3;
     String name = "coordination";
     Float ratio = 1.5;
-    Decimal fixed = 2.5;
+    @Power(1) Fix fixed = 2.5;
     Record value;
 
     print(count);

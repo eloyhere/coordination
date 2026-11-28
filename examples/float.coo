@@ -5,11 +5,10 @@ float twice(float value) {
 integer main() {
     float ratio = 1.5;
     float result = twice(ratio) + 0.25;
+    @Power(2) float promoted = 3.25;   // float + @Power promotes to fix
 
-    decimal fixed = result;
-
-    print(ratio);  // 1.5
-    print(result); // 3.25
-    print(fixed);  // 3.25
+    print(ratio);    // 1.5
+    print(result);   // 3.25
+    print(promoted); // 3.25
     return 0;
 }

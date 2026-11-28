@@ -1386,6 +1386,167 @@ public:
   CHECK(fieldOutput.str().find("std::int8_t small") != std::string::npos);
 }
 
+void testFixTypes() {
+  Harness harness(R"(
+integer main() {
+  @Power(2) fix price = 19.99;
+  @Power(2) integer cents = 19.99;
+  @Power(2) float ratio = 1.5;
+  fix whole = 3;
+  @Power(2) fix a = 1.5;
+  @Power(2) fix b = 2.0;
+  @Power(4) fix product = a * b;
+  @Power(2) fix sum = a + b;
+  @Power(3) fix finer = 1.500;
+  @Power(3) fix aligned = a + finer;
+    return 0;
+}
+)");
+  CHECK(!harness.diagnostics.hasErrors());
+  std::ostringstream output;
+  coord::CppEmitter emitter(*harness.module, {}, output);
+  emitter.emit();
+  const std::string generated = output.str();
+  CHECK(generated.find("coord_rt::Fix<2, 10> price") != std::string::npos);
+  CHECK(generated.find("fromRaw(1999LL)") != std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<2, 10> cents") != std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<2, 10> ratio") != std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<0, 10> whole") != std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<4, 10> product") != std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<2, 10> sum") != std::string::npos);
+  CHECK(generated.find("coord_rt::Fix<3, 10> aligned") != std::string::npos);
+
+  Harness negativePower(R"(
+integer main() {
+  @Power(-2) integer big = 12345;
+  print(big);
+  return 0;
+}
+)");
+  CHECK(!negativePower.diagnostics.hasErrors());
+  std::ostringstream negativeOutput;
+  coord::CppEmitter negativeEmitter(*negativePower.module, {},
+                                    negativeOutput);
+  negativeEmitter.emit();
+  CHECK(negativeOutput.str().find("coord_rt::Fix<-2, 10>") !=
+        std::string::npos);
+
+  Harness radixThree(R"(
+integer main() {
+  @Power(2) @Radix(3) fix third = 0.5;
+  print(third);
+  @Radix(3) integer mask = 7;
+  print(mask);
+  return 0;
+}
+)");
+  CHECK(!radixThree.diagnostics.hasErrors());
+  std::ostringstream radixOutput;
+  coord::CppEmitter radixEmitter(*radixThree.module, {}, radixOutput);
+  radixEmitter.emit();
+  CHECK(radixOutput.str().find("coord_rt::Fix<2, 3> third") !=
+        std::string::npos);
+
+  Harness radixZero(R"(
+integer main() {
+  @Radix(0) integer value = 1;
+  return 0;
+}
+)");
+  CHECK(radixZero.countCode("E2100") >= 1);
+
+  Harness radixOne(R"(
+integer main() {
+  @Radix(1) integer value = 1;
+  return 0;
+}
+)");
+  CHECK(radixOne.countCode("E2100") >= 1);
+
+  Harness powerOnString(R"(
+integer main() {
+  @Power(2) string text = "x";
+  return 0;
+}
+)");
+  CHECK(powerOnString.countCode("E2101") >= 1);
+
+  Harness fixLength(R"(
+integer main() {
+  @Length(32) @Power(2) fix narrow = 1.5;
+  return 0;
+}
+)");
+  CHECK(fixLength.countCode("E2102") >= 1);
+
+  Harness missingPower(R"(
+integer main() {
+  fix amount = 19.99;
+  return 0;
+}
+)");
+  CHECK(missingPower.countCode("E2103") >= 1);
+
+  Harness division(R"(
+integer main() {
+  @Power(2) fix a = 1.0;
+  @Power(2) fix b = 4.0;
+  print(a / b);
+  return 0;
+}
+)");
+  CHECK(division.countCode("E2104") >= 1);
+
+  Harness integerTruncation(R"(
+integer main() {
+  integer value = 1.5;
+  return 0;
+}
+)");
+  CHECK(integerTruncation.countCode("E2105") >= 1);
+
+  Harness mixedRadix(R"(
+integer main() {
+  @Power(2) @Radix(2) fix binary = 1.5;
+  @Power(2) @Radix(10) fix ten = 1.5;
+  print(binary + ten);
+  return 0;
+}
+)");
+  CHECK(mixedRadix.countCode("E2108") >= 1);
+
+  Harness fixFloatMix(R"(
+integer main() {
+  @Power(2) fix fixed = 1.5;
+  float ratio = 2.0;
+  print(fixed + ratio);
+  return 0;
+}
+)");
+  CHECK(fixFloatMix.countCode("E2005") >= 1);
+
+  Harness implicitFloatToFix(R"(
+integer main() {
+  float ratio = 1.5;
+  @Power(2) fix fixed = ratio;
+  return 0;
+}
+)");
+  CHECK(implicitFloatToFix.countCode("E2005") >= 1);
+
+  Harness explicitConversions(R"(
+integer main() {
+  @Power(2) fix amount = 19.99;
+  integer whole = amount.toInteger();
+  float ratio = amount.toFloat();
+  print(whole);
+  print(ratio);
+  return 0;
+}
+)");
+  CHECK(!explicitConversions.diagnostics.hasErrors());
+}
+
 void testFixedArrays() {
   Harness harness(R"(
 integer main() {
@@ -2365,12 +2526,12 @@ void main() {}
 )");
   CHECK(voidMain.countCode("E2052") >= 1);
 
-  Harness decimalMain(R"(
-decimal main() {
-    return 1.0;
+  Harness fixMain(R"(
+fix main() {
+    return 0;
 }
 )");
-  CHECK(decimalMain.countCode("E2052") >= 1);
+  CHECK(fixMain.countCode("E2052") >= 1);
 
   Harness valid(R"(
 integer main() {
@@ -3318,6 +3479,7 @@ int main() {
   testOutlineAndHints();
   testSignednessAnnotations();
   testLengthAnnotations();
+  testFixTypes();
   testFixedArrays();
   testExpectCodegen();
   testAnnotationRegistry();

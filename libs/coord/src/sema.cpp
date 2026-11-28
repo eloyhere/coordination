@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -32,8 +34,205 @@ bool numericLike(const Type* type) {
   if (type == nullptr) {
     return false;
   }
-  return type->kind == TypeKind::Int || type->kind == TypeKind::Decimal ||
-         type->kind == TypeKind::Float || type->name == "decimal";
+  return type->kind == TypeKind::Int || type->kind == TypeKind::Fix ||
+         type->kind == TypeKind::Float;
+}
+
+/// Copies validated numeric metadata from a type expression onto the enclosing
+/// declaration/statement fields used by the C++ backend for integer spelling.
+void copyNumericMetadata(const TypeExpr* expr, int& length, int& radix,
+                         int& power, bool& hasPower) {
+  if (expr == nullptr) {
+    return;
+  }
+  if (expr->hasNumericLength && expr->numericLength > 0) {
+    length = expr->numericLength;
+  }
+  if (expr->hasNumericRadix && expr->numericRadix > 0) {
+    radix = expr->numericRadix;
+  }
+  if (expr->hasNumericPower &&
+      expr->numericPower != std::numeric_limits<int>::min()) {
+    power = expr->numericPower;
+    hasPower = true;
+  }
+}
+
+/// radix^exponent for a non-negative exponent, or false when it does not fit a
+/// signed 64-bit integer.
+bool fixScale(unsigned radix, unsigned exponent, std::uint64_t& out) {
+  std::uint64_t result = 1;
+  for (unsigned i = 0; i < exponent; ++i) {
+    if (radix != 0 &&
+        result > static_cast<std::uint64_t>(INT64_MAX) / radix) {
+      return false;
+    }
+    result *= radix;
+  }
+  out = result;
+  return true;
+}
+
+bool multiplyChecked(std::uint64_t& value, std::uint64_t factor) {
+  if (factor != 0 &&
+      value > std::numeric_limits<std::uint64_t>::max() / factor) {
+    return false;
+  }
+  value *= factor;
+  return true;
+}
+
+/// Encodes a fractional literal (e.g. "19.99", "1.5e-2") as the raw
+/// integer of a fix type with the given radix and power, rounding half away
+/// from zero. Returns false when the literal does not fit a 64-bit raw value.
+bool encodeFixLiteral(std::string_view text, int radix, int power,
+                      std::int64_t& out) {
+  std::size_t position = 0;
+  bool negative = false;
+  if (position < text.size() && (text[position] == '+' || text[position] == '-')) {
+    negative = text[position] == '-';
+    ++position;
+  }
+  std::string digits;
+  std::int64_t exponent = 0;
+  bool inExponent = false;
+  bool negativeExponent = false;
+  bool sawExponentSign = false;
+  for (; position < text.size(); ++position) {
+    const char c = text[position];
+    if (c == 'e' || c == 'E') {
+      if (inExponent) {
+        return false;
+      }
+      inExponent = true;
+      continue;
+    }
+    if (inExponent) {
+      if (c == '+' || c == '-') {
+        if (sawExponentSign) {
+          return false;
+        }
+        sawExponentSign = true;
+        negativeExponent = c == '-';
+        continue;
+      }
+      if (c < '0' || c > '9') {
+        return false;
+      }
+      exponent = exponent * 10 + (c - '0');
+      if (exponent > 100000) {
+        return false;
+      }
+      continue;
+    }
+    if (c == '.' || c == '_') {
+      continue;
+    }
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    digits.push_back(c);
+  }
+  if (negativeExponent) {
+    exponent = -exponent;
+  }
+  // The number of fractional digits in the mantissa is folded into the
+  // exponent so value == digits * 10^exponent.
+  std::size_t mantissaFraction = 0;
+  {
+    std::size_t dot = text.find('.');
+    std::size_t end = text.find_first_of("eE");
+    if (end == std::string_view::npos) {
+      end = text.size();
+    }
+    if (dot != std::string_view::npos && dot < end) {
+      for (std::size_t i = dot + 1; i < end; ++i) {
+        if (text[i] >= '0' && text[i] <= '9') {
+          ++mantissaFraction;
+        }
+      }
+    }
+  }
+  exponent -= static_cast<std::int64_t>(mantissaFraction);
+
+  const std::size_t first = digits.find_first_not_of('0');
+  if (first == std::string::npos) {
+    out = 0;
+    return true;
+  }
+  digits.erase(0, first);
+  if (digits.size() > 20) {
+    return false;
+  }
+  std::uint64_t numerator = 0;
+  for (char digit : digits) {
+    if (!multiplyChecked(numerator, 10)) {
+      return false;
+    }
+    const std::uint64_t next = static_cast<std::uint64_t>(digit - '0');
+    if (numerator > std::numeric_limits<std::uint64_t>::max() - next) {
+      return false;
+    }
+    numerator += next;
+  }
+
+  std::uint64_t denominator = 1;
+  if (exponent >= 0) {
+    std::uint64_t factor = 1;
+    if (!fixScale(10, static_cast<unsigned>(exponent), factor) ||
+        !multiplyChecked(numerator, factor)) {
+      return false;
+    }
+  } else {
+    std::uint64_t factor = 1;
+    if (!fixScale(10, static_cast<unsigned>(-exponent), factor)) {
+      // denominator exceeds uint64: numerator (< 2^64) / larger denominator
+      // rounds to zero.
+      out = 0;
+      return true;
+    }
+    if (!multiplyChecked(denominator, factor)) {
+      out = 0;
+      return true;
+    }
+  }
+  std::uint64_t scale = 1;
+  if (power >= 0) {
+    if (!fixScale(static_cast<unsigned>(radix),
+                  static_cast<unsigned>(power), scale) ||
+        !multiplyChecked(numerator, scale)) {
+      return false;
+    }
+  } else {
+    if (!fixScale(static_cast<unsigned>(radix),
+                  static_cast<unsigned>(-power), scale)) {
+      out = 0;
+      return true;
+    }
+    if (!multiplyChecked(denominator, scale)) {
+      out = 0;
+      return true;
+    }
+  }
+  std::uint64_t quotient = numerator / denominator;
+  const std::uint64_t remainder = numerator % denominator;
+  // Round half away from zero: 2*remainder >= denominator.
+  if (remainder != 0 && remainder >= denominator - remainder) {
+    ++quotient;
+  }
+  const std::uint64_t limit =
+      static_cast<std::uint64_t>(INT64_MAX) + (negative ? 1u : 0u);
+  if (quotient > limit) {
+    return false;
+  }
+  if (negative) {
+    out = quotient == static_cast<std::uint64_t>(INT64_MAX) + 1
+              ? std::numeric_limits<std::int64_t>::min()
+              : -static_cast<std::int64_t>(quotient);
+  } else {
+    out = static_cast<std::int64_t>(quotient);
+  }
+  return true;
 }
 
 void parseOptionalPolicy(const AnnotationUse& use, ProxyPolicy& policy,
@@ -240,16 +439,29 @@ void Checker::initializeBuiltins() {
   errorType_ = makeType(TypeKind::Error, "<error>", nullptr);
   classType_ = makeType(TypeKind::Class, "class", nullptr);
 
-  Type* decimalRoot = makeType(TypeKind::Class, "decimalRoot", classType_);
   Type* characterRoot = makeType(TypeKind::Class, "character", classType_);
   Type* booleanRoot = makeType(TypeKind::Class, "boolean", classType_);
   enumerationType_ = makeType(TypeKind::Class, "Enumeration", classType_);
 
   voidType_ = makeType(TypeKind::Void, "void", nullptr);
   intType_ = makeType(TypeKind::Int, "integer", classType_);
-  decimalType_ = makeType(TypeKind::Decimal, "decimal", decimalRoot);
-  makeType(TypeKind::Decimal, "f32", decimalRoot);
-  floatType_ = makeType(TypeKind::Float, "float", decimalRoot);
+  Type* fixRoot = makeType(TypeKind::Class, "fixRoot", classType_);
+  fixType_ = makeType(TypeKind::Fix, "fix", fixRoot);
+  fixType_->length = 64;
+  fixType_->radix = 10;
+  fixType_->power = 0;
+  makeType(TypeKind::Float, "f32", classType_);
+  floatType_ = makeType(TypeKind::Float, "float", classType_);
+  const auto addFixMethod = [&](const char* name, Type* returnType) {
+    MethodInfo method;
+    method.name = name;
+    method.returnType = returnType;
+    method.owner = fixType_;
+    method.access = Access::Public;
+    fixType_->methods.push_back(method);
+  };
+  addFixMethod("toInteger", intType_);
+  addFixMethod("toFloat", floatType_);
   recordType_ = makeType(TypeKind::Record, "Record", classType_);
   charType_ = makeType(TypeKind::Char, "char", characterRoot);
   boolType_ = makeType(TypeKind::Bool, "bool", booleanRoot);
@@ -261,7 +473,7 @@ void Checker::initializeBuiltins() {
   typeMap_["Character"] = charType_;
   typeMap_["Boolean"] = boolType_;
   typeMap_["Float"] = floatType_;
-  typeMap_["Decimal"] = decimalType_;
+  typeMap_["Fix"] = fixType_;
   typeMap_["Record"] = recordType_;
   // The keyword spellings must resolve to the primitives together with their
   // uppercase aliases; the internal base classes that carry the same names are
@@ -346,6 +558,34 @@ Type* Checker::makeType(TypeKind kind, std::string name, Type* base) {
   if (!raw->name.empty()) {
     typeMap_[raw->name] = raw;
   }
+  return raw;
+}
+
+Type* Checker::makeFixType(int length, int radix, int power) {
+  if (length == 64 && radix == 10 && power == 0 && fixType_ != nullptr) {
+    return fixType_;
+  }
+  const std::string key = "fix<" + std::to_string(length) + "," +
+                          std::to_string(radix) + "," +
+                          std::to_string(power) + ">";
+  const auto found = compositeTypes_.find(key);
+  if (found != compositeTypes_.end()) {
+    return found->second;
+  }
+  auto type = std::make_unique<Type>();
+  type->kind = TypeKind::Fix;
+  type->name = "fix";
+  type->base = fixType_ != nullptr ? fixType_->base : classType_;
+  type->builtin = true;
+  type->length = length;
+  type->radix = radix;
+  type->power = power;
+  if (fixType_ != nullptr) {
+    type->methods = fixType_->methods;
+  }
+  Type* raw = type.get();
+  types_.push_back(std::move(type));
+  compositeTypes_[key] = raw;
   return raw;
 }
 
@@ -1018,6 +1258,216 @@ Type* Checker::instantiateFunctionalInterface(Type* iface, TypeExpr* type,
   return makeFunctionType(std::move(parameters), returnType);
 }
 
+Type* Checker::resolveNumericType(TypeExpr* type, Type* base) {
+  if (type == nullptr || base == nullptr) {
+    return base;
+  }
+  const bool annotated = type->hasNumericLength || type->hasNumericRadix ||
+                         type->hasNumericPower;
+  if (!annotated) {
+    return base;
+  }
+  const bool numeric = base->kind == TypeKind::Int ||
+                       base->kind == TypeKind::Fix ||
+                       base->kind == TypeKind::Float;
+  if (!numeric) {
+    if (type->hasNumericLength) {
+      diagnostics_.error(type->span, "E2057",
+                         "@Length is only valid on basic numeric types");
+    }
+    if (type->hasNumericRadix || type->hasNumericPower) {
+      diagnostics_.error(type->span, "E2101",
+                         "@Radix/@Power require an integer, fix or float "
+                         "type");
+    }
+    return base;
+  }
+
+  int length = 0;
+  if (type->hasNumericLength) {
+    if (type->numericLength == std::numeric_limits<int>::min()) {
+      diagnostics_.error(type->numericLengthSpan, "E2056",
+                         "@Length requires an integer literal width");
+    } else if (type->numericLength != 8 && type->numericLength != 16 &&
+               type->numericLength != 32 && type->numericLength != 64 &&
+               type->numericLength != 128) {
+      diagnostics_.error(type->numericLengthSpan, "E2056",
+                         "@Length width must be 8, 16, 32, 64 or 128");
+    } else {
+      length = type->numericLength;
+    }
+  }
+  int radix = 0;
+  if (type->hasNumericRadix) {
+    if (type->numericRadix == std::numeric_limits<int>::min()) {
+      diagnostics_.error(type->numericRadixSpan, "E2100",
+                         "@Radix requires an integer literal base");
+    } else if (type->numericRadix < 2) {
+      diagnostics_.error(type->numericRadixSpan, "E2100",
+                         "@Radix must be an integer >= 2");
+    } else {
+      radix = type->numericRadix;
+    }
+  }
+  int power = 0;
+  if (type->hasNumericPower) {
+    if (type->numericPower == std::numeric_limits<int>::min()) {
+      diagnostics_.error(type->numericPowerSpan, "E2106",
+                         "@Power requires an integer literal exponent");
+    } else {
+      power = type->numericPower;
+    }
+  }
+
+  const int declaredLength = type->hasNumericLength ? length : 0;
+  if (base->kind == TypeKind::Float && type->hasNumericLength &&
+      declaredLength != 0 && declaredLength != 32 && declaredLength != 64) {
+    diagnostics_.error(type->numericLengthSpan, "E2102",
+                       "@Length on float supports only 32 or 64; floating "
+                       "widths other than those are not implemented");
+  }
+
+  const bool promote =
+      type->hasNumericPower &&
+      (base->kind == TypeKind::Int || base->kind == TypeKind::Float);
+  if (!promote && base->kind != TypeKind::Fix) {
+    return base;
+  }
+
+  const int targetLength =
+      declaredLength != 0 ? declaredLength : (base->kind == TypeKind::Fix
+                                                  ? base->length
+                                                  : 64);
+  const int targetRadix =
+      radix != 0 ? radix : (base->kind == TypeKind::Fix ? base->radix : 10);
+  const int targetPower =
+      type->hasNumericPower ? power : (base->kind == TypeKind::Fix ? base->power : 0);
+  if (targetLength != 64) {
+    diagnostics_.error(type->span, "E2102",
+                       "@Length(" + std::to_string(targetLength) +
+                           ") for fix is not implemented in this slice; only a "
+                           "64-bit raw is supported");
+    return base;
+  }
+  if (targetRadix < 2) {
+    return base;
+  }
+  std::uint64_t scale = 0;
+  const unsigned exponent = static_cast<unsigned>(
+      targetPower < 0 ? -static_cast<long long>(targetPower) : targetPower);
+  if (!fixScale(static_cast<unsigned>(targetRadix), exponent, scale)) {
+    diagnostics_.error(type->hasNumericPower ? type->numericPowerSpan
+                                             : type->span,
+                       "E2102",
+                       "@Power(" + std::to_string(targetPower) +
+                           ") does not fit a 64-bit raw at radix " +
+                           std::to_string(targetRadix));
+    return base;
+  }
+  return makeFixType(targetLength, targetRadix, targetPower);
+}
+
+bool Checker::coerceFractionLiteral(Expr* expr, Type* target,
+                                    bool targetPowerExplicit, Span span) {
+  if (expr == nullptr || target == nullptr ||
+      target->kind != TypeKind::Fix) {
+    return false;
+  }
+  Expr* literal = expr;
+  while (literal != nullptr &&
+         (literal->kind == ExprKind::Unary &&
+          (literal->op == "+" || literal->op == "-"))) {
+    literal = literal->lhs.get();
+  }
+  if (literal == nullptr || literal->kind != ExprKind::FractionLit) {
+    return false;
+  }
+  if (!targetPowerExplicit) {
+    diagnostics_.error(span, "E2103",
+                       "a fractional literal requires an explicit @Power on "
+                       "'fix'; add e.g. @Power(2) or use 'float'");
+    return false;
+  }
+  std::int64_t raw = 0;
+  if (!encodeFixLiteral(literal->fractionText, target->radix, target->power,
+                        raw)) {
+    diagnostics_.error(literal->span, "E2105",
+                       "fractional literal '" + literal->fractionText +
+                           "' does not fit a 64-bit fix raw at @Power(" +
+                           std::to_string(target->power) + "), @Radix(" +
+                           std::to_string(target->radix) + ")");
+    return false;
+  }
+  literal->fixRaw = raw;
+  literal->fixLiteral = true;
+  literal->resolvedType = target;
+  expr->resolvedType = target;
+  return true;
+}
+
+void Checker::checkIntegerLiteralTarget(const Expr* value, Type* target,
+                                        Span span) {
+  if (value == nullptr || target == nullptr ||
+      target->kind != TypeKind::Int) {
+    return;
+  }
+  const Expr* literal = value;
+  while (literal != nullptr && literal->kind == ExprKind::Unary &&
+         (literal->op == "+" || literal->op == "-")) {
+    literal = literal->lhs.get();
+  }
+  if (literal != nullptr && literal->kind == ExprKind::FractionLit) {
+    diagnostics_.error(span, "E2105",
+                       "a fractional literal cannot initialize an integer; no "
+                       "silent truncation (use fix with @Power or float)");
+  }
+}
+
+bool Checker::isFractionLiteral(const Expr* expr) {
+  if (expr == nullptr) {
+    return false;
+  }
+  if (expr->kind == ExprKind::FractionLit) {
+    return true;
+  }
+  return expr->kind == ExprKind::Unary &&
+         (expr->op == "+" || expr->op == "-") && expr->lhs != nullptr &&
+         expr->lhs->kind == ExprKind::FractionLit;
+}
+
+bool Checker::hasFractionLiteralOperand(const Expr* expr) {
+  return expr != nullptr && isFractionLiteral(expr->lhs.get());
+}
+
+bool Checker::targetHasFixPower(const Expr* target) {
+  if (target == nullptr) {
+    return false;
+  }
+  if (target->kind == ExprKind::Name) {
+    if (const Variable* variable = lookupVariable(target->name)) {
+      return variable->hasFixPower;
+    }
+    if (currentClass_ != nullptr) {
+      if (const FieldInfo* field = lookupField(currentClass_, target->name)) {
+        if (field->type != nullptr && field->type->kind == TypeKind::Fix) {
+          return field->hasFixPower;
+        }
+      }
+    }
+    const auto constant = consts_.find(target->name);
+    if (constant != consts_.end() && constant->second != nullptr) {
+      return constant->second->hasPower;
+    }
+  }
+  if (target->kind == ExprKind::Member && target->lhs != nullptr) {
+    Type* baseType = target->lhs->resolvedType;
+    if (const FieldInfo* field = lookupField(baseType, target->name)) {
+      return field->hasFixPower;
+    }
+  }
+  return false;
+}
+
 Type* Checker::resolveType(TypeExpr* type, bool allowMeta) {
   if (type == nullptr) {
     return voidType_;
@@ -1074,6 +1524,15 @@ Type* Checker::resolveType(TypeExpr* type, bool allowMeta) {
       }
       break;
     }
+  }
+  if (result != nullptr && type->kind == TypeExprKind::Named) {
+    result = resolveNumericType(type, result);
+  } else if (type->hasNumericLength || type->hasNumericRadix ||
+             type->hasNumericPower) {
+    diagnostics_.error(type->span, "E2101",
+                       "@Length/@Radix/@Power must annotate a named numeric "
+                       "type");
+    result = errorType_;
   }
   if (result != nullptr && result->isMeta() && !allowMeta &&
       result->kind != TypeKind::Reflector) {
@@ -1229,43 +1688,24 @@ void Checker::inheritAnnotations(Decl& target, const Decl* source) {
 
 int Checker::resolveLength(const std::vector<AnnotationUse>& annotations,
                            Type* type, Span span) {
-  const AnnotationUse* lengthUse = nullptr;
+  (void)type;
+  (void)span;
   for (const AnnotationUse& use : annotations) {
-    if (use.name == "Length") {
-      lengthUse = &use;
-      break;
+    if (use.name != "Length") {
+      continue;
     }
+    if (use.args.size() != 1 || use.args[0] == nullptr ||
+        use.args[0]->kind != ExprKind::IntLit) {
+      return 0;
+    }
+    const std::int64_t width = use.args[0]->intValue;
+    if (width != 8 && width != 16 && width != 32 && width != 64 &&
+        width != 128) {
+      return 0;
+    }
+    return static_cast<int>(width);
   }
-  if (lengthUse == nullptr) {
-    return 0;
-  }
-  if (type == nullptr ||
-      (type->name != "integer" && type->name != "character" &&
-       type->name != "decimal" && type->name != "boolean")) {
-    diagnostics_.error(span, "E2057",
-                       "@Length is only valid on basic numeric types");
-    return 0;
-  }
-  if (lengthUse->args.size() != 1 || lengthUse->args[0] == nullptr ||
-      lengthUse->args[0]->kind != ExprKind::IntLit) {
-    diagnostics_.error(lengthUse->span, "E2056",
-                       "@Length requires an integer literal width");
-    return 0;
-  }
-  const std::int64_t width = lengthUse->args[0]->intValue;
-  if (width != 8 && width != 16 && width != 32 && width != 64 &&
-      width != 128) {
-    diagnostics_.error(lengthUse->span, "E2056",
-                       "@Length width must be 8, 16, 32, 64 or 128");
-    return 0;
-  }
-  if (width == 128 &&
-      (type == nullptr || type->name != "integer")) {
-    diagnostics_.error(lengthUse->span, "E2057",
-                       "@Length(128) is only supported for integer");
-    return 0;
-  }
-  return static_cast<int>(width);
+  return 0;
 }
 
 namespace {
@@ -1577,7 +2017,7 @@ bool Checker::isDeepCopyable(const Type* type,
   }
   switch (type->kind) {
     case TypeKind::Int:
-    case TypeKind::Decimal:
+    case TypeKind::Fix:
     case TypeKind::Float:
     case TypeKind::Bool:
     case TypeKind::Char:
@@ -1849,16 +2289,8 @@ void Checker::checkClass(Decl& decl) {
                          "a field cannot be both @Signed and @Unsigned");
     }
     Type* fieldType = resolveType(member->type.get(), false);
-    if (member->radix != 0) {
-      if (member->radix != 2 && member->radix != 8 && member->radix != 10 &&
-          member->radix != 16) {
-        diagnostics_.error(member->span, "E2066",
-                           "@Radix must be 2, 8, 10 or 16");
-      } else if (fieldType != nullptr && !fieldType->isInteger()) {
-        diagnostics_.error(member->span, "E2066",
-                           "@Radix is only supported for integer fields");
-      }
-    }
+    copyNumericMetadata(member->type.get(), member->length, member->radix,
+                        member->power, member->hasPower);
     if ((member->isUnique || member->isShare) && fieldType != nullptr &&
         fieldType->kind != TypeKind::Class &&
         fieldType->kind != TypeKind::Interface) {
@@ -1914,11 +2346,12 @@ void Checker::checkClass(Decl& decl) {
     }
     if (member->init) {
       Type* initType = checkExpr(member->init.get());
-      bool optionalField = false;
-      for (const AnnotationUse& use : member->annotations) {
-        if (use.name == "Optional") {
-          optionalField = true;
-        }
+      bool coercedFixLiteral = false;
+      if (fieldType != nullptr && fieldType->kind == TypeKind::Fix) {
+        coercedFixLiteral = coerceFractionLiteral(
+            member->init.get(), fieldType, member->hasPower, member->span);
+        checkIntegerLiteralTarget(member->init.get(), fieldType,
+                                  member->span);
       }
       if (initType != nullptr && initType->kind == TypeKind::Null) {
         if (!optionalField) {
@@ -1926,12 +2359,13 @@ void Checker::checkClass(Decl& decl) {
                              "null requires an @Optional field");
         }
       } else {
-        requireAssignable(initType, fieldType, member->span,
-                          "field initializer");
+        requireAssignable(coercedFixLiteral ? fieldType : initType, fieldType,
+                          member->span, "field initializer");
       }
     }
     type->fields.push_back(
-        FieldInfo{member->name, fieldType, member.get(), member->access, type});
+        FieldInfo{member->name, fieldType, member.get(), member->access, type,
+                  member->hasPower});
     member->resolvedType = fieldType;
     if (type->base != nullptr) {
       const FieldInfo* hidden = lookupField(type->base, member->name);
@@ -2520,6 +2954,8 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
         "@Unique/@Share return requires a class or interface type");
   }
   decl.length = resolveLength(decl.annotations, returnType, decl.span);
+  copyNumericMetadata(decl.type.get(), decl.length, decl.radix, decl.power,
+                      decl.hasPower);
   if ((decl.isUnsigned || decl.isSigned) && returnType != nullptr &&
       returnType->name != "integer") {
     diagnostics_.error(decl.span, "E2054",
@@ -2560,6 +2996,7 @@ void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
+      declared->hasFixPower = param.hasPower;
       if (paramType != nullptr && paramType->kind == TypeKind::Function) {
         // A function-typed parameter is only guaranteed to live for the
         // duration of the call; it must not be returned or stored.
@@ -2634,6 +3071,7 @@ void Checker::checkConstructorDecl(Decl& decl) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
+      declared->hasFixPower = param.hasPower;
       if (paramType != nullptr && paramType->kind == TypeKind::Function) {
         // A function-typed parameter is only guaranteed to live for the
         // duration of the call; it must not be returned or stored.
@@ -3019,6 +3457,7 @@ void Checker::checkFunction(Decl& decl) {
     declareVariable(param.name, paramType, false, nullptr, param.span, param.isOptional, param.proxyPolicy, param.optionalDefault);
     if (Variable* declared = lookupVariable(param.name)) {
       declared->isWeak = param.isWeak;
+      declared->hasFixPower = param.hasPower;
       if (paramType != nullptr && paramType->kind == TypeKind::Function) {
         // A function-typed parameter is only guaranteed to live for the
         // duration of the call; it must not be returned or stored.
@@ -3029,6 +3468,8 @@ void Checker::checkFunction(Decl& decl) {
 
   decl.resolvedType = returnType;
   decl.length = resolveLength(decl.annotations, returnType, decl.span);
+  copyNumericMetadata(decl.type.get(), decl.length, decl.radix, decl.power,
+                      decl.hasPower);
   if (decl.isNative) {
     const auto supported = [](Type* type) {
       return type != nullptr &&
@@ -3127,23 +3568,19 @@ void Checker::checkFunction(Decl& decl) {
 void Checker::checkConst(Decl& decl) {
   validateAnnotations(decl.annotations, "variable", decl.span, true);
   Type* declared = decl.type ? resolveType(decl.type.get(), true) : nullptr;
+  copyNumericMetadata(decl.type.get(), decl.length, decl.radix, decl.power,
+                      decl.hasPower);
   Type* initType = decl.init ? checkExpr(decl.init.get()) : errorType_;
   if (declared == nullptr) {
     declared = initType;
   } else if (decl.init) {
-    requireAssignable(initType, declared, decl.span, "constant initializer");
+    const bool coercedFixLiteral = coerceFractionLiteral(
+        decl.init.get(), declared, decl.hasPower, decl.span);
+    checkIntegerLiteralTarget(decl.init.get(), declared, decl.span);
+    requireAssignable(coercedFixLiteral ? declared : initType, declared,
+                      decl.span, "constant initializer");
   }
   decl.resolvedType = declared;
-  if (decl.radix != 0) {
-    if (decl.radix != 2 && decl.radix != 8 && decl.radix != 10 &&
-        decl.radix != 16) {
-      diagnostics_.error(decl.span, "E2066",
-                         "@Radix must be 2, 8, 10 or 16");
-    } else if (declared != nullptr && !declared->isInteger()) {
-      diagnostics_.error(decl.span, "E2066",
-                         "@Radix is only supported for integer constants");
-    }
-  }
   if (decl.type == nullptr && declared != nullptr) {
     decl.type = std::make_unique<TypeExpr>();
     decl.type->kind = TypeExprKind::Named;
@@ -3209,16 +3646,17 @@ bool Checker::assignable(Type* from, Type* to) const {
   if (isSubtype(from, to)) {
     return true;
   }
-  if (from != nullptr && to != nullptr) {
-    const bool fromNumeric = from->kind == TypeKind::Int ||
-                             from->kind == TypeKind::Decimal ||
-                             from->kind == TypeKind::Float;
-    const bool toNumeric = to->kind == TypeKind::Int ||
-                           to->kind == TypeKind::Decimal ||
-                           to->kind == TypeKind::Float;
-    if (fromNumeric && toNumeric && to->kind != TypeKind::Int) {
-      return true;
-    }
+  if (from == nullptr || to == nullptr) {
+    return false;
+  }
+  // Numeric conversions. Widening within a family is implicit; conversions
+  // that change representation (integer -> fix, fix -> float/integer,
+  // float -> fix, fix radix/power changes) are explicit.
+  if (to->kind == TypeKind::Float) {
+    return from->kind == TypeKind::Int || from->kind == TypeKind::Float;
+  }
+  if (to->kind == TypeKind::Fix) {
+    return from->kind == TypeKind::Int;
   }
   return false;
 }
@@ -3712,9 +4150,12 @@ Type* Checker::checkExpr(Expr* expr) {
     case ExprKind::IntLit:
       expr->resolvedType = intType_;
       return intType_;
-    case ExprKind::DecimalLit:
-      expr->resolvedType = decimalType_;
-      return decimalType_;
+    case ExprKind::FractionLit:
+      if (expr->fixLiteral && expr->resolvedType != nullptr) {
+        return expr->resolvedType;
+      }
+      expr->resolvedType = floatType_;
+      return floatType_;
     case ExprKind::CharLit:
       expr->resolvedType = charType_;
       return charType_;
@@ -3869,6 +4310,13 @@ Type* Checker::checkUnary(Expr* expr) {
     expr->resolvedType = errorType_;
     return errorType_;
   }
+  if (operand->kind == TypeKind::Fix && expr->op == "~") {
+    diagnostics_.error(expr->span, "E2104",
+                       "bitwise '~' is not defined for fix; convert to "
+                       "integer explicitly (11B)");
+    expr->resolvedType = errorType_;
+    return errorType_;
+  }
   expr->resolvedType = operand;
   return operand;
 }
@@ -3882,6 +4330,13 @@ Type* Checker::checkBinary(Expr* expr) {
   Type* rhs = checkExpr(expr->rhs.get());
   restoreOptionalNarrowing(undo);
 
+  const bool lhsFix = lhs != nullptr && lhs->kind == TypeKind::Fix;
+  const bool rhsFix = rhs != nullptr && rhs->kind == TypeKind::Fix;
+  const bool lhsInt = lhs != nullptr && lhs->kind == TypeKind::Int;
+  const bool rhsInt = rhs != nullptr && rhs->kind == TypeKind::Int;
+  const bool lhsFloat = lhs != nullptr && lhs->kind == TypeKind::Float;
+  const bool rhsFloat = rhs != nullptr && rhs->kind == TypeKind::Float;
+
   if (expr->op == "&&" || expr->op == "||") {
     requireAssignable(lhs, boolType_, expr->span, "logical operator");
     requireAssignable(rhs, boolType_, expr->span, "logical operator");
@@ -3893,6 +4348,24 @@ Type* Checker::checkBinary(Expr* expr) {
     if ((expr->op == "==" || expr->op == "!=") &&
         ((lhs != nullptr && lhs->kind == TypeKind::Null) ||
          (rhs != nullptr && rhs->kind == TypeKind::Null))) {
+      expr->resolvedType = boolType_;
+      return boolType_;
+    }
+    if (lhsFix || rhsFix) {
+      if ((lhsFix && rhsFloat) || (rhsFix && lhsFloat) ||
+          (lhsFix && rhs != nullptr && !rhsFix && !rhsInt) ||
+          (rhsFix && lhs != nullptr && !lhsFix && !lhsInt)) {
+        diagnostics_.error(
+            expr->span, "E2108",
+            "cannot compare 'fix' with '" +
+                (lhsFix ? (rhs != nullptr ? rhs->name : "<error>")
+                        : (lhs != nullptr ? lhs->name : "<error>")) +
+                "'; convert explicitly (fix <-> float/integer are explicit)");
+      } else if (lhsFix && rhsFix && lhs->radix != rhs->radix) {
+        diagnostics_.error(expr->span, "E2108",
+                           "cannot compare fix values with different @Radix; "
+                           "convert explicitly");
+      }
       expr->resolvedType = boolType_;
       return boolType_;
     }
@@ -3909,6 +4382,13 @@ Type* Checker::checkBinary(Expr* expr) {
   }
 
   if (expr->op == "&" || expr->op == "|" || expr->op == "^") {
+    if (lhsFix || rhsFix) {
+      diagnostics_.error(expr->span, "E2104",
+                         "bitwise operators are not defined for fix; convert to "
+                         "integer explicitly (11B)");
+      expr->resolvedType = errorType_;
+      return errorType_;
+    }
     if (lhs != nullptr && rhs != nullptr &&
         (lhs->kind == TypeKind::Float || rhs->kind == TypeKind::Float)) {
       diagnostics_.error(expr->span, "E2005",
@@ -3918,29 +4398,30 @@ Type* Checker::checkBinary(Expr* expr) {
     }
   }
 
-  if (expr->op == "+" && lhs->kind == TypeKind::String &&
-      rhs->kind == TypeKind::String) {
+  if (expr->op == "+" && lhs != nullptr && rhs != nullptr &&
+      lhs->kind == TypeKind::String && rhs->kind == TypeKind::String) {
     expr->resolvedType = stringType_;
     return stringType_;
   }
 
   if (expr->op == "<<" || expr->op == ">>") {
-    const bool integerShift = lhs != nullptr && rhs != nullptr &&
-                              lhs->kind == TypeKind::Int &&
-                              rhs->kind == TypeKind::Int;
-    const bool decimalShift = lhs != nullptr && rhs != nullptr &&
-                              lhs->kind == TypeKind::Decimal &&
-                              rhs->kind == TypeKind::Int;
-    if (!integerShift && !decimalShift) {
-      diagnostics_.error(expr->span, "E2005",
-                         "operator '" + expr->op +
-                             "' requires integer, or decimal << integer");
+    if (lhsFix) {
+      diagnostics_.error(expr->span, "E2104",
+                         "fix shift is not implemented; shift a raw integer "
+                         "explicitly (11B)");
       expr->resolvedType = errorType_;
       return errorType_;
     }
-    Type* result = decimalShift ? decimalType_ : intType_;
-    expr->resolvedType = result;
-    return result;
+    const bool integerShift = lhsInt && rhsInt;
+    if (!integerShift) {
+      diagnostics_.error(expr->span, "E2005",
+                         "operator '" + expr->op +
+                             "' requires integer operands");
+      expr->resolvedType = errorType_;
+      return errorType_;
+    }
+    expr->resolvedType = intType_;
+    return intType_;
   }
 
   if (!numericLike(lhs) || !numericLike(rhs)) {
@@ -3951,12 +4432,76 @@ Type* Checker::checkBinary(Expr* expr) {
     return errorType_;
   }
 
+  if (lhsFix || rhsFix) {
+    if ((lhsFix && rhsFloat) || (rhsFix && lhsFloat) ||
+        (lhsFix && !rhsFix && !rhsInt) || (rhsFix && !lhsFix && !lhsInt)) {
+      diagnostics_.error(
+          expr->span, "E2005",
+          "operator '" + expr->op +
+              "' cannot mix fix and float; convert explicitly (fix <-> float "
+              "are explicit)");
+      expr->resolvedType = errorType_;
+      return errorType_;
+    }
+    Type* fixOperand = lhsFix ? lhs : rhs;
+    if (lhsFix && rhsFix && lhs->radix != rhs->radix) {
+      diagnostics_.error(expr->span, "E2108",
+                         "fix operands must share @Radix; convert explicitly");
+      expr->resolvedType = errorType_;
+      return errorType_;
+    }
+    if (expr->op == "/") {
+      diagnostics_.error(
+          expr->span, "E2104",
+          "fix division requires an explicit target @Power and is deferred to "
+          "slice 11B");
+      expr->resolvedType = errorType_;
+      return errorType_;
+    }
+    if (expr->op == "%") {
+      diagnostics_.error(expr->span, "E2104",
+                         "fix remainder is deferred to slice 11B");
+      expr->resolvedType = errorType_;
+      return errorType_;
+    }
+    int power = fixOperand->power;
+    if (expr->op == "*") {
+      if (lhsFix && rhsFix) {
+        const long long sum = static_cast<long long>(lhs->power) + rhs->power;
+        std::uint64_t scale = 0;
+        const unsigned exponent =
+            static_cast<unsigned>(sum < 0 ? -sum : sum);
+        if (sum < std::numeric_limits<int>::min() ||
+            sum > std::numeric_limits<int>::max() ||
+            !fixScale(static_cast<unsigned>(fixOperand->radix), exponent,
+                      scale)) {
+          diagnostics_.error(expr->span, "E2102",
+                             "the natural product @Power does not fit a 64-bit "
+                             "raw");
+          expr->resolvedType = errorType_;
+          return errorType_;
+        }
+        power = static_cast<int>(sum);
+      }
+    } else if (expr->op != "+" && expr->op != "-") {
+      diagnostics_.error(expr->span, "E2005",
+                         "operator '" + expr->op +
+                             "' is not defined for fix");
+      expr->resolvedType = errorType_;
+      return errorType_;
+    }
+    if (lhsFix && rhsFix && (expr->op == "+" || expr->op == "-")) {
+      power = std::max(lhs->power, rhs->power);
+    }
+    Type* result =
+        makeFixType(fixOperand->length, fixOperand->radix, power);
+    expr->resolvedType = result;
+    return result;
+  }
+
   Type* result = intType_;
-  if (lhs->kind == TypeKind::Float || rhs->kind == TypeKind::Float) {
+  if (lhsFloat || rhsFloat) {
     result = floatType_;
-  } else if (lhs->kind == TypeKind::Decimal ||
-             rhs->kind == TypeKind::Decimal) {
-    result = decimalType_;
   } else if (lhs->kind != TypeKind::Int) {
     result = lhs;
   }
@@ -4090,7 +4635,15 @@ Type* Checker::checkAssign(Expr* expr) {
                          "null cannot be assigned to a non-optional target");
     }
   } else {
-    requireAssignable(rhs, lhs, expr->span, "assignment");
+    bool coercedFixLiteral = false;
+    if (lhs != nullptr && lhs->kind == TypeKind::Fix && expr->rhs != nullptr) {
+      coercedFixLiteral =
+          coerceFractionLiteral(expr->rhs.get(), lhs,
+                                targetHasFixPower(expr->lhs.get()), expr->span);
+      checkIntegerLiteralTarget(expr->rhs.get(), lhs, expr->span);
+    }
+    requireAssignable(coercedFixLiteral ? lhs : rhs, lhs, expr->span,
+                      "assignment");
   }
   if (expr->rhs != nullptr && expr->lhs != nullptr) {
     const int borrowDepth = expr->rhs->borrowDepth;
@@ -4341,9 +4894,16 @@ Type* Checker::checkCall(Expr* expr) {
       } else {
         argType = checkExpr(expr->args[i].get());
       }
+      bool coercedFixLiteral = false;
+      if (paramType != nullptr && paramType->kind == TypeKind::Fix) {
+        coercedFixLiteral = coerceFractionLiteral(
+            expr->args[i].get(), paramType, function->params[i].hasPower,
+            expr->args[i]->span);
+      }
       if (!(argType != nullptr && argType->kind == TypeKind::Null &&
             function->params[i].isOptional)) {
-        requireAssignable(argType, paramType, expr->args[i]->span,
+        requireAssignable(coercedFixLiteral ? paramType : argType, paramType,
+                          expr->args[i]->span,
                           "argument " + std::to_string(i + 1));
       }
     }
@@ -4584,6 +5144,12 @@ Type* Checker::checkCall(Expr* expr) {
                    argType->kind == TypeKind::Result) {
           diagnostics_.error(arg->span, "E2050",
                              "@Result must be handled explicitly");
+        } else if (argType != nullptr && argType->kind == TypeKind::Fix &&
+                   (argType->radix < 2 || argType->radix > 36)) {
+          diagnostics_.error(arg->span, "E2107",
+                             "printing a fix value requires @Radix in 2..36; "
+                             "radix " + std::to_string(argType->radix) +
+                                 " is not supported");
         }
       }
       expr->resolvedType = voidType_;
@@ -4821,9 +5387,16 @@ Type* Checker::checkCall(Expr* expr) {
       } else {
         argType = checkExpr(expr->args[i].get());
       }
+      bool coercedFixLiteral = false;
+      if (paramType != nullptr && paramType->kind == TypeKind::Fix) {
+        coercedFixLiteral = coerceFractionLiteral(
+            expr->args[i].get(), paramType, function->params[i].hasPower,
+            expr->args[i]->span);
+      }
       if (!(argType != nullptr && argType->kind == TypeKind::Null &&
             function->params[i].isOptional)) {
-        requireAssignable(argType, paramType, expr->args[i]->span,
+        requireAssignable(coercedFixLiteral ? paramType : argType, paramType,
+                          expr->args[i]->span,
                           "argument " + std::to_string(i + 1));
       }
       if ((function->params[i].isUnique ||
@@ -5604,7 +6177,7 @@ void Checker::validateLockBlock(Stmt* stmt) {
       Type* type = variable->type;
       const bool valueType =
           type != nullptr &&
-          (type->kind == TypeKind::Int || type->kind == TypeKind::Decimal ||
+          (type->kind == TypeKind::Int || type->kind == TypeKind::Fix ||
            type->kind == TypeKind::Float || type->kind == TypeKind::Bool ||
            type->kind == TypeKind::Char || type->kind == TypeKind::String ||
            type->kind == TypeKind::Enum);
@@ -5771,16 +6344,8 @@ void Checker::checkStmt(Stmt* stmt) {
     }
     case StmtKind::Var: {
       Type* type = stmt->type ? resolveType(stmt->type.get(), false) : nullptr;
-      if (stmt->radix != 0) {
-        if (stmt->radix != 2 && stmt->radix != 8 && stmt->radix != 10 &&
-            stmt->radix != 16) {
-          diagnostics_.error(stmt->span, "E2066",
-                             "@Radix must be 2, 8, 10 or 16");
-        } else if (type != nullptr && !type->isInteger()) {
-          diagnostics_.error(stmt->span, "E2066",
-                             "@Radix is only supported for integer types");
-        }
-      }
+      copyNumericMetadata(stmt->type.get(), stmt->length, stmt->radix,
+                          stmt->power, stmt->hasPower);
       if (stmt->isOptional && stmt->proxyPolicy == ProxyPolicy::Default &&
           stmt->optionalDefault != nullptr) {
         Type* expected = type;
@@ -6056,6 +6621,13 @@ void Checker::checkStmt(Stmt* stmt) {
       }
 
       Type* initType = nullptr;
+      bool coercedFixLiteral = false;
+      if (stmt->expr != nullptr && type != nullptr &&
+          type->kind == TypeKind::Fix) {
+        coercedFixLiteral = coerceFractionLiteral(
+            stmt->expr.get(), type, stmt->hasPower, stmt->span);
+      }
+      checkIntegerLiteralTarget(stmt->expr.get(), type, stmt->span);
       if (stmt->expr != nullptr &&
           stmt->expr->kind == ExprKind::ArrayLit) {
         if (type == nullptr ||
@@ -6111,6 +6683,9 @@ void Checker::checkStmt(Stmt* stmt) {
       if (type == nullptr) {
         type = initType != nullptr ? initType : errorType_;
       } else if (initType != nullptr) {
+        if (coercedFixLiteral) {
+          initType = type;
+        }
         if (initType->kind == TypeKind::Null) {
           if (!stmt->isOptional) {
             diagnostics_.error(stmt->span, "E2046",
@@ -6152,23 +6727,6 @@ void Checker::checkStmt(Stmt* stmt) {
           type->name != "integer") {
         diagnostics_.error(stmt->span, "E2054",
                            "@Unsigned/@Signed require an integer variable");
-      }
-      if (stmt->length != 0) {
-        if (stmt->length != 8 && stmt->length != 16 &&
-            stmt->length != 32 && stmt->length != 64 &&
-            stmt->length != 128) {
-          diagnostics_.error(stmt->span, "E2056",
-                             "@Length width must be 8, 16, 32, 64 or 128");
-        } else if (stmt->length == 128 &&
-                   (type == nullptr || type->name != "integer")) {
-          diagnostics_.error(stmt->span, "E2057",
-                             "@Length(128) is only supported for integer");
-        } else if (type == nullptr ||
-                   (type->name != "integer" && type->name != "character" &&
-                    type->name != "decimal" && type->name != "boolean")) {
-          diagnostics_.error(stmt->span, "E2057",
-                             "@Length is only valid on basic numeric types");
-        }
       }
       if (stmt->expr == nullptr && type != nullptr &&
           type->kind == TypeKind::Class && type->decl != nullptr) {
@@ -6245,6 +6803,7 @@ void Checker::checkStmt(Stmt* stmt) {
         declared->isUnique = stmt->isUnique;
         declared->isShare = stmt->isShare;
           declared->isWeak = stmt->isWeak;
+          declared->hasFixPower = stmt->hasPower;
           declared->borrowDepth =
               stmt->expr != nullptr ? stmt->expr->borrowDepth : 0;
       }
@@ -6640,7 +7199,17 @@ void Checker::checkStmt(Stmt* stmt) {
                    actual->kind == TypeKind::Null) {
           // Nullable return accepts null explicitly.
         } else {
-          requireAssignable(actual, expected, stmt->span, "return statement");
+          bool coercedFixLiteral = false;
+          if (expected != nullptr && expected->kind == TypeKind::Fix) {
+            coercedFixLiteral = coerceFractionLiteral(
+                stmt->expr.get(), expected,
+                currentFunction_ != nullptr && currentFunction_->hasPower,
+                stmt->span);
+            checkIntegerLiteralTarget(stmt->expr.get(), expected,
+                                      stmt->span);
+          }
+          requireAssignable(coercedFixLiteral ? expected : actual, expected,
+                            stmt->span, "return statement");
         }
       } else if (expected->kind != TypeKind::Void) {
         diagnostics_.error(stmt->span, "E2005",

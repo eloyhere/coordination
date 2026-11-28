@@ -300,6 +300,11 @@ annotation Length {}
 @Target(type)
 annotation Radix {}
 
+/// Fixed-point power for `fix`: raw = semantic * radix^power. Also promotes
+/// integer/float declarations to `fix` when present.
+@Target(type)
+annotation Power {}
+
 // Deprecated: functional interfaces lower to function values in v0. They are
 // retained until the Lambda module (slice 12) provides structured operator();
 // they will be deleted then.

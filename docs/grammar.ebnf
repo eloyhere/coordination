@@ -19,8 +19,8 @@
 
 identifier      = letter | "_", { letter | digit | "_" } ;
 integer-literal = decimal-integer | hex-integer | bin-integer | oct-integer ;
-decimal-literal = digit, { digit | "_" }, ".", digit, { digit | "_" },
-                  [ exponent ] ;
+fraction-literal = digit, { digit | "_" }, ".", digit, { digit | "_" },
+                   [ exponent ] ;
 exponent        = ( "e" | "E" ), [ "+" | "-" ], digit, { digit } ;
 character-lit   = "'", ( character | escape ), "'" ;
 string-lit      = '"', { character | escape }, '"' ;
@@ -113,6 +113,12 @@ constraint       = type, [ "extends", type ] ;
 (* Types                                                                     *)
 (* ------------------------------------------------------------------------- *)
 
+(* Type keywords include void, integer, fix, float, record, character,
+   boolean and function. Numeric annotations @Length/@Radix/@Power target a
+   type expression: when they precede a local/field/parameter/return type they
+   bind to that type, and @Power on integer/float promotes the resolved type to
+   fix.                                                                       *)
+
 type             = union-type ;
 union-type       = intersect-type, { "|", intersect-type } ;
 intersect-type   = postfix-type, { "&", postfix-type } ;
@@ -127,7 +133,7 @@ primary-type     = [ "const" ],
 (* ------------------------------------------------------------------------- *)
 
 params           = [ param, { ",", param } ] ;
-param            = type, identifier, [ "=", expression ] ;
+param            = { annotation-use }, type, identifier, [ "=", expression ] ;
 arguments        = [ expression, { ",", expression } ] ;
 
 (* ------------------------------------------------------------------------- *)
@@ -209,7 +215,7 @@ primary-expression = literal
                    | "(", expression, ")"
                    | block ;
 
-literal          = integer-literal | decimal-literal | character-lit
+literal          = integer-literal | fraction-literal | character-lit
                  | string-lit | "true" | "false" ;
 
 (* ------------------------------------------------------------------------- *)

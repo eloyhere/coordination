@@ -1,0 +1,18 @@
+// Radix selects the raw scaling base and the print base (2..36).
+integer main() {
+    @Power(0) @Radix(3) integer three = 3;
+    print(three);                    // 10 (base 3)
+
+    @Power(2) @Radix(2) integer half = 0.5;
+    print(half);                     // 0.1 (base 2; raw 2 / 2^2)
+
+    @Power(2) @Radix(10) fix tenth = 0.5;
+    print(tenth);                    // 0.5
+
+    @Power(2) @Radix(3) fix thirdish = 0.5;
+    print(thirdish);                 // 0.12 (base 3; 0.5 rounds to 5/9)
+
+    @Radix(2) integer twelve = 12;   // @Radix alone does not promote
+    print(twelve);                   // 12 (integer print stays decimal)
+    return 0;
+}
