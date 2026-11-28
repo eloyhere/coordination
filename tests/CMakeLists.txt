@@ -1006,6 +1006,6 @@ if(MSVC)
       -DCOORC=$<TARGET_FILE:coorc>
       -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda.coo
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda
-      -DEXPECTED=42|15|42
+      -DEXPECTED=42|15|16|21|20|10
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()

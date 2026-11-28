@@ -1,12 +1,27 @@
+integer apply((integer) -> integer fn, integer value) {
+    return fn(value);
+}
+
+(integer) -> integer makeAdder() {
+    return (integer x): integer -> x + 1;
+}
+
 integer main() {
     (integer) -> integer addOne = (integer x): integer -> x + 1;
     integer base = 10;
-    (integer) -> integer addBase = (integer x): integer -> x + base;
-    (integer) -> integer doubleIt = (integer x): integer -> {
-        return x * 2;
+    (integer) -> integer addBase = [base](integer x): integer -> x + base;
+    (integer) -> integer addRef = [&base](integer x): integer -> {
+        base = base + 1;
+        return x + base;
     };
+    (integer) -> integer triple;
+    triple = [](integer x): integer -> x * 3;
     print(addOne(41));
     print(addBase(5));
-    print(doubleIt(21));
+    print(addRef(5));
+    print(triple(7));
+    print(apply((integer x): integer -> x * 4, 5));
+    (integer) -> integer adder = makeAdder();
+    print(adder(9));
     return 0;
 }

@@ -1809,6 +1809,9 @@ ExprPtr Parser::parsePrimary() {
   if (check(TokKind::LBrace)) {
     return parseObjectLiteral();
   }
+  if (check(TokKind::LBracket) && looksLikeLambda()) {
+    return parseLambda();
+  }
   if (match(TokKind::LBracket)) {
     expr->kind = ExprKind::ArrayLit;
     if (!check(TokKind::RBracket)) {
@@ -1884,11 +1887,33 @@ ExprPtr Parser::parsePrimary() {
 }
 
 bool Parser::looksLikeLambda() const {
-  if (!check(TokKind::LParen)) {
+  std::size_t start = 0;
+  if (check(TokKind::LBracket)) {
+    int brackets = 0;
+    std::size_t i = 0;
+    for (;; ++i) {
+      const TokKind kind = peek(i).kind;
+      if (kind == TokKind::End) {
+        return false;
+      }
+      if (kind == TokKind::LBracket) {
+        ++brackets;
+      } else if (kind == TokKind::RBracket) {
+        --brackets;
+        if (brackets == 0) {
+          break;
+        }
+      }
+    }
+    start = i + 1;
+    if (peek(start).kind != TokKind::LParen) {
+      return false;
+    }
+  } else if (!check(TokKind::LParen)) {
     return false;
   }
   int depth = 0;
-  for (std::size_t i = 0;; ++i) {
+  for (std::size_t i = start;; ++i) {
     const TokKind kind = peek(i).kind;
     if (kind == TokKind::End) {
       return false;
@@ -1909,6 +1934,38 @@ ExprPtr Parser::parseLambda() {
   expr->kind = ExprKind::Lambda;
   expr->span = current().span;
   expr->lambda = std::make_shared<LambdaInfo>();
+  if (match(TokKind::LBracket)) {
+    std::string captures = "[";
+    bool first = true;
+    while (!check(TokKind::RBracket) && !atEnd()) {
+      if (!first) {
+        captures += ", ";
+      }
+      first = false;
+      if (match(TokKind::Equal)) {
+        captures += "=";
+      } else if (match(TokKind::Amp)) {
+        if (check(TokKind::Identifier)) {
+          captures += "&" + std::string(advance().text);
+        } else {
+          captures += "&";
+        }
+      } else if (match(TokKind::KwThis)) {
+        captures += "this";
+      } else if (check(TokKind::Identifier)) {
+        captures += std::string(advance().text);
+      } else {
+        error(current(), "expected a lambda capture");
+        advance();
+      }
+      if (!match(TokKind::Comma)) {
+        break;
+      }
+    }
+    expect(TokKind::RBracket, "']' after lambda captures");
+    captures += "]";
+    expr->lambda->captureList = captures;
+  }
   expr->lambda->params = parseParams();
   expect(TokKind::Colon, "':' before a lambda return type");
   expr->lambda->returnType = parseType(true);

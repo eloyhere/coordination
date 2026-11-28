@@ -248,6 +248,7 @@ struct Initializer {
 };
 
 struct LambdaInfo {
+  std::string captureList;
   std::vector<Param> params;
   TypeExprPtr returnType;
   StmtPtr body;

@@ -3135,7 +3135,14 @@ Type* Checker::checkAssign(Expr* expr) {
       }
     }
   }
-  Type* rhs = checkExpr(expr->rhs.get());
+  Type* rhs = nullptr;
+  if (lhs != nullptr && lhs->kind == TypeKind::Function &&
+      expr->rhs != nullptr && expr->rhs->kind == ExprKind::Lambda) {
+    checkLambda(expr->rhs.get(), lhs);
+    rhs = lhs;
+  } else {
+    rhs = checkExpr(expr->rhs.get());
+  }
   if (!optional && expr->rhs != nullptr &&
       expr->rhs->kind == ExprKind::Name) {
     checkOptionalDirectAccess(expr->rhs.get(), "implicit conversion");
@@ -3384,7 +3391,15 @@ Type* Checker::checkCall(Expr* expr) {
     }
     for (std::size_t i = 0; i < expr->args.size(); ++i) {
       Type* paramType = resolveType(function->params[i].type.get(), false);
-      Type* argType = checkExpr(expr->args[i].get());
+      Type* argType = nullptr;
+      if (expr->args[i] != nullptr &&
+          expr->args[i]->kind == ExprKind::Lambda &&
+          paramType != nullptr && paramType->kind == TypeKind::Function) {
+        checkLambda(expr->args[i].get(), paramType);
+        argType = paramType;
+      } else {
+        argType = checkExpr(expr->args[i].get());
+      }
       if (!(argType != nullptr && argType->kind == TypeKind::Null &&
             function->params[i].isOptional)) {
         requireAssignable(argType, paramType, expr->args[i]->span,
@@ -3743,7 +3758,15 @@ Type* Checker::checkCall(Expr* expr) {
     bindGenericParams(function->generics, false);
     for (std::size_t i = 0; i < expr->args.size(); ++i) {
       Type* paramType = resolveType(function->params[i].type.get(), false);
-      Type* argType = checkExpr(expr->args[i].get());
+      Type* argType = nullptr;
+      if (expr->args[i] != nullptr &&
+          expr->args[i]->kind == ExprKind::Lambda &&
+          paramType != nullptr && paramType->kind == TypeKind::Function) {
+        checkLambda(expr->args[i].get(), paramType);
+        argType = paramType;
+      } else {
+        argType = checkExpr(expr->args[i].get());
+      }
       if (!(argType != nullptr && argType->kind == TypeKind::Null &&
             function->params[i].isOptional)) {
         requireAssignable(argType, paramType, expr->args[i]->span,
@@ -5134,7 +5157,14 @@ void Checker::checkStmt(Stmt* stmt) {
       Type* expected =
           currentReturnType_ != nullptr ? currentReturnType_ : voidType_;
       if (stmt->expr) {
-        Type* actual = checkExpr(stmt->expr.get());
+        Type* actual = nullptr;
+        if (stmt->expr->kind == ExprKind::Lambda &&
+            expected->kind == TypeKind::Function) {
+          checkLambda(stmt->expr.get(), expected);
+          actual = expected;
+        } else {
+          actual = checkExpr(stmt->expr.get());
+        }
         if (stmt->expr->kind == ExprKind::Unary && stmt->expr->op == "&") {
           diagnostics_.error(stmt->span, "E2039",
                              "returning '&' is not allowed; return the value "

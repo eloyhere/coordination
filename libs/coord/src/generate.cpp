@@ -2959,7 +2959,11 @@ void CppEmitter::emitExpr(const Expr* expr) {
       out_ << ')';
       return;
     case ExprKind::Lambda: {
-      out_ << "[=](";
+      const std::string captures =
+          expr->lambda != nullptr && !expr->lambda->captureList.empty()
+              ? expr->lambda->captureList
+              : "[=]";
+      out_ << captures << '(';
       if (expr->lambda != nullptr) {
         for (std::size_t i = 0; i < expr->lambda->params.size(); ++i) {
           if (i != 0) {
