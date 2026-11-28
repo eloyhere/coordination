@@ -1313,6 +1313,78 @@ if(MSVC)
       -DEXPECTED=3
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 
+  add_test(NAME coord_e2e_copy_deep
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_deep.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_deep
+      -DEXPECTED=1|9
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_copy_deep_unique
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_deep_unique.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_deep_unique
+      -DEXPECTED=7|9
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_copy_shallow
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_shallow.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_shallow
+      -DEXPECTED=0|2|5
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_copy_deep_share_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_deep_share_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_deep_share_error
+      -DEXPECT_SUBSTRING=E2095
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_copy_shallow_unique_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_shallow_unique_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_shallow_unique_error
+      -DEXPECT_SUBSTRING=E2095
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_copy_explicit_required_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_explicit_required_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_explicit_required_error
+      -DEXPECT_SUBSTRING=E2095
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_copy_bad_mode_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/copy_bad_mode_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_copy_bad_mode_error
+      -DEXPECT_SUBSTRING=E2095
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_deep
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_deep.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_deep
+      -DEXPECTED=5|1
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_shallow_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_shallow_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_shallow_error
+      -DEXPECT_SUBSTRING=E2094
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_scoped_thread
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

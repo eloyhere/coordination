@@ -1,0 +1,6 @@
+// @Copy(Deep) cannot copy @Share fields.
+@Copy(Deep)
+class Bad {
+public:
+    @Share Bad payload;
+}

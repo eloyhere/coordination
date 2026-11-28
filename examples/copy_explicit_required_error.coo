@@ -1,0 +1,11 @@
+// A class with owning fields must opt into copying explicitly.
+class Holder {
+public:
+    @Unique Holder owned;
+}
+
+integer main() {
+    Holder a;
+    Holder b = a;
+    return 0;
+}

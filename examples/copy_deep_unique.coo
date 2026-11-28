@@ -1,0 +1,37 @@
+// @Copy(Deep) follows @Unique ownership: the pointee is cloned.
+@Copy(Deep)
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}
+
+@Copy(Deep)
+class Holder {
+public:
+    @Unique Payload owned;
+
+    Holder(integer initial) {
+        owned = Payload(initial);
+    }
+
+    integer get() {
+        return owned.value;
+    }
+
+    void set(integer value) {
+        owned.value = value;
+    }
+}
+
+integer main() {
+    Holder a = Holder(7);
+    Holder b = a;
+    b.set(9);
+    print(a.get());
+    print(b.get());
+    return 0;
+}

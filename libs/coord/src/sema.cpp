@@ -1510,6 +1510,102 @@ void Checker::validateProxyHandler(Decl& decl) {
   }
 }
 
+bool Checker::classHasOwningFields(const Type* type) const {
+  if (type == nullptr || type->kind != TypeKind::Class) {
+    return false;
+  }
+  for (const FieldInfo& field : type->fields) {
+    if (field.decl != nullptr &&
+        (field.decl->isUnique || field.decl->isShare)) {
+      return true;
+    }
+    if (field.type != nullptr && field.type->kind == TypeKind::Pointer) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Checker::classRequiresExplicitCopy(const Type* type) const {
+  if (type == nullptr || type->kind != TypeKind::Class ||
+      type->decl == nullptr) {
+    return false;
+  }
+  if (type->decl->copyKind == Decl::CopyKind::Deep ||
+      type->decl->copyKind == Decl::CopyKind::Shallow) {
+    return false;
+  }
+  return classHasOwningFields(type);
+}
+
+void Checker::validateCopyClass(Decl& decl) {
+  Type* type = decl.resolvedType;
+  if (type == nullptr) {
+    return;
+  }
+  for (const AnnotationUse& use : decl.annotations) {
+    if (use.name != "Copy") {
+      continue;
+    }
+    if (use.args.size() != 1 || use.args[0] == nullptr ||
+        use.args[0]->kind != ExprKind::Name) {
+      diagnostics_.error(use.span, "E2095",
+                         "@Copy requires Deep or Shallow");
+      continue;
+    }
+    const std::string& mode = use.args[0]->name;
+    if (mode == "Deep") {
+      decl.copyKind = Decl::CopyKind::Deep;
+    } else if (mode == "Shallow") {
+      decl.copyKind = Decl::CopyKind::Shallow;
+    } else {
+      diagnostics_.error(use.span, "E2095",
+                         "@Copy requires Deep or Shallow");
+    }
+  }
+  const bool owning = classHasOwningFields(type);
+  if (decl.copyKind == Decl::CopyKind::Implicit && owning) {
+    decl.copyKind = Decl::CopyKind::None;
+  }
+  if (decl.copyKind == Decl::CopyKind::Deep) {
+    for (const FieldInfo& field : type->fields) {
+      if (field.decl != nullptr && field.decl->isShare) {
+        diagnostics_.error(field.decl->span, "E2095",
+                           "@Copy(Deep) cannot copy @Share field '" +
+                               field.name + "'");
+      }
+      if (field.type != nullptr &&
+          (field.type->kind == TypeKind::Pointer ||
+           field.type->kind == TypeKind::Thread ||
+           field.type->kind == TypeKind::ScopedThread ||
+           field.type->kind == TypeKind::Mutex ||
+           field.type->kind == TypeKind::ScopedLock ||
+           field.type->kind == TypeKind::Atomic)) {
+        diagnostics_.error(field.decl != nullptr ? field.decl->span : decl.span,
+                           "E2095",
+                           "@Copy(Deep) cannot copy non-value field '" +
+                               field.name + "'");
+      } else if (field.type != nullptr &&
+                 field.type->kind == TypeKind::Class &&
+                 field.type->decl != nullptr &&
+                 field.type->decl->copyKind == Decl::CopyKind::Shallow) {
+        diagnostics_.error(field.decl != nullptr ? field.decl->span : decl.span,
+                           "E2095",
+                           "@Copy(Deep) cannot contain @Copy(Shallow) field '" +
+                               field.name + "'");
+      }
+    }
+  } else if (decl.copyKind == Decl::CopyKind::Shallow) {
+    for (const FieldInfo& field : type->fields) {
+      if (field.decl != nullptr && field.decl->isUnique) {
+        diagnostics_.error(field.decl->span, "E2095",
+                           "@Copy(Shallow) cannot copy @Unique field '" +
+                               field.name + "'");
+      }
+    }
+  }
+}
+
 void Checker::checkClass(Decl& decl) {
   validateDoc(decl);
   validateAnnotations(decl.annotations, "class", decl.span);
@@ -1709,6 +1805,8 @@ void Checker::checkClass(Decl& decl) {
       }
     }
   }
+
+  validateCopyClass(decl);
 
   for (const auto& member : decl.members) {
     if (member->kind == DeclKind::Method) {
@@ -3657,6 +3755,37 @@ Type* Checker::checkAssign(Expr* expr) {
   Type* lhs = checkExpr(expr->lhs.get());
   checkCaptureMutation(expr->lhs.get(), expr->span);
   checkLockWrite(expr->lhs.get(), expr->span);
+  if (lhs != nullptr && lhs->kind == TypeKind::Class &&
+      classRequiresExplicitCopy(lhs)) {
+    bool referenceField = false;
+    if (expr->lhs != nullptr && expr->lhs->kind == ExprKind::Member &&
+        expr->lhs->lhs != nullptr) {
+      Type* baseType = expr->lhs->lhs->resolvedType;
+      const FieldInfo* field = lookupField(baseType, expr->lhs->name);
+      if (field != nullptr && field->decl != nullptr &&
+          (field->decl->isShare || field->decl->isWeak ||
+           field->decl->isUnique)) {
+        referenceField = true;
+      }
+    } else if (expr->lhs != nullptr && expr->lhs->kind == ExprKind::Name &&
+               lookupVariable(expr->lhs->name) == nullptr &&
+               currentClass_ != nullptr) {
+      const FieldInfo* field =
+          lookupField(currentClass_, expr->lhs->name);
+      if (field != nullptr && field->decl != nullptr &&
+          (field->decl->isShare || field->decl->isWeak ||
+           field->decl->isUnique)) {
+        referenceField = true;
+      }
+    }
+    if (!referenceField) {
+      diagnostics_.error(
+          expr->span, "E2095",
+          "class '" + lhs->name +
+              "' requires an explicit @Copy(Deep) or @Copy(Shallow) before it "
+              "can be assigned/copied");
+    }
+  }
   if (expr->rhs != nullptr && expr->rhs->kind == ExprKind::Name &&
       expr->lhs != nullptr &&
       (expr->lhs->kind == ExprKind::Member ||
@@ -5247,12 +5376,16 @@ void Checker::validateLockBlock(Stmt* stmt) {
            type->kind == TypeKind::Float || type->kind == TypeKind::Bool ||
            type->kind == TypeKind::Char || type->kind == TypeKind::String ||
            type->kind == TypeKind::Enum);
-      if (!valueType) {
+      const bool deepCopyable =
+          type != nullptr && type->kind == TypeKind::Class &&
+          type->decl != nullptr &&
+          type->decl->copyKind == Decl::CopyKind::Deep;
+      if (!valueType && !deepCopyable) {
         diagnostics_.error(
             capture.span, "E2094",
             "value capture of class/container/pointer '" + capture.name +
-                "' is rejected in v0 (shallow copies share @Share/pointer "
-                "fields); use [&name] or [const&name]");
+                "' requires @Copy(Deep) on the class (shallow copies share "
+                "@Share/pointer fields); use [&name] or [const&name]");
         continue;
       }
     }
@@ -5858,6 +5991,15 @@ void Checker::checkStmt(Stmt* stmt) {
             stmt->span, "E2092",
             "Atomic values cannot be copied; initialize in place with "
             "Atomic(initial)");
+      }
+      if (type != nullptr && type->kind == TypeKind::Class &&
+          stmt->expr != nullptr && stmt->expr->kind != ExprKind::Call &&
+          classRequiresExplicitCopy(type)) {
+        diagnostics_.error(
+            stmt->span, "E2095",
+            "class '" + type->name +
+                "' contains owning/pointer fields and requires an explicit "
+                "@Copy(Deep) or @Copy(Shallow) before it can be copied");
       }
       declareVariable(stmt->name, type, stmt->isConst, nullptr, stmt->span, stmt->isOptional, stmt->proxyPolicy, stmt->optionalDefault.get());
       if (Variable* declared = lookupVariable(stmt->name)) {

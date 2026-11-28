@@ -1,0 +1,35 @@
+// @Copy(Shallow) allows @Share fields and member-wise copies.
+class Payload {
+public:
+    integer value;
+
+    Payload(integer initial) {
+        value = initial;
+    }
+}
+
+@Copy(Shallow)
+class Shared {
+public:
+    @Share Payload payload;
+    integer id;
+
+    Shared(integer initial) {
+        payload = Payload(initial);
+        id = 0;
+    }
+
+    integer value() {
+        return payload.value;
+    }
+}
+
+integer main() {
+    Shared a = Shared(5);
+    Shared b = a;
+    b.id = 2;
+    print(a.id);
+    print(b.id);
+    print(b.value());
+    return 0;
+}

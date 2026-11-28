@@ -1871,6 +1871,50 @@ void CppEmitter::emitClass(const Decl& decl) {
     }
   }
 
+  if (decl.copyKind == Decl::CopyKind::Deep) {
+    depth_ = 1;
+    out_ << "  " << sanitize(decl.name) << "(const " << sanitize(decl.name)
+         << "& __other)";
+    if (decl.base != nullptr && decl.base->name != "class") {
+      out_ << " : " << typeToString(decl.base.get()) << "(__other)";
+    }
+    out_ << " {\n";
+    const auto emitFieldCopy = [&](const DeclPtr& member) {
+      if (member->kind != DeclKind::Field || member->isShare) {
+        return;
+      }
+      const std::string name = sanitize(member->name);
+      out_ << "    " << name << " = ";
+      if (member->isUnique) {
+        const std::string pointee =
+            member->type != nullptr && member->type->resolved != nullptr
+                ? sanitize(member->type->resolved->name)
+                : "void";
+        out_ << "__other." << name << " ? std::make_unique<" << pointee
+             << ">(*__other." << name << ") : nullptr";
+      } else {
+        out_ << "__other." << name;
+      }
+      out_ << ";\n";
+    };
+    for (const auto& member : decl.members) {
+      emitFieldCopy(member);
+    }
+    out_ << "  }\n";
+    out_ << "  " << sanitize(decl.name) << "& operator=(const "
+         << sanitize(decl.name) << "& __other) {\n";
+    out_ << "    if (this == &__other) return *this;\n";
+    if (decl.base != nullptr && decl.base->name != "class") {
+      out_ << "    " << typeToString(decl.base.get())
+           << "::operator=(__other);\n";
+    }
+    for (const auto& member : decl.members) {
+      emitFieldCopy(member);
+    }
+    out_ << "    return *this;\n  }\n";
+    depth_ = 0;
+  }
+
   depth_ = 0;
   out_ << "};\n\n";
   currentClassDecl_ = previousClass;

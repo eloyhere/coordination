@@ -1,0 +1,21 @@
+// A [x] lock capture of a class requires @Copy(Deep).
+@Copy(Deep)
+class Point {
+public:
+    integer x;
+
+    Point(integer initial) {
+        x = initial;
+    }
+}
+
+integer main() {
+    Mutex mutex;
+    Point point = Point(1);
+    @Lock(Exclusive, mutex, [point]) {
+        point.x = 5;
+        print(point.x);
+    }
+    print(point.x);
+    return 0;
+}

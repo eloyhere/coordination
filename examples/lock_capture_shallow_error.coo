@@ -1,0 +1,19 @@
+// A Shallow class cannot be an isolating [x] capture.
+@Copy(Shallow)
+class Point {
+public:
+    integer x;
+
+    Point(integer initial) {
+        x = initial;
+    }
+}
+
+integer main() {
+    Mutex mutex;
+    Point point = Point(1);
+    @Lock(Exclusive, mutex, [point]) {
+        print(point.x);
+    }
+    return 0;
+}

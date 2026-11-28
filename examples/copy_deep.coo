@@ -1,0 +1,21 @@
+// @Copy(Deep) on a value class: copies are independent.
+@Copy(Deep)
+class Point {
+public:
+    integer x;
+    integer y;
+
+    Point(integer a, integer b) {
+        x = a;
+        y = b;
+    }
+}
+
+integer main() {
+    Point a = Point(1, 2);
+    Point b = a;
+    b.x = 9;
+    print(a.x);
+    print(b.x);
+    return 0;
+}

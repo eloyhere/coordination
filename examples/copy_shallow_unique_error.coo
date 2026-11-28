@@ -1,0 +1,6 @@
+// @Copy(Shallow) cannot copy @Unique fields.
+@Copy(Shallow)
+class Bad {
+public:
+    @Unique Bad owned;
+}

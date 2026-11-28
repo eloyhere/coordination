@@ -240,7 +240,11 @@ private:
   [[nodiscard]] static bool isMetaAnnotationName(std::string_view name);
   [[nodiscard]] static bool isBuiltinAnnotationName(std::string_view name);
   void checkClass(Decl& decl);
-  void checkEnum(Decl& decl);
+  /// Reads `@Copy(Deep|Shallow)` and validates the class's copy strategy
+  /// against its field types.
+  void validateCopyClass(Decl& decl);
+  [[nodiscard]] bool classRequiresExplicitCopy(const Type* type) const;
+  [[nodiscard]] bool classHasOwningFields(const Type* type) const;  void checkEnum(Decl& decl);
   void checkInterface(Decl& decl);
   void checkAnnotation(Decl& decl);
   void checkFunction(Decl& decl);

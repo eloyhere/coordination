@@ -1,0 +1,6 @@
+// @Copy only accepts Deep or Shallow.
+@Copy(Sometimes)
+class Bad {
+public:
+    integer value;
+}

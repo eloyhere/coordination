@@ -393,6 +393,11 @@ struct Decl : Node {
   bool synthesizedDestructor = false;
   bool isNative = false;
   std::string nativeSymbol;
+  /// Copyability of a class: implicit for pure value classes, explicit through
+  /// `@Copy(Deep|Shallow)`, and None when owning fields require an explicit
+  /// annotation before the value may be copied.
+  enum class CopyKind { Implicit, Deep, Shallow, None };
+  CopyKind copyKind = CopyKind::Implicit;
 
   std::vector<AnnotationUse> annotations;
   std::vector<std::string> inheritedAnnotationNames;

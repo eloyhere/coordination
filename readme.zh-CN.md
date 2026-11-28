@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**174 项 CTest**，Windows 全套 **174/174 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 当前基线：**183 项 CTest**，Windows 全套 **183/183 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **174 项**（1 个单元测试 + 173 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 注册 **183 项**（1 个单元测试 + 182 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -524,6 +524,7 @@ coorc build . -o out\app.exe
 - `@Constructure` 类型化/命名构造与 `@Retention(Compile/Runtime)` 代码块已实现基础版；编译期块不能依赖运行期局部状态，代码块上的 `Invocation`/`enum` 报 `E2044`；复杂构造重载消歧仍属 🚧。
 - Atomic v0：内建不可拷贝 `Atomic`，降为 `std::atomic<std::int64_t>`，支持 `load()`、`store(v)`、`fetchAdd(v)`/`fetchSub(v)`（返回操作前的值）、`exchange(v)`（返回旧值）与 `compareExchange(expected, desired)`（值等于 expected 并替换为 desired 时返回 true；expected 不被更新）。所有操作 seq_cst，无内存序参数；没有 `Atomic<T>` 泛型、浮点/指针原子、condition variable 或数据竞争静态分析。支持局部变量与类字段，参数/返回位置 ⏳。拷贝或赋值报 `E2092`。
 - ScopedThread v0：内建 move-only `ScopedThread`，降为 `std::jthread`，析构时自动 join（离开声明块会等待线程结束）。支持 `join()`/`detach()`/`joinable()` 与和 `Thread` 相同的跨线程捕获规则（`E2090`）；不可拷贝/赋值，仅局部变量。没有 `stop_token`/`requestStop`、取消或跨线程异常传播。
+- Copy v0：含 `@Unique`/`@Share`/指针字段的类默认不可复制，必须显式 `@Copy(Deep)`（值字段 + 可深拷贝 `@Unique` 链；拒绝 `@Share`/原始指针/引用/环）或 `@Copy(Shallow)`（逐成员拷贝，允许 `@Share` 与原始指针，禁止 `@Unique`）；纯值类保留隐式复制。`@Copy` 错误报 `E2095`；类 `[x]` 锁捕获要求 `@Copy(Deep)`。
 - ScopedLock/@Lock v0：`ScopedLock guard = ScopedLock(mutex);` 是 `std::lock_guard<std::mutex>` 形式的 RAII，由具名 `Mutex` 左值构造并在离开作用域时解锁；不可拷贝（`E2092`）且仅局部变量。`@Lock(Exclusive, mutex, [captures]) { ... }` 是块形式：`[x]` 复制 primitive/string/enum 值（class 值捕获拒绝），`[&x]` 可变借用，`[const&x]` 只读借用且只能调用 `@ReadOnly` 方法；写未捕获/`const&` 对象与能力错误报 `E2094`，捕获逃逸报 `E2039`，旧 `@Lock(mutex)` 语法报 `E2094`。只检查直接写/调用（无别名/数据竞争证明）；未捕获 class 对象只允许 `@ReadOnly` 调用，嵌套 `@Lock` 报 `E2094`，`[x]` 副本可返回、借用捕获不能逃逸（`E2039`）。没有超时、try-lock 或重入检查：同一 mutex 嵌套加锁会死锁。
 - Mutex v0：内建不可拷贝 `Mutex`，降为 `std::mutex`，手动 `lock()`/`unlock()`/`tryLock()`；拷贝或赋值报 `E2091`。没有 RAII guard、没有静态数据竞争分析；忘记 unlock 会阻塞其它线程。`Mutex` 可作局部变量或类字段（含 Mutex 的对象用 `@Share` 共享）；参数/返回值位置 ⏳。
 - Thread v0：内建 move-only `Thread`，由 `() -> void` 入口构造，支持 `join()`/`detach()`/`joinable()`/`hardwareConcurrency()`。入口闭包必须拥有捕获（`[]`、`[=]`、`[x]`、`@Share` 拷贝）；`[&]`、`[&x]`、`[this]` 与调用期借用的函数值报 `E2090`。可 join 的线程必须在析构前 join/detach；共享可变状态不保证无数据竞争，同步原语、scoped thread 与非局部 `Thread` 位置仍属 ⏳。
