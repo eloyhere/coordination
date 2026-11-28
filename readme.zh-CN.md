@@ -82,6 +82,19 @@ integer main(integer argc, Array<string> args) {
 - `@Result<T>` 只改变错误传播，不改变“必须返回 `integer`”；
 - 生成的 C++ 入口会把结果转成进程退出码。
 
+### 2.1 数值表示注解
+
+`@Length`、`@Radix`、`@Signed`、`@Unsigned`、`@Power` 是通用数值表示注解，不是 `fix` 专属：
+
+| 注解 | 含义 |
+| --- | --- |
+| `@Length(N)` | 存储宽度：`integer` 8/16/32/64/128，`float` 32/64，`fix` 8/16/32/64/128 |
+| `@Radix(R)` | `integer`/`float` 的字面量/打印进制；`fix` 的 scale 基数 |
+| `@Signed` / `@Unsigned` | 数值符号 |
+| `@Power(P)` | `fix` 的 scale 指数；`integer`/`float` + `@Power` 提升为 `fix` |
+
+规则与转换细节见 [framework.zh-CN.md](framework.zh-CN.md) §2.2.1。
+
 ## 3 构建与测试
 
 ```bat
@@ -200,24 +213,9 @@ coorc platform
 - `doctor` 检查编译器候选、`curl`、配置/缓存目录、清单与网络；`platform` 打印宿主、目标三元组与可执行/对象/库命名。
 - `config set mirror.timeout-ms 5000` 可调整超时。
 
-## 5 包管理器与镜像简明用法
+## 5 包
 
-### 5.1 清单
-
-包根目录有 `coordination.toml`（推荐）或 `coord.pkg`（M0 行式格式）即可成为包；两者同时存在时优先 `coordination.toml`。
-
-`coord.pkg`：
-
-```text
-name app
-version 0.1.0
-source src
-dependency ../lib
-dependency math ^1.2
-dev-dependency testkit 0.1
-```
-
-`coordination.toml`：
+包就是含 `coordination.toml`（推荐）或 `coord.pkg` 的目录。最小清单：
 
 ```toml
 [package]
@@ -229,168 +227,31 @@ source = "src"
 [dependencies]
 math = "^1.2"
 local = { path = "../lib" }
-core = { version = "~0.3", platform = "windows" }
-
-[dev-dependencies]
-testkit = "0.1"
-
-[registries]
-official = "https://registry.coordination-lang.org"
-
-[[mirrors]]
-name = "cn"
-registry = "official"
-url = "https://cn.registry.coordination-lang.org"
-priority = 10
 ```
-
-- 版本约束：`^`、`~`、`*`、`>=`/`<`、`=1.2.3`；预发布只在其 `major.minor.patch` 被显式约束时匹配。
-- `platform` 过滤支持 `windows`/`linux`/`macos`/`unix`/架构名与 `!` 取反；`optional = true` 仅在 `--all-optional` 时解析。
-- workspace `[workspace] members` 当前只解析、不递归安装。
-- native 项目新增 `[build]`、`[toolchain.<target>]`、`[native]`；清单是编译器/target 的唯一来源。`coord.pkg` 以行字段兼容同一配置：`target`、`cc`、`cxx`、`sysroot`、`cflag`/`cxxflag`/`ldflag` 与 `native-include`/`native-object`/`native-library`：
-
-```toml
-[build]
-target = "x86_64-unknown-linux-gnu"
-
-[toolchain.x86_64-unknown-linux-gnu]
-cc = "/usr/bin/clang"          # 必填
-cxx = "/usr/bin/clang++"       # 必填；编译生成的 bridge 与主程序
-sysroot = ""                   # 可选
-cflags = []                    # 可选
-cxxflags = []                  # 可选；传给 bridge/主程序编译
-ldflags = []                   # 可选；传给链接
-
-[native]
-include = ["native/include"]         # 头文件搜索路径（项目相对）
-objects = ["native/build/foo.o"]     # 由项目自己的构建系统产出
-libraries = ["m"]                    # 名称（m、user32）或 .a/.lib/.so 路径
-```
-
-- `@Native(file: "native/include/foo.h", abi: "c" | "c++", symbol: "c_name")` 只声明头文件与 ABI（`symbol` 只用于 function，默认取声明名；class 必须 `abi: "c++"` 且不能带 `symbol`）。bridge 模型见 §7.7。
-- Fail closed：缺 `[build].target`、缺/不完整 `[toolchain.<target>]`、objects/libraries/include 或头文件不存在、命令行 target/flags 与清单冲突都是硬错误（`E2112`–`E2119`）；`coorc` 绝不从 `PATH` 猜编译器、绝不自动下载。单文件使用 `@Native` 报 `E2112`；旧的 `@Native("symbol")` 形式报 `E2114`。
-
-### 5.2 信任策略与安装
-
-`coordination.toml` 可声明信任策略：
-
-```toml
-[trust]
-require_checksum = true      # 拒绝没有 SHA-256 的注册表条目
-allow_insecure_http = false  # 拒绝非回环 http:// 注册表
-```
-
-回环 HTTP（`localhost`、`127.0.0.1`、`[::1]`）和 `file://` 始终允许。策略错误在下载前报告；校验和不匹配会删除缓存归档。
-
-### 5.3 安装、锁与 vendor
 
 ```bat
-coorc install
-coorc install --locked          # 锁文件过期直接失败，CI 推荐
-coorc install --frozen          # 不写锁文件
-coorc install --offline         # 只读缓存与 vendor
-coorc update math               # 只更新指定包
-coorc build tests\fixtures\two_packages\app -o out\app.exe
+coorc init my-app --name my_app
+cd my-app
+coorc add math@^1.2
+coorc install --locked
+coorc build . -o out\my_app.exe
 ```
 
-- 注册表包解压到 `coord_modules/<name>/`（含 `.coord-package.toml`），路径依赖不复制。
-- `coord.lock` 固定版本、来源、注册表 URL、SHA-256 与依赖边；`install/update/add/remove` 自动原子写入。
-- `coorc build` 自动收集 `coord_modules/*`、清单中的路径依赖（递归）与当前包 `source` 下的 `.coo`，因此安装后无需改语言 `import`。
-- 增量 stamp 包含根清单、`coord.lock`、各 vendor 清单、文件数与最新 mtime，以及宿主目标三元组与编译器。
+- `coord.lock` 固定版本、来源与 SHA-256；安装的包 vendor 到 `coord_modules/`。
+- `--locked`/`--frozen`/`--offline` 控制可复现性；`mirror`/`config` 选择注册表与镜像。
+- native 项目增加 `[build]`、`[toolchain.<target>]` 与 `[native]`；清单是编译器/target 的唯一来源。
+- 完整清单字段、解析、注册表协议、`[trust]`、镜像、缓存与 vendor 规则见 [framework.zh-CN.md](framework.zh-CN.md) §8。
 
-### 5.4 注册表
+## 6 跨平台
 
-注册表就是一棵目录树（本地目录或 HTTP(S) 根）：
+Windows/Linux 运行完整 214 项测试（214/214）；macOS 注册同一套但本环境预期/未运行。详细矩阵见 [framework.zh-CN.md](framework.zh-CN.md) §6.6；宿主/target 三元组与编译器探测见 §6.5。
 
-```text
-index.toml
-index/<name>.toml
-packages/<name>/<version>.tar.gz
-health
-```
+- 生成程序使用 C++20，按平台使用 `wmain`/`main`；路径/文件 API 为 UTF-8；见 §9.5。
+- native 交叉编译由清单/toolchain 驱动；MSVC 不能交叉编译，交叉目标不能 `run`；见 §9.6。
 
-`coorc pack` 生成确定性 `.tar.gz`（条目排序、mtime 0、gzip stored 块）；`coorc publish` 写本地注册表或通过系统 `curl` PUT 到远程；凭据来自 `COORD_TOKEN`。归档 SHA-256 在解压前校验。
+## 7 教程示例
 
-### 5.5 镜像
-
-- **registry** 是仓库端点；**mirror** 是同一 registry 的另一个端点，带 `priority`（越大越先尝试）。
-- 选择顺序：显式 `--mirror` → 项目配置 → 用户配置 → 内置目录；同一 registry 的镜像按 priority 降序尝试，失败自动切换。
-- 连续失败写入 `<cache>/mirror-health.toml`，冷却 5 分钟；`health` 缺失时探测 `index.toml`。
-- 配置层：内置 → 用户 `config.toml` → 项目清单 → 环境变量 → 命令行。环境变量：`COORD_REGISTRY`、`COORD_MIRROR`、`COORD_OFFLINE`、`COORD_TIMEOUT_MS`、`COORD_CONFIG`、`COORD_CACHE_DIR`、`COORD_CURL`。
-- 内置 `cn`/`eu` 默认禁用，URL 是占位端点；实际使用时用 `mirror add` 或项目清单覆盖。
-
-```bat
-coorc mirror add cn https://cn.example/coord --registry official --priority 10
-coorc mirror use cn
-coorc mirror test cn
-coorc config set mirror.timeout-ms 5000
-```
-
-### 5.6 缓存
-
-```text
-<cache>/coord/
-  registries/<hash>/index/...
-  downloads/<name>-<version>.archive
-  sources/<name>-<version>-<hash>/
-  tmp/
-  mirror-health.toml
-```
-
-`<cache>` 默认 Windows `%LOCALAPPDATA%\coord\cache`、macOS `~/Library/Caches/coord`、Linux `${XDG_CACHE_HOME:-~/.cache}/coord`；`coorc clean` 删除 `coord_modules/`，`coorc clean --cache` 同时清缓存。
-
-## 6 跨平台说明
-
-### 6.1 支持的宿主
-
-| 宿主 | 目标三元组 | 默认宿主 C++ 编译器 |
-| --- | --- | --- |
-| Windows x64/arm64 | `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc` | `cl` |
-| Linux x64/arm64 | `x86_64-unknown-linux-gnu` / `aarch64-unknown-linux-gnu` | `c++`（g++/clang++） |
-| macOS x64/arm64 | `x86_64-apple-darwin` / `aarch64-apple-darwin` | `c++`（Apple clang） |
-| FreeBSD | `*-unknown-freebsd` | `c++` |
-
-Linux/macOS 已用 g++ 本地验证；Windows 为主开发平台。工具链源码不写 `#ifdef _WIN32`，平台差异集中在 `modules/platform`。
-
-### 6.2 子进程与编译器
-
-- 工具链用 `platform::run(argv)` 直接启动子进程，**不经过 shell**；参数按平台规则引用，避免路径空格、引号与 `cmd.exe` 展开问题。
-- Windows 使用 `CreateProcessW`（UTF-16 命令行与环境块），Unix 使用 `fork`/`execvp` + 进程组；支持超时、输出捕获、stdin 管道与取消。
-- 编译分两步：每个翻译单元先编译成 object（MSVC `/nologo /std:c++20 /EHsc /utf-8 /c <src> /Fo<obj>`；GCC/Clang `-std=c++20 -O2 -pthread -c <src> -o <obj>`），再链接（`cl /nologo <objs> /Fe<exe>`；`cxx <objs> -o <exe>`）。native 项目会额外加 `-I`/`/I` include 目录、把 `cxxflags` 传给两次编译，并把声明的 objects/libraries 与 `ldflags` 传给链接。`--cxx-flavor` 可覆盖自动判断；`--verbose` 打印每条命令行。
-
-### 6.3 路径、编码与目录
-
-- 所有跨模块路径以 UTF-8 字符串传递；Windows 转换到 UTF-16 文件 API。
-- 源文件内部统一 LF；读取时归一 CRLF/CR，写回 LF，行号/字节偏移跨平台一致。
-- 可执行后缀 `.exe`（Windows），对象 `.obj`/`.o`，静态库 `foo.lib`/`libfoo.a`，动态库 `foo.dll`/`libfoo.so`/`libfoo.dylib`；`platform.h` 统一提供。
-- 配置目录：`%APPDATA%\coord`、`~/Library/Application Support/coord`、`${XDG_CONFIG_HOME:-~/.config}/coord`；缓存目录见 §5.5。
-- Windows 控制台启动时切换到 UTF-8 代码页；检测 `NO_COLOR` 与终端能力。
-
-### 6.4 生成程序与交叉编译
-
-生成 C++ 使用标准 C++20 + 条件 `<windows.h>`：
-
-- Windows/MSVC 使用 `wmain`，把 UTF-16 `argv` 转成 UTF-8，并在启动时 `SetConsoleOutputCP/SetConsoleInputCP` 设 UTF-8；
-- POSIX 使用 `main`，`argv` 按 UTF-8 解释；
-- 路径/文件 API 使用 UTF-8 → `std::filesystem::path`（Windows 用 `u8string`）。
-
-程序可用的内建：`readFile`、`writeFile`、`fileExists`、`deleteFile`、`timeMillis`、`sleepMillis`，以及 `operatingSystem()`、`architecture()`、`targetTriple()`、`pathSeparator()`、`lineSeparator()`、`executableSuffix()`、`currentDirectory()`、`temporaryDirectory()`、`homeDirectory()`、`environment(name)`、`setEnvironment`、`pathJoin`、`pathFileName`、`pathParent`、`pathExtension`、`pathIsAbsolute`、`pathNormalize`、`pathExists`、`createDirectory`、`createDirectories`、`deleteDirectory`、`listDirectory(path)`。
-
-交叉编译：
-
-```bat
-coorc build src\main.coo --target x86_64-unknown-linux-gnu --sysroot C:\sysroots\linux
-coorc build src\main.coo --cxx C:\toolchains\aarch64-linux-gnu\bin\aarch64-linux-gnu-g++
-```
-
-- clang 宿主会收到 `--target`；GCC 交叉工具链通过 `--cxx` 指定；`--sysroot` 传递 sysroot。
-- MSVC 不能交叉编译；交叉编译目标不能 `coorc run`，只能 `check`/`build`/`--emit-cpp`。
-
-## 7 示例
-
-### 7.1 ProxyPolicy 与 Optional
-
-`ProxyPolicy` 由所有代理对象共享；Optional 只是代理的一种。
+### 7.1 Optional 与构造
 
 ```coo
 class Payload {
@@ -401,233 +262,28 @@ public:
 }
 
 integer main() {
-    @Optional @Unique Payload empty = null;
-    print(empty.isPresent());            // false
-    print(empty.orElse(Payload(0)).value); // 0
-
-    @Optional(Abort) Payload* pointer = null;
-    // *pointer  -> 运行期终止并打印 optional value is null
-
-    @Optional(Skip) Payload* skipped = null;
-    print((*skipped).value);             // 0（默认构造对象）
+    @Optional(Skip) Payload* pointer = null;
+    print((*pointer).value);              // 0
 
     @Optional(Default(Payload(7))) Payload* fallback = null;
-    print((*fallback).value);            // 7
+    print((*fallback).value);             // 7
     return 0;
 }
 ```
 
-默认 `@Optional` 策略是 `Error`，要求先收窄：
+`@Optional` 与 `ProxyPolicy` 规则见 [framework.zh-CN.md](framework.zh-CN.md) §4.5.2；`@Constructure`/`@Destructure` 见 §4.8。
 
-```coo
-@Optional Payload* pointer = null;
-if (pointer != null) {
-    print(pointer.value); // 收窄后可直接访问
-}
-// print(pointer.value);  // E2048
-```
+### 7.2 Native bridge
 
-`@Proxy` 使用同一套策略；不写 policy 时默认 `Skip`：
-
-```coo
-@Proxy(Trace, Abort)
-class Service { ... }
-```
-
-`@Weak T` 映射为 `std::weak_ptr<T>`，观察 `@Share T` 但不延长生命周期：
-
-```coo
-@Share Box owner = Box(7);
-@Weak Box weak = owner;
-print(weak.isPresent());          // true
-print(weak.lock().get().value);   // 7
-```
-
-`isPresent()/isEmpty()` 判断是否过期；`lock()/upgrade()` 返回可空 `@Share` 句柄。未初始化的局部变量和字段会默认初始化（`0`、空字符串、默认构造对象），不再保留不确定值。
-
-### 7.2 构造与解构
-
-`@Constructure` 开启类型化/命名字面量构造；`@Proxy` 类默认支持同样的类型化/命名构造和字段解构，无需显式 `@Constructure`/`@Destructure`。类型标签可省略，已有类型的变量/字面量直接写：
-
-```coo
-class Point {
-public:
-    integer x;
-    string y;
-
-    @Constructure
-    Point(integer x, string y) {
-        this.x = x;
-        this.y = y;
-    }
-
-    @Destructure
-    void unpack(integer& outX, string& outY) {
-        outX = x + 1;
-        outY = y + "!";
-    }
-}
-
-integer main() {
-    integer a = 3;
-    string b = "hi";
-
-    Point p = {a, b};                  // 已声明变量
-    Point q = {5, "ok"};               // 位置值
-    Point r = {y = "named", x = 9};    // 命名参数
-    Point s = {integer a, string b};   // 显式标签消歧
-
-    {integer ax, string by} = p;       // ax == 4, by == "hi!"
-    return 0;
-}
-```
-
-- 条目为 `[A] value`、`[A] name` 或 `[A] name = expr`；`A` 与 name 可省略。无 `=` 的裸 name 既是值也是匹配名；有 `=` 的按参数名匹配。
-- 只匹配 `@Constructure` 构造函数：数量、名字、位置/值类型与可选类型标签；无匹配或歧义报 `E2076`。
-- 目标类 `@Destructure` 方法接收默认初始化绑定的引用并写入输出；否则逐字段读取（存在代理 trap 时先经过 trap）。
-
-### 7.3 代码块保留
-
-```coo
-integer main() {
-    @Retention(Compile)
-    {
-        print("compile-time");
-    }
-
-    @Retention(Runtime)
-    {
-        print("runtime");
-    }
-    return 0;
-}
-```
-
-- `@Retention(Compile)` 块由解释器在编译期执行；`print` 输出可用 `coorc --print-consts` 查看，生成程序不包含该块。
-- `@Retention(Runtime)` 块不在编译期执行，运行时正常执行。
-- 代码块只允许 `Compile`/`Runtime`；`Invocation`/`enum` 报 `E2044`。
-
-### 7.4 数字进制与静态定点
-
-```coo
-@Power(4) fix convert(fix value) {
-    return value;                    // 返回目标 @Power(4) 触发转换
-}
-
-integer main() {
-    @Power(2) fix price = 1.5;
-    @Power(4) fix fine = price;      // 目标注解加宽 power
-    @Radix(2) @Power(4) fix q = price; // 目标注解改变 radix
-    @Length(16) @Power(2) fix wide = price;
-    @Power(2) fix one = 1.0;
-    @Power(2) fix low = one / 3;     // 自然 power 下为 0.33
-    @Power(4) fix high = one / 3;    // 0.3333：目标注解覆盖精度
-    print(fine);
-    print(q);                        // 以 2 进制打印 1.1
-    print(wide);
-    print(convert(2));
-    print(low);                      // 0.33
-    print(high);                     // 0.3333
-    return 0;
-}
-```
-
-- `fix` 是静态定点数：`raw = semantic × radix^power`，表示为 `coord_rt::Fix<Power, Radix, Length>`，只有一个有符号 8/16/32/64/128 位 raw 整数（无运行期 scale）。默认 `@Length(64) @Radix(10) @Power(0)`。
-- `@Power` 作用于 `integer` 或 `float` 声明时提升为 `fix`；`@Radix` 单独不提升。小数字面量初始化 `fix` 必须显式给出 `@Power`（否则 `E2103`），编译期精确编码，超过目标 scale 时按 half away from zero 舍入。`@Length(128)` 字面量编码到有符号 128 位 raw（如 `@Length(128) @Power(0) fix max = 170141183460469231731687303715884105727.0;`），超出范围报 `E2105`。
-- fix→fix 转换由目标类型注解驱动：给目标变量/字段/参数/返回值加 `@Length`/`@Radix`/`@Power`（`@Power(4) fix fine = price;`、`@Radix(2) @Power(4) fix q = price;`、`@Length(16) ...`）。**完全相同的 canonical fix 类型**（`@Length`/`@Radix`/`@Power` 均相同，含默认 `fix`）之间的复制是普通 storage 复制，不需要目标注解；改变类型且目标无注解时报 `E2109`。该规则同样适用于字段、参数、返回值、数组/队列字面量与 map value，因此容器操作不会引入隐式跨 storage 转换。不提供 `toRadix`/`toScale` 方法；`toInteger()`/`toFloat()` 只用于跨 storage 边界。
-- 所有运算符可用：`+ - * / %`、一元 `-`、`++/--`、比较、`& | ^ ~ << >>`。算术/比较按语义（`+`/`-` 对齐更细 power，`*` power 相加，`/` 自然 `max(power1,power2)` 且显式目标可覆盖，`%` 符号跟随被除数）；位运算/移位按 raw，要求 radix/power/length 完全一致（`E2111`）。
-- `@Length` 支持 8/16/32/64/128，并实现结果宽度加宽（`+`/`-`：`max(len1,len2)+1`，`*`：`len1+len2`；低于 128 的宽度保持原结果宽度，含 128 位操作数时结果加宽到 128）。带显式注解目标的 `*`/`/` 使用更宽中间值：旧宽度用 64×64→128，128×128 用可移植 256 位中间值，从而可安全转换到更窄的目标 scale 而不截断。
-- `@Length(128)` 的 raw 是有符号二进制补码 128 位：C++ 后端用自定义双 limb `coord_rt::UInt128` 作为位模式并叠加有符号 helper，GCC/Clang 下 64×64→128 原语用 `__int128`，64 位 MSVC 用 `_mul128`（其它平台用可移植 32 位拆分），不依赖非标准库。溢出、除零与越界转换均 checked，打印 `fix ...` 诊断并终止。静态 `@Power` scale 常量仍必须放入有符号 64 位整数，因此 radix 10 的 `@Power(20)` 即使 `@Length(128)` 仍报 `E2102`。
-- `print` 按该类型的 radix（2–36）输出语义值并去掉无意义尾零。
-- `@Radix` 接受任意整数 `>= 2`；`0`、`1` 与负数报 `E2100`。作用于 `integer` 时只改变生成 C++ 的字面量写法（2/8/16 进制：`0XFF`、`0B1010`、C++ 八进制 `0100`），其他进制退回十进制；运行期打印整数不变。
-
-### 7.5 注解处理器
-
-annotation 通过实现 `AnnotationProcessor` 并 override `process(Description)` 生成声明；旧的 `@Processor` 方法注解已删除：
-
-```coo
-@Target(class)
-annotation Serializable implements AnnotationProcessor {
-    override void process(Description target) {
-        addFunctionReturning("serialize", target.fieldCount());
-    }
-}
-
-@Serializable
-class Data {
-public:
-    integer first;
-    string second;
-}
-
-integer main() {
-    print(serialize());
-    return 0;
-}
-```
-
-- `Processor` 是根标记接口；`AnnotationProcessor`、`ProxyHandler`、`InvocationHandler` 都继承它。只有 annotation 声明可以实现 `AnnotationProcessor`（`E2060`），且必须恰好有一个 `override void process(Description)`（`E2058`/`E2059`/`E2060`）。
-- 同一个 annotation 可以同时实现 `AnnotationProcessor` 与 `ProxyHandler`（编译期生成 + 运行期 trap）；见 [`examples/annotation_processor.coo`](examples/annotation_processor.coo)。
-- 可用的生成原语：`addFunction`、`addFunctionReturning`、`addConstant`、`addAnnotatedFunction`，以及 `line(file, line)`。
-
-### 7.6 包依赖
+native 项目保留自己的 `.c`/`.cpp` 构建，然后调用 `coorc`：
 
 ```bat
-coorc init app --name app
-cd app
-coorc add math@^1.2
-coorc install --locked
-coorc build . -o out\app.exe
-```
-
-### 7.7 Native Bridge（C 与 C++）
-
-native 代码用 `@Native` 声明、在清单里配置；`coorc` 生成 ABI 兼容的 C bridge，并链接项目自己构建的产物。示例工程见 [`examples/native`](examples/native)。
-
-```coo
-// examples/native/cpp_class/src/main.coo
-@Native(file: "native/include/counter.h", abi: "c++")
-class Counter {
-public:
-    Counter();
-    Counter(integer initial);
-    ~Counter();
-    integer value();
-    void increment();
-    integer add(integer delta);
-    string label();
-}
-
-@Unsafe
-integer main() {
-    Counter counter = Counter(10);
-    counter.increment();
-    print(counter.value());   // 11
-    print(counter.add(5));    // 16
-    print(counter.label());   // counter
-    return 0;
-}
-```
-
-```bat
-cmake --preset x64-debug
-cmake --build out\build\x64-debug
 cd examples\native\cpp_class
-native\build.cmd                :: 项目自己的 native 构建 -> native\build\counter.obj
+native\build.cmd
 coorc run .
 ```
 
-职责划分：
-
-| 层 | 职责 |
-| --- | --- |
-| `coordination.toml` | target 三元组、`cc`/`cxx`、sysroot/flags、native include/objects/libraries；编译器信息的唯一来源 |
-| `@Native(file:, abi:, symbol:)` | 无函数体 function 的头文件/ABI；native class 必须 `abi: "c++"` 且不能带 `symbol`；`symbol` 只用于 function，默认取声明名 |
-| 项目构建系统 | 把用户 `.c`/`.cpp` 编译成 objects/libraries（coorc 不做） |
-| 生成的 bridge（`<program>.native.cpp`） | `extern "C"` 包装；C 函数直接调用、字符串以 `const char*`、C++ class 用 move-only 不透明句柄 + 外部 `new (std::nothrow)`/`delete`；无 `try`/`catch`、无异常泄漏 |
-| 生成的主程序 | 调用 bridge 并转换值（null `const char*` → 空字符串，native 句柄 → 值 class） |
-
-Fail-closed：缺 `[build].target`、缺/不完整 `[toolchain.<target>]`、objects/libraries/include 或头文件不存在、命令行 target 冲突都是错误（`E2112`–`E2119`），绝不回退宿主默认编译器。native 调用仍需 `@Unsafe`（`E2096`）。
+`coorc` 不编译用户 C/C++，只编译生成的 `extern "C"` bridge 并链接声明的 objects/libraries。完整契约见 [framework.zh-CN.md](framework.zh-CN.md) §7.4。
 
 ## 8 仓库结构
 
@@ -637,14 +293,13 @@ Fail-closed：缺 `[build].target`、缺/不完整 `[toolchain.<target>]`、obje
 | [`tools/coorc`](tools/coorc) | CLI：编译、测试、包管理、镜像与诊断命令 |
 | [`tests`](tests) | 单元测试、CTest、e2e 脚本与 fixtures |
 | [`examples`](examples) | 可运行 `.coo` 示例 |
-| [`lib/standard`](lib/standard) | 标准库源（`annotations.coo` 与 `utility.coo` 已接入） |
+| [`lib/standard`](lib/standard) | 当前标准库源：`annotations.coo` 与 `utility.coo`；`documentation.coo` 是设计稿，未加载 |
 | [`framework.md`](framework.md) / [`framework.zh-CN.md`](framework.zh-CN.md) | 权威框架与语言规范 |
-| [`docs/grammar.ebnf`](docs/grammar.ebnf) | 形式化文法 |
-| [`docs/archive`](docs/archive) | 历史文档，以 `framework.md` 为准 |
+| [`docs/grammar.ebnf`](docs/grammar.ebnf) | 跟踪 lexer/parser 的形式文法 |
 
 ## 9 限制与已知问题
 
-- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口目标以函数值子集提供：`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` 降为函数类型（泛型实参替换，`.apply`/`.accept`/`.test`/`.get` 调用形式）；具名接口值与类实现 `@FunctionalInterface` 仍属 ⏳（`E2004`/`E2089`），且 `@FunctionalInterface` 已弃用，等 Lambda 模块（切片 12）结构化 `operator()` 后删除。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 已改为项目配置：`@Native(file:, abi:, symbol:)` 只声明头文件/ABI，`coordination.toml` 的 `[build]`/`[toolchain.<target>]`/`[native]` 提供编译器/target/objects/libraries，`coorc` 生成 `extern "C"` bridge（C 函数包装、`const char*` 字符串、move-only 不透明 C++ class 句柄、无 `try`/`catch`）。旧 `@Native("symbol")` 报 `E2114`，单文件使用报 `E2112`；见 §7.7 与 `examples/native`。`@Wrap` 与 `unsafe`/`new`/`delete`/`extern` 仍属 ⏳；`@Copy` 与 `Weak<T>` 已实现；`@Wrap` 标 deferred（声明已移除）；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
+- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。`@FunctionalInterface` 已移除，lambda 以 `(A) -> R` 函数值传递；callable interface 的 `operator()`、未绑定实例引用与函数指针 thunk 仍属 🚧。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 已改为项目配置：`@Native(file:, abi:, symbol:)` 只声明头文件/ABI，`coordination.toml` 的 `[build]`/`[toolchain.<target>]`/`[native]` 提供编译器/target/objects/libraries，`coorc` 生成 `extern "C"` bridge（C 函数包装、`const char*` 字符串、move-only 不透明 C++ class 句柄、无 `try`/`catch`）。旧 `@Native("symbol")` 报 `E2114`，单文件使用报 `E2112`；见 §7.7 与 `examples/native`。`@Wrap` 与 `unsafe`/`new`/`delete`/`extern` 仍属 ⏳；`@Copy` 与 `Weak<T>` 已实现；`@Wrap` 标 deferred（声明已移除）；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
 - `ProxyPolicy` 的执行覆盖局部 `T*`/`@Unique`/`@Share` 变量，以及参数/字段/返回值上的基础 `Skip`/`Default`（`coord_e2e_optional_params`/`_fields`/`_return`），并覆盖 `@Proxy` 的 `Skip`/`Abort`/`Error` 解构。`@Proxy` 的 `Default(expr)` 构造/解构、runtime 构造前钩子、任意非默认构造类的 `Skip` 默认值仍属 🚧。
 - `@Constructure` 类型化/命名构造与 `@Retention(Compile/Runtime)` 代码块已实现基础版；编译期块不能依赖运行期局部状态，代码块上的 `Invocation`/`enum` 报 `E2044`；复杂构造重载消歧仍属 🚧。
 - Atomic v0：内建不可拷贝 `Atomic`，降为 `std::atomic<std::int64_t>`，支持 `load()`、`store(v)`、`fetchAdd(v)`/`fetchSub(v)`（返回操作前的值）、`exchange(v)`（返回旧值）与 `compareExchange(expected, desired)`（值等于 expected 并替换为 desired 时返回 true；expected 不被更新）。所有操作 seq_cst，无内存序参数；没有 `Atomic<T>` 泛型、浮点/指针原子、condition variable 或数据竞争静态分析。支持局部变量与类字段，参数/返回位置 ⏳。拷贝或赋值报 `E2092`。
@@ -668,7 +323,7 @@ Fail-closed：缺 `[build].target`、缺/不完整 `[toolchain.<target>]`、obje
 - 框架与语言规范：[framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md)
 - 英文 QuickStart：[readme.md](readme.md)
 - 形式文法：[docs/grammar.ebnf](docs/grammar.ebnf)
-- 历史归档：[docs/archive/](docs/archive/)（不再维护）
+- 历史归档：已移除；[framework.zh-CN.md](framework.zh-CN.md) 是唯一来源。
 
 
 

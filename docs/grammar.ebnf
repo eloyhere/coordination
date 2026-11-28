@@ -1,47 +1,94 @@
 (*
-  Coordination grammar (draft).
+  Coordination grammar.
+
+  This file tracks the implemented lexer/parser:
+    libs/coord/src/lexer.cpp
+    libs/coord/src/parser.cpp
+  If this grammar and the parser disagree, the parser is authoritative and
+  this file is corrected. There is no inline grammar in framework.md.
 
   Notation: ISO/IEC 14977 EBNF.
-  - { x }      zero or more
-  - [ x ]      optional
-  - ( x | y )  alternative
-  - (* ... *)  comment
+    { x }       zero or more
+    [ x ]       optional
+    ( x | y )   alternative
+    (* ... *)   comment
+    ? ... ?     implementation-defined special sequence
 
-  Conventions:
-  - Identifiers are ASCII; literals follow the lexer in docs/02-spec.md.
-  - `Scope` is semantic: every `block` introduces a scope.
-  - Features marked [planned] are not implemented by the M0 bootstrap.
+  Implemented status:
+  - `switch`, `match`, `for ... in`, lambdas, method references, `@Unsafe`,
+    `@Safe`, `@Retention(Compile|Runtime)` blocks and `@Lock` blocks parse.
+  - `T?` is NOT implemented: `?` is not accepted in type position.
+  - There is no bare `unsafe { ... }` statement; the spelling is `@Unsafe { ... }`
+    (and `@Safe { ... }`). `unsafe` remains a reserved keyword.
+  - `function` is a keyword; callable types are written `(A, B) -> R`.
 *)
 
 (* ------------------------------------------------------------------------- *)
 (* Lexical                                                                   *)
 (* ------------------------------------------------------------------------- *)
 
-identifier      = letter | "_", { letter | digit | "_" } ;
-integer-literal = decimal-integer | hex-integer | bin-integer | oct-integer ;
-fraction-literal = digit, { digit | "_" }, ".", digit, { digit | "_" },
-                   [ exponent ] ;
+identifier      = identifier-start, { identifier-continue } ;
+identifier-start = ascii-letter | "_" | unicode-scalar ;
+identifier-continue = ascii-letter | digit | "_" | unicode-scalar ;
+ascii-letter    = "A" .. "Z" | "a" .. "z" ;
+digit           = "0" .. "9" ;
+
+(* The lexer is intentionally permissive: any non-ASCII Unicode scalar that is
+   not Unicode whitespace and not a control character may appear in an
+   identifier. ASCII identifiers still start with a letter or underscore. *)
+unicode-scalar  = ? non-ASCII Unicode scalar excluding whitespace/control ? ;
+
+integer-literal = dec-integer | hex-integer | bin-integer | oct-integer ;
+dec-integer     = digit, { digit | "_" } ;
+hex-integer     = "0", ( "x" | "X" ), hex-digit, { hex-digit | "_" } ;
+bin-integer     = "0", ( "b" | "B" ), bin-digit, { bin-digit | "_" } ;
+oct-integer     = "0", ( "o" | "O" ), oct-digit, { oct-digit | "_" } ;
+hex-digit       = digit | "a" .. "f" | "A" .. "F" ;
+bin-digit       = "0" | "1" ;
+oct-digit       = "0" .. "7" ;
+
+fraction-literal = dec-integer, ".", digit, { digit | "_" },
+                   [ exponent ]
+                 | dec-integer, exponent ;
 exponent        = ( "e" | "E" ), [ "+" | "-" ], digit, { digit } ;
+
 character-lit   = "'", ( character | escape ), "'" ;
 string-lit      = '"', { character | escape }, '"' ;
+escape          = "\\", ( "n" | "r" | "t" | "0" | "\\" | "'" | '"'
+                        | "u", "{", hex-digit, { hex-digit }, "}" ) ;
+
+comment         = "//", { ? any character except newline ? }
+                | "/*", { ? any character ? }, "*/" ;
+doc-comment     = "///", { ? any character except newline ? }
+                | "/**", { ? any character ? }, "*/" ;
+
+(* Keywords (reserved; not available as identifiers):
+   module import export as class interface implements extends annotation
+   function void const static virtual override final operator where
+   if else let while for switch in return break continue true false null
+   this super is match extern unsafe new delete
+   integer fix float record character boolean enumerate
+   public private protected
+   `descriptor`, `description`, `reflection`, `reflector` and `proxy` are
+   ordinary identifiers, not keywords. *)
 
 (* ------------------------------------------------------------------------- *)
-(* Modules and declarations                                                  *)
+(* Modules, imports and top-level declarations                               *)
 (* ------------------------------------------------------------------------- *)
 
-(* Keywords include: enumerate, class, interface, annotation, ...            *)
-
-compilation-unit = [ module-decl ], { import-decl }, { top-level-decl } ;
-
+compilation-unit = [ module-decl ], { import-decl }, { top-level } ;
 module-decl      = "module", path, ";" ;
-import-decl      = "import", path, [ "as", identifier ],
-                   [ ".", "{", identifier, { ",", identifier }, "}" ], ";" ;
+import-decl      = "import", ( import-list | path, [ "as", identifier ] ), ";" ;
+import-list      = "{", [ identifier, { ",", identifier } ], "}", "from", path ;
 path             = identifier, { ".", identifier } ;
 
-top-level-decl   = { annotation-use },
-                   [ "export" ],
-                   ( class-decl | interface-decl | annotation-decl
-                   | enum-decl | function-decl | const-decl ) ;
+top-level        = { annotation-use }, [ "export" ],
+                   ( class-decl | interface-decl | enum-decl
+                   | annotation-decl | function-decl | const-decl
+                   | export-list | module-directive ) ;
+
+export-list      = "export", "{", [ identifier, { ",", identifier } ], "}", ";" ;
+module-directive = ( "@Unsafe" | "@Safe" ), ";" ;   (* file-level capability *)
 
 class-decl       = [ "final" ], "class", identifier,
                    [ generic-params ],
@@ -49,203 +96,212 @@ class-decl       = [ "final" ], "class", identifier,
                    [ "implements", type, { ",", type } ],
                    class-body, [ ";" ] ;
 
+interface-decl   = "interface", identifier, [ generic-params ],
+                   [ "extends", type, { ",", type } ],
+                   class-body, [ ";" ] ;
+
 enum-decl        = "enumerate", identifier,
                    [ "implements", type, { ",", type } ],
                    "{", [ enum-variant, { ",", enum-variant }, [ "," ] ],
-                   [ ";", { method-decl } ], "}", [ ";" ] ;
-
+                   [ ";", { member-decl } ], "}", [ ";" ] ;
 enum-variant     = { annotation-use }, identifier, [ "=", expression ] ;
 
-interface-decl   = "interface", identifier, [ generic-params ],
-                   "{", { interface-member }, "}" ;
+annotation-decl  = "annotation", identifier,
+                   [ "(", params, ")" | generic-params ],
+                   [ "implements", type, { ",", type } ],
+                   ( ";" | "{", { member-decl }, "}" ) ;
 
-annotation-decl  = "annotation", identifier, [ generic-params ],
-                   [ "(", params, ")" ],
-                   ( ";"
-                   | "{", { annotation-member }, "}" ) ;
-
-function-decl    = type, ( identifier | operator-name ),
-                   [ generic-params ], "(", params, ")",
-                   [ "where", constraint, { ",", constraint } ],
+function-decl    = type, function-name, [ generic-params ], "(", params, ")",
+                   [ "where", type, { ",", type } ],
                    ( block | ";" ) ;
+function-name    = identifier
+                 | "operator", ( identifier | operator-symbol ) ;
+operator-symbol  = "+" | "-" | "*" | "/" | "%" | "==" | "!="
+                 | "<" | "<=" | ">" | ">=" | "&" | "|" | "^"
+                 | "<<" | ">>" | "!" | "~" | "++" | "--" ;
 
-const-decl       = "const", [ type ], identifier, "=", expression, ";" ;
+const-decl       = "const", ( identifier, "=", expression
+                            | type, identifier, "=", expression ), ";" ;
 
-(* ------------------------------------------------------------------------- *)
-(* Classes, interfaces, annotations                                          *)
-(* ------------------------------------------------------------------------- *)
-
-class-body       = "{", { access-section | class-member }, "}" ;
+class-body       = "{", { access-section | member-decl }, "}" ;
 access-section   = ( "public" | "private" | "protected" ), ":" ;
-class-member     = { annotation-use },
-                   ( field-decl | method-decl | constructor-decl
-                   | destructor-decl ) ;
 
-field-decl       = [ "const" | "final" ], type, identifier,
+member-decl      = { annotation-use },
+                   [ "virtual" | "override" | "final" | "static" ],
+                   ( constructor-decl | destructor-decl
+                   | field-decl | method-decl ) ;
+
+field-decl       = [ "final" ], type, identifier,
                    [ "=", expression ], ";" ;
 
-method-decl      = { "virtual" | "override" | "final" | "static" },
-                   type, identifier, [ generic-params ],
-                   "(", params, ")", [ "const" ],
-                   ( block | ";" ) ;
+method-decl      = type, identifier, [ generic-params ], "(", params, ")",
+                   [ "const" ], ( block | ";" ) ;
 
 constructor-decl = identifier, "(", params, ")",
-                   [ ":", initializer, { ",", initializer } ], block ;
-initializer      = "super", "(", arguments, ")"
-                 | identifier, "(", arguments, ")" ;
-destructor-decl  = "~", identifier, "(", ")", block ;
+                   [ ":", initializer, { ",", initializer } ],
+                   ( block | ";" ) ;
+initializer      = ( "super" | identifier ), "(", arguments, ")" ;
 
-interface-member = { annotation-use },
-                   ( method-decl | destructor-decl ) ;
+destructor-decl  = "~", identifier, "(", ")", ( block | ";" ) ;
 
-annotation-member = { annotation-use },
-                    ( method-decl | field-decl ) ;
+(* `@Native` members of an `@Native` class are implicit; an explicit method
+   annotation is rejected by Sema (E2113). *)
 
 (* ------------------------------------------------------------------------- *)
-(* Generic parameters and constraints                                        *)
+(* Generics, types and parameters                                            *)
 (* ------------------------------------------------------------------------- *)
 
 generic-params   = "<", generic-param, { ",", generic-param }, ">" ;
 generic-param    = identifier, [ "extends", type ] ;
-constraint       = type, [ "extends", type ] ;
 
-(* ------------------------------------------------------------------------- *)
-(* Types                                                                     *)
-(* ------------------------------------------------------------------------- *)
+(* Numeric representation annotations are ordinary annotations placed before
+   a type expression:
+     @Length(N)          storage width for integer/float/fix
+     @Radix(R)           integer/float literal/print base; fix scale radix
+     @Signed/@Unsigned    numeric signedness
+     @Power(P)           fix scale exponent; integer/float + @Power -> fix
+   They target `type`; see framework.md "Numeric Representation Annotations". *)
 
-(* Type keywords include void, integer, fix, float, record, character,
-   boolean and function. Numeric annotations @Length/@Radix/@Power target a
-   type expression: when they precede a local/field/parameter/return type they
-   bind to that type, and @Power on integer/float promotes the resolved type to
-   fix.
-
-   fix numeric annotations:
-   - @Length(8 | 16 | 32 | 64 | 128) selects the raw width; default 64.
-     The raw is a signed two's-complement integer and the invariant is
-     raw = semantic * radix^power with no runtime scale.
-   - @Radix(>= 2) selects the scaling/printing base; @Power(n) selects the
-     static exponent. The static scale radix^|power| must fit a signed 64-bit
-     integer (E2102); @Length(128) raws use 128-bit literals and wider
-     intermediates instead.
-   - Copying between identical canonical shapes (same @Length/@Radix/@Power,
-     default fix included) is a plain storage copy and needs no target
-     annotation. A shape change is a conversion and requires an annotation on
-     the target variable/field/parameter/return type, otherwise E2109. A
-     container element type cannot carry these annotations, so a shape change
-     there is E2109 too (no implicit cross-storage conversion).              *)
-
-type             = union-type ;
+type             = [ "const" ], union-type, [ "&" ] ;
 union-type       = intersect-type, { "|", intersect-type } ;
 intersect-type   = postfix-type, { "&", postfix-type } ;
-postfix-type     = primary-type, { "?" | "*" | "[", expression, "]" } ;
-primary-type     = [ "const" ],
-                   ( path, [ "<", type, { ",", type }, ">" ]
-                   | "(", [ type, { ",", type } ], ")", "->", type
-                   | "(" type ")" ) ;
-
-(* ------------------------------------------------------------------------- *)
-(* Parameters and arguments                                                  *)
-(* ------------------------------------------------------------------------- *)
+postfix-type     = primary-type, { "*" | "[", expression, "]" } ;
+(* In reference positions the parser consumes the final "&" as a reference;
+   elsewhere "A & B" is an intersection type. *)
+primary-type     = path, [ "<", type, { ",", type }, ">" ]
+                 | "(", [ type, { ",", type } ], ")", "->", type
+                 | "(", type, ")" ;
+                 (* `T?` is not implemented; `?` is not a type postfix. *)
 
 params           = [ param, { ",", param } ] ;
 param            = { annotation-use }, type, identifier, [ "=", expression ] ;
 arguments        = [ expression, { ",", expression } ] ;
 
 (* ------------------------------------------------------------------------- *)
-(* Statements (each block is a Scope)                                         *)
+(* Statements                                                                *)
 (* ------------------------------------------------------------------------- *)
 
 block            = "{", { statement }, "}" ;
+
 statement        = block
                  | var-decl
                  | "if", "(", expression, ")", statement,
                    [ "else", statement ]
                  | "while", "(", expression, ")", statement
-                 | "for", "(", [ for-init ], ";", [ expression ], ";",
-                   [ expression ], ")", statement
+                 | "for", identifier, "in", expression, statement
+                 | "switch", "(", expression, ")", switch-body
+                 | "match", "(", expression, ")", match-body
                  | "return", [ expression ], ";"
                  | "break", ";"
                  | "continue", ";"
-                 | "unsafe", block
-                 | "match", "(", expression, ")", "{",
-                   { pattern, "=>", ( expression | block ), [ "," ] }, "}"
-                 | "~", postfix-expression, ";"      (* destructor declaration *)
+                 | "~", postfix-expression, ";"          (* ~this.member; *)
+                 | capability-block
+                 | retention-block
+                 | lock-block
+                 | destructure-stmt
                  | expression, ";" ;
 
 var-decl         = { annotation-use }, [ "const" ], type, identifier,
-                   [ "=", expression
-                   | "(", arguments, ")"        (* 构造函数重载 *)
-                   | "{", arguments, "}"        (* 聚合逐属性 *) ], ";" ;
-for-init         = var-decl | expression ;
+                   [ "=", ( expression | constructure-init )
+                   | brace-init
+                   | "(", arguments, ")" ],
+                   ";" ;
+brace-init       = "{", [ expression, { ",", expression } ], "}" ;
+
+(* @Constructure: `A value`, `A name`, `A name = expr`; type label optional. *)
+constructure-init = "{", [ constructure-entry,
+                           { ",", constructure-entry } ], "}" ;
+constructure-entry = [ type ], ( expression
+                               | identifier, [ "=", expression ] ) ;
+
+(* Each case body is a single statement; `default` is switch-only and last. *)
+switch-body      = "{", { switch-case }, "}" ;
+switch-case      = "case", expression, ":", statement
+                 | "default", ":", statement ;
+
+match-body       = "{", { match-case }, "}" ;
+match-case       = "case", pattern, ":", ( expression | block ) ;
+
+pattern          = pattern-primary, { "|", pattern-primary },
+                   [ "if", expression ] ;
+pattern-primary  = "_"
+                 | literal
+                 | path
+                 | literal, ( ".." | "..=" ), literal ;
+
+capability-block = ( "@Unsafe" | "@Safe" ), block ;
+retention-block  = "@Retention", "(", ( "Compile" | "Runtime" ), ")", block ;
+lock-block       = "@Lock", "(", "Exclusive", ",", expression,
+                   [ ",", lock-captures ], ")", block ;
+lock-captures    = "[", lock-capture, { ",", lock-capture }, "]" ;
+lock-capture     = identifier | "&", identifier
+                 | "const", "&", identifier ;
+
+destructure-stmt = "{", destructure-binding,
+                   { ",", destructure-binding }, "}", "=", expression, ";" ;
+destructure-binding = type, identifier ;
 
 (* ------------------------------------------------------------------------- *)
 (* Expressions                                                               *)
 (* ------------------------------------------------------------------------- *)
 
-expression       = assignment-expression | lambda-expression | method-reference ;
+expression       = if-expression | assignment-expression ;
+if-expression    = "if", "(", expression, ")", expression,
+                   "else", ( expression | if-expression ) ;
 
-(* 规划：Java 目标类型 + C++ 捕获；省略捕获列表 = 外部变量按值复制 *)
-lambda-expression = [ capture-list ], "(", [ param, { ",", param } ], ")",
-                    [ ":", type ], "->", ( expression | block ) ;
-
-capture-list      = "[", [ capture-item, { ",", capture-item } ], "]" ;
-capture-item      = [ "&" ], ( identifier | "this" ) | "=" | "&" ;
-
-(* 规划：Type::method / object::method *)
-method-reference  = ( path | expression ), "::", identifier ;
-assignment-expression = conditional-expression
+assignment-expression = binary-expression
                  | unary-expression, assign-op, assignment-expression ;
 assign-op        = "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" ;
 
-conditional-expression = logical-or-expression
-                 | "if", "(", expression, ")", block,
-                   [ "else", ( block | conditional-expression ) ] ;
+binary-expression = unary-expression,
+                    { binary-op, unary-expression } ;
+binary-op        = "||" | "&&" | "|" | "^" | "&"
+                 | "==" | "!=" | "<" | "<=" | ">" | ">="
+                 | "<<" | ">>" | "+" | "-" | "*" | "/" | "%" ;
 
-logical-or-expression  = logical-and-expression,
-                         { "||", logical-and-expression } ;
-logical-and-expression = bit-or-expression,
-                         { "&&", bit-or-expression } ;
-bit-or-expression      = bit-xor-expression, { "|", bit-xor-expression } ;
-bit-xor-expression     = bit-and-expression, { "^", bit-and-expression } ;
-bit-and-expression     = equality-expression, { "&", equality-expression } ;
-equality-expression    = relational-expression,
-                         { ( "==" | "!=" ), relational-expression } ;
-relational-expression  = additive-expression,
-                         { ( "<" | "<=" | ">" | ">=" ), additive-expression } ;
-additive-expression    = multiplicative-expression,
-                         { ( "+" | "-" ), multiplicative-expression } ;
-multiplicative-expression = unary-expression,
-                         { ( "*" | "/" | "%" ), unary-expression } ;
+unary-expression = ( "!" | "-" | "+" | "~" | "*" | "&" | "++" | "--" ),
+                   unary-expression
+                 | postfix-expression ;
 
-unary-expression = [ "!" | "-" | "+" | "~" | "*" | "&" ], postfix-expression ;
 postfix-expression = primary-expression,
                      { "(", arguments, ")"
                      | ".", identifier
-                     | "[", expression, "]" } ;
+                     | "::", identifier
+                     | "[", expression, "]"
+                     | ( "++" | "--" ) } ;
 
 primary-expression = literal
                    | "this"
+                   | "super", ".", identifier
                    | path
                    | "(", expression, ")"
-                   | block ;
+                   | object-literal
+                   | lambda-expression
+                   | if-expression ;
 
-literal          = integer-literal | fraction-literal | character-lit
-                 | string-lit | "true" | "false" ;
+object-literal   = "{", [ object-field, { ",", object-field } ], "}" ;
+object-field     = identifier, ":", expression
+                 | identifier ;
+
+lambda-expression = [ capture-list ], "(", params, ")", ":", type,
+                    "->", ( expression | block ) ;
+capture-list     = "[", [ capture, { ",", capture } ], "]" ;
+capture          = identifier | "&", identifier | "=" | "&" | "this" ;
+
+literal          = integer-literal | fraction-literal
+                 | character-lit | string-lit | "true" | "false" | "null" ;
 
 (* ------------------------------------------------------------------------- *)
-(* Annotations and patterns                                                  *)
+(* Annotations                                                               *)
 (* ------------------------------------------------------------------------- *)
 
-annotation-use   = "@", path, [ "(", [ annotation-argument,
-                                       { ",", annotation-argument } ], ")" ] ;
-
-(* Named arguments are used by native declarations, e.g.
-   @Native(file: "native/include/foo.h", abi: "c++", symbol: "coo_add").   *)
+annotation-use   = "@", path,
+                   [ "(", [ annotation-argument,
+                            { ",", annotation-argument } ], ")" ] ;
 annotation-argument = [ identifier, ":" ], expression ;
 
-pattern          = "_"
-                 | literal
-                 | path, [ "(", [ pattern, { ",", pattern } ], ")" ]
-                 | pattern, "|", pattern
-                 | pattern, "if", expression ;
+(* `@Native` uses named arguments:
+     @Native(file: "native/include/foo.h", abi: "c++", symbol: "coo_add")
+   `symbol` is function-only; a native class requires abi: "c++" and cannot
+   carry `symbol`. *)

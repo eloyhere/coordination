@@ -82,6 +82,19 @@ integer main(integer argc, Array<string> args) {
 - `@Result<T>` changes error propagation only, never the "must return `integer`" rule;
 - the generated C++ entry converts the result into the process exit code.
 
+### 2.1 Numeric Representation Annotations
+
+`@Length`, `@Radix`, `@Signed`, `@Unsigned` and `@Power` are general numeric representation annotations, not `fix`-only:
+
+| Annotation | Meaning |
+| --- | --- |
+| `@Length(N)` | storage width: `integer` 8/16/32/64/128, `float` 32/64, `fix` 8/16/32/64/128 |
+| `@Radix(R)` | literal/print base for `integer`/`float`; scale radix for `fix` |
+| `@Signed` / `@Unsigned` | numeric signedness |
+| `@Power(P)` | `fix` scale exponent; `integer`/`float` + `@Power` promotes to `fix` |
+
+Rules and conversion details: [framework.md](framework.md) §2.2.1.
+
 ## 3 Build and Test
 
 ```bat
@@ -200,24 +213,9 @@ coorc platform
 - `doctor` checks compiler candidates, `curl`, config/cache directories, manifests and network; `platform` prints the host, target triple and executable/object/library naming.
 - `config set mirror.timeout-ms 5000` adjusts the timeout.
 
-## 5 Package Manager and Mirrors in Brief
+## 5 Packages
 
-### 5.1 Manifests
-
-A package is any directory with `coordination.toml` (recommended) or `coord.pkg` (M0 line format); `coordination.toml` wins when both exist.
-
-`coord.pkg`:
-
-```text
-name app
-version 0.1.0
-source src
-dependency ../lib
-dependency math ^1.2
-dev-dependency testkit 0.1
-```
-
-`coordination.toml`:
+A package is a directory with `coordination.toml` (recommended) or `coord.pkg`. A minimal manifest:
 
 ```toml
 [package]
@@ -229,170 +227,31 @@ source = "src"
 [dependencies]
 math = "^1.2"
 local = { path = "../lib" }
-core = { version = "~0.3", platform = "windows" }
-
-[dev-dependencies]
-testkit = "0.1"
-
-[registries]
-official = "https://registry.coordination-lang.org"
-
-[[mirrors]]
-name = "cn"
-registry = "official"
-url = "https://cn.registry.coordination-lang.org"
-priority = 10
 ```
-
-- Version constraints: `^`, `~`, `*`, `>=`/`<`, `=1.2.3`; prereleases match only when their `major.minor.patch` is explicitly constrained.
-- `platform` filters `windows`/`linux`/`macos`/`unix`/architecture names with `!` negation; `optional = true` resolves only with `--all-optional`.
-- `[workspace] members` is currently parsed but not installed recursively.
-- Native projects add `[build]`, `[toolchain.<target>]` and `[native]`; the manifest is the only source of compiler/target truth. `coord.pkg` accepts the same settings as line fields: `target`, `cc`, `cxx`, `sysroot`, `cflag`/`cxxflag`/`ldflag` and `native-include`/`native-object`/`native-library`:
-
-```toml
-[build]
-target = "x86_64-unknown-linux-gnu"
-
-[toolchain.x86_64-unknown-linux-gnu]
-cc = "/usr/bin/clang"          # required
-cxx = "/usr/bin/clang++"       # required; compiles the generated bridge + program
-sysroot = ""                   # optional
-cflags = []                    # optional (project build hints)
-cxxflags = []                  # optional; passed to the bridge/program compile
-ldflags = []                   # optional; passed to the link step
-
-[native]
-include = ["native/include"]         # header search paths (project-relative)
-objects = ["native/build/foo.o"]     # produced by the project's own build system
-libraries = ["m"]                    # names ((m, user32) or paths to .a/.lib/.so)
-```
-
-- `@Native(file: "native/include/foo.h", abi: "c" | "c++", symbol: "c_name")` only declares the header and ABI (`symbol` is function-only and defaults to the declaration name; `abi: "c++"` is required for a class, which cannot carry `symbol`). See §7.7 for the bridge model.
-- Fail closed: missing `[build].target`, missing/incomplete `[toolchain.<target>]`, missing objects/libraries/includes or headers and target/flag conflicts with the command line are hard errors (`E2112`–`E2119`); `coorc` never guesses a compiler from `PATH` and never downloads one. Single-file `@Native` use reports `E2112`; the old `@Native("symbol")` form reports `E2114`.
-
-### 5.2 Trust Policies and Install
-
-`coordination.toml` may declare a trust policy:
-
-```toml
-[trust]
-require_checksum = true      # reject registry entries without SHA-256
-allow_insecure_http = false  # refuse non-loopback http:// registries
-```
-
-Loopback HTTP (`localhost`, `127.0.0.1`, `[::1]`) and `file://` registries are always allowed. Policy failures are reported before download; checksum mismatches remove the cached archive.
-
-### 5.3 Install, Lock and Vendor
 
 ```bat
-coorc install
-coorc install --locked          # fail on stale lockfile; recommended for CI
-coorc install --frozen          # do not write the lockfile
-coorc install --offline         # cache/vendor only
-coorc update math               # update only the named package
-coorc build tests\fixtures\two_packages\app -o out\app.exe
+coorc init my-app --name my_app
+cd my-app
+coorc add math@^1.2
+coorc install --locked
+coorc build . -o out\my_app.exe
 ```
 
-- Registry packages extract to `coord_modules/<name>/` (with `.coord-package.toml`); path dependencies are not copied.
-- `coord.lock` pins versions, sources, registry URLs, SHA-256 and dependency edges; `install/update/add/remove` write it atomically.
-- `coorc build` automatically collects `coord_modules/*`, manifest path dependencies (recursively) and `.coo` under the package `source`, so installing never requires changing language `import`s.
-- The incremental stamp covers the root manifest, `coord.lock`, vendor manifests, file counts and newest mtimes, plus the host target triple and compiler.
+- `coord.lock` pins versions, sources and SHA-256; installed packages are vendored under `coord_modules/`.
+- `--locked`/`--frozen`/`--offline` control reproducibility; `mirror`/`config` select registries and mirrors.
+- Native projects add `[build]`, `[toolchain.<target>]` and `[native]`; the manifest is the only compiler/target source.
+- Full manifest fields, resolution, registry protocol, `[trust]`, mirrors, cache and vendor rules: [framework.md](framework.md) §8.
 
-### 5.4 Registries
+## 6 Cross-Platform
 
-A registry is a directory tree (local directory or HTTP(S) root):
+Windows/Linux run the full 214-test suite (214/214); macOS registers the same suite but is expected/not run in this environment. The detailed matrix is [framework.md](framework.md) §6.6; host/target triples and compiler discovery are §6.5.
 
-```text
-index.toml
-index/<name>.toml
-packages/<name>/<version>.tar.gz
-health
-```
+- Generated programs use C++20 and `wmain`/`main` as appropriate; path/file APIs are UTF-8; see [framework.md](framework.md) §9.5.
+- Native cross-compilation is manifest/toolchain driven; MSVC cannot cross-compile and cross targets cannot `run`; see [framework.md](framework.md) §9.6.
 
-`coorc pack` emits a deterministic `.tar.gz` (sorted entries, mtime 0, gzip stored blocks); `coorc publish` writes a local registry or PUTs to a remote one through system `curl`; credentials come from `COORD_TOKEN`. Archive SHA-256 is verified before extraction.
+## 7 Tutorial Examples
 
-### 5.5 Mirrors
-
-- **registry**: a repository endpoint; **mirror**: another endpoint for the same registry with a `priority` (higher tried first).
-- Selection order: explicit `--mirror` → project config → user config → built-in catalog; mirrors of one registry are tried by descending priority with automatic failover.
-- Consecutive failures are recorded in `<cache>/mirror-health.toml` with a 5-minute cooldown; when `health` is missing, `index.toml` is probed.
-- Config layers: built-in → user `config.toml` → project manifest → environment → command line. Environment: `COORD_REGISTRY`, `COORD_MIRROR`, `COORD_OFFLINE`, `COORD_TIMEOUT_MS`, `COORD_CONFIG`, `COORD_CACHE_DIR`, `COORD_CURL`.
-- Built-in `cn`/`eu` mirrors are disabled and use placeholder URLs; override them with `mirror add` or the project manifest.
-
-```bat
-coorc mirror add cn https://cn.example/coord --registry official --priority 10
-coorc mirror use cn
-coorc mirror test cn
-coorc config set mirror.timeout-ms 5000
-```
-
-### 5.6 Cache
-
-```text
-<cache>/coord/
-  registries/<hash>/index/...
-  downloads/<name>-<version>.archive
-  sources/<name>-<version>-<hash>/
-  tmp/
-  mirror-health.toml
-```
-
-`<cache>` defaults to `%LOCALAPPDATA%\coord\cache` on Windows, `~/Library/Caches/coord` on macOS and `${XDG_CACHE_HOME:-~/.cache}/coord` on Linux; `coorc clean` removes `coord_modules/`, and `coorc clean --cache` also clears the cache.
-
-## 6 Cross-Platform Notes
-
-### 6.1 Supported Hosts
-
-| Host | Target triple | Default host C++ compiler |
-| --- | --- | --- |
-| Windows x64/arm64 | `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc` | `cl` |
-| Linux x64/arm64 | `x86_64-unknown-linux-gnu` / `aarch64-unknown-linux-gnu` | `c++` (g++/clang++) |
-| macOS x64/arm64 | `x86_64-apple-darwin` / `aarch64-apple-darwin` | `c++` (Apple clang) |
-| FreeBSD | `*-unknown-freebsd` | `c++` |
-
-Linux/macOS have been verified locally with g++; Windows is the primary development platform. Toolchain sources never write `#ifdef _WIN32`; platform differences live in `modules/platform`.
-
-### 6.2 Subprocesses and Compilers
-
-- The toolchain spawns subprocesses with `platform::run(argv)` **without a shell**, quoting arguments per platform to avoid spaces, quotes and `cmd.exe` expansion.
-- Windows uses `CreateProcessW` (UTF-16 command line and environment block); Unix uses `fork`/`execvp` + process groups; timeouts, output capture, stdin pipes and cancellation are supported.
-- Compilation is two steps: compile each translation unit to an object (`/nologo /std:c++20 /EHsc /utf-8 /c <src> /Fo<obj>` for MSVC; `-std=c++20 -O2 -pthread -c <src> -o <obj>` for GCC/Clang), then link (`cl /nologo <objs> /Fe<exe>`; `cxx <objs> -o <exe>`). A native project adds `-I`/`/I` include dirs, `cxxflags` to both compiles, and the declared objects/libraries plus `ldflags` to the link. `--cxx-flavor` overrides auto-detection; `--verbose` prints every command line.
-
-### 6.3 Paths, Encoding and Directories
-
-- All cross-module paths travel as UTF-8; Windows converts to UTF-16 file APIs.
-- Sources use LF internally; CRLF/CR are normalized on read and LF is written back, keeping lines/offsets identical across platforms.
-- Executable suffix `.exe` (Windows), objects `.obj`/`.o`, static libraries `foo.lib`/`libfoo.a`, shared libraries `foo.dll`/`libfoo.so`/`libfoo.dylib`; provided by `platform.h`.
-- Config dirs: `%APPDATA%\coord`, `~/Library/Application Support/coord`, `${XDG_CONFIG_HOME:-~/.config}/coord`; cache dirs in §5.5.
-- Windows consoles switch to the UTF-8 code page at startup; `NO_COLOR` and terminal capability are detected.
-
-### 6.4 Generated Programs and Cross-Compilation
-
-Generated C++ uses standard C++20 plus a conditional `<windows.h>`:
-
-- Windows/MSVC uses `wmain`, converts UTF-16 `argv` to UTF-8, and calls `SetConsoleOutputCP`/`SetConsoleInputCP` with UTF-8 at startup;
-- POSIX uses `main`, and `argv` is interpreted as UTF-8;
-- path/file APIs use UTF-8 → `std::filesystem::path` (Windows constructs from `u8string`).
-
-Program built-ins: `readFile`, `writeFile`, `fileExists`, `deleteFile`, `timeMillis`, `sleepMillis`, plus `operatingSystem()`, `architecture()`, `targetTriple()`, `pathSeparator()`, `lineSeparator()`, `executableSuffix()`, `currentDirectory()`, `temporaryDirectory()`, `homeDirectory()`, `environment(name)`, `setEnvironment`, `pathJoin`, `pathFileName`, `pathParent`, `pathExtension`, `pathIsAbsolute`, `pathNormalize`, `pathExists`, `createDirectory`, `createDirectories`, `deleteDirectory`, `listDirectory(path)`.
-
-Cross-compilation:
-
-```bat
-coorc build examples\native\c_functions        # target/toolchain from coordination.toml
-coorc build src\main.coo --target x86_64-unknown-linux-gnu --sysroot C:\sysroots\linux
-coorc build src\main.coo --cxx C:\toolchains\aarch64-linux-gnu\bin\aarch64-linux-gnu-g++
-```
-
-- A native project takes `[build].target` and `[toolchain.<target>]` from `coordination.toml`; the same configured `cxx` compiles the main translation unit and the generated bridge. A `--target`/`--cxx`/`--sysroot` that contradicts the manifest is `E2117`; a missing toolchain is `E2116`.
-- Outside native projects a clang host receives `--target`; GCC cross toolchains are supplied via `--cxx`; `--sysroot` passes a sysroot.
-- MSVC cannot cross-compile; cross targets cannot `coorc run` — only `check`/`build`/`--emit-cpp`. `--emit-cpp` also writes `<output>.native.cpp`, which is the compile-only proof of a foreign target.
-
-## 7 Examples
-
-### 7.1 ProxyPolicy and Optional
-
-`ProxyPolicy` is shared by all proxy objects; Optional is one proxy kind.
+### 7.1 Optional and construction
 
 ```coo
 class Payload {
@@ -403,238 +262,28 @@ public:
 }
 
 integer main() {
-    @Optional @Unique Payload empty = null;
-    print(empty.isPresent());              // false
-    print(empty.orElse(Payload(0)).value); // 0
-
-    @Optional(Abort) Payload* pointer = null;
-    // *pointer  -> terminates at runtime, printing "optional value is null"
-
-    @Optional(Skip) Payload* skipped = null;
-    print((*skipped).value);               // 0 (default-constructed object)
+    @Optional(Skip) Payload* pointer = null;
+    print((*pointer).value);              // 0
 
     @Optional(Default(Payload(7))) Payload* fallback = null;
-    print((*fallback).value);              // 7
+    print((*fallback).value);             // 7
     return 0;
 }
 ```
 
-The default `@Optional` policy is `Error`, so direct access requires narrowing first:
+`@Optional` and `ProxyPolicy` rules: [framework.md](framework.md) §4.5.2. For `@Constructure`/`@Destructure`, see §4.8.
 
-```coo
-@Optional Payload* pointer = null;
-if (pointer != null) {
-    print(pointer.value); // direct access after narrowing
-}
-// print(pointer.value);  // E2048
-```
+### 7.2 Native bridge
 
-`@Proxy` uses the same policies; without a policy argument it defaults to `Skip`:
-
-```coo
-@Proxy(Trace, Abort)
-class Service { ... }
-```
-
-`@Weak T` maps to `std::weak_ptr<T>` and observes an `@Share T` owner without extending its lifetime:
-
-```coo
-@Share Box owner = Box(7);
-@Weak Box weak = owner;
-print(weak.isPresent());          // true
-print(weak.lock().get().value);   // 7
-```
-
-`isPresent()/isEmpty()` check expiry; `lock()/upgrade()` return a nullable `@Share` handle. Uninitialized locals and fields are default-initialized (`0`, empty string, default-constructed class) instead of left indeterminate.
-
-### 7.2 Construction and Destructuring
-
-`@Constructure` enables typed/named brace construction. `@Proxy` classes accept the same typed/named construction and field destructuring by default, even without an explicit `@Constructure`/`@Destructure`. Type labels are optional; write expressions directly when their types are already known:
-
-```coo
-class Point {
-public:
-    integer x;
-    string y;
-
-    @Constructure
-    Point(integer x, string y) {
-        this.x = x;
-        this.y = y;
-    }
-
-    @Destructure
-    void unpack(integer& outX, string& outY) {
-        outX = x + 1;
-        outY = y + "!";
-    }
-}
-
-integer main() {
-    integer a = 3;
-    string b = "hi";
-
-    Point p = {a, b};                  // already-typed variables
-    Point q = {5, "ok"};               // positional values
-    Point r = {y = "named", x = 9};    // named arguments
-    Point s = {integer a, string b};   // explicit labels for disambiguation
-
-    {integer ax, string by} = p;       // ax == 4, by == "hi!"
-    return 0;
-}
-```
-
-- Entries are `[A] value`, `[A] name` or `[A] name = expr`; `A` and the name are optional. Without `=`, a bare name is both the value and the match name; with `=`, the entry matches a constructor parameter name.
-- Matching considers only `@Constructure` constructors: count, names, positions/value types and optional type labels. No match or ambiguity reports `E2076`.
-- A target-class `@Destructure` method receives references to default-initialized bindings and writes their outputs; otherwise destructuring reads fields (through the proxy trap when present).
-
-### 7.3 Block Retention
-
-```coo
-integer main() {
-    @Retention(Compile)
-    {
-        print("compile-time");
-    }
-
-    @Retention(Runtime)
-    {
-        print("runtime");
-    }
-    return 0;
-}
-```
-
-- `@Retention(Compile)` blocks run in the interpreter at compile time; their `print` output is visible with `coorc --print-consts` and is omitted from the generated program.
-- `@Retention(Runtime)` blocks are not executed at compile time and run normally.
-- Only `Compile`/`Runtime` are valid on blocks; `Invocation`/`enum` report `E2044`.
-
-### 7.4 Numeric Radix and Static Fixed Point
-
-```coo
-@Power(4) fix convert(fix value) {
-    return value;                    // return target @Power(4) converts
-}
-
-integer main() {
-    @Power(2) fix price = 1.5;
-    @Power(4) fix fine = price;      // target annotation widens power
-    @Radix(2) @Power(4) fix q = price; // target annotation changes radix
-    @Length(16) @Power(2) fix wide = price;
-    @Power(2) fix one = 1.0;
-    @Power(2) fix low = one / 3;     // 0.33 at the natural power
-    @Power(4) fix high = one / 3;    // 0.3333: target overrides precision
-    print(fine);
-    print(q);                        // 1.1 in base 2
-    print(wide);
-    print(convert(2));
-    print(low);                      // 0.33
-    print(high);                     // 0.3333
-    return 0;
-}
-```
-
-- `fix` is static fixed point: `raw = semantic × radix^power`, represented as `coord_rt::Fix<Power, Radix, Length>` with one signed 8/16/32/64/128-bit raw integer (no runtime scale). Defaults are `@Length(64) @Radix(10) @Power(0)`.
-- `@Power` on an `integer` or `float` declaration promotes it to `fix`; `@Radix` alone does not. A fractional literal needs an explicit `@Power` to initialize a `fix` (otherwise `E2103`); it is encoded exactly at compile time, rounding half away from zero beyond the target scale. A `@Length(128)` literal is encoded into a signed 128-bit raw (e.g. `@Length(128) @Power(0) fix max = 170141183460469231731687303715884105727.0;`) and a literal beyond that range reports `E2105`.
-- Fix-to-fix conversion is target-driven: annotate the destination variable/field/parameter/return type (`@Power(4) fix fine = price;`, `@Radix(2) @Power(4) fix q = price;`, `@Length(16) ...`). A **copy between identical canonical shapes** (`@Length`/`@Radix`/`@Power` all equal, including the default `fix`) is a plain storage copy and needs no target annotation; a conversion that changes the shape without a target annotation reports `E2109`. The same rule applies to fields, parameters, return values, array/queue literals and map values, so no implicit cross-storage fix conversion is introduced by container operations. There are no `toRadix`/`toScale` methods; `toInteger()`/`toFloat()` only cross the fix storage boundary.
-- All operators work: `+ - * / %`, unary `-`, `++/--`, comparisons, `& | ^ ~ << >>`. Arithmetic/comparison is semantic (`+`/`-` align to the finer power, `*` adds powers, `/` uses `max(power1,power2)` and an explicit target can override it, `%` keeps the dividend sign); bitwise/shift operates on `raw` and requires identical radix/power/length (`E2111`).
-- `@Length` supports 8/16/32/64/128 with result-width widening (`+`/`-`: `max(len1,len2)+1`, `*`: `len1+len2`; widths below 128 keep their previous result widths and a 128-bit operand widens the result to 128). A `*` or `/` assigned to an explicitly annotated target uses wider intermediates: 64×64→128 for the old widths and a portable 256-bit intermediate for 128×128, so a narrower target scale is produced without truncation.
-- The `@Length(128)` raw is a signed two's-complement 128-bit integer: the C++ backend uses a custom two-limb `coord_rt::UInt128` as the bit pattern with signed helpers, `__int128` on GCC/Clang for the 64×64→128 primitive and `_mul128` on 64-bit MSVC (portable 32-bit split fallback elsewhere); no non-standard library is required. Overflow, division by zero and out-of-range conversions are checked and abort with a `fix ...` diagnostic. The static `@Power` scale constant must still fit a signed 64-bit integer, so e.g. radix-10 `@Power(20)` remains `E2102` even for `@Length(128)`.
-- `print` renders the semantic value in the type's radix (2–36) and drops trailing zero digits.
-- `@Radix` accepts any integer `>= 2`; `0`, `1` and negatives report `E2100`. For `integer` it only changes generated C++ literal spelling for bases 2/8/16 (`0XFF`, `0B1010`, C++ octal `0100`); other bases spell decimal, and runtime `print` of an integer is unchanged.
-
-### 7.5 Annotation Processors
-
-Annotations generate declarations by implementing `AnnotationProcessor` and overriding `process(Description)`; the old `@Processor` method annotation has been removed:
-
-```coo
-@Target(class)
-annotation Serializable implements AnnotationProcessor {
-    override void process(Description target) {
-        addFunctionReturning("serialize", target.fieldCount());
-    }
-}
-
-@Serializable
-class Data {
-public:
-    integer first;
-    string second;
-}
-
-integer main() {
-    print(serialize());
-    return 0;
-}
-```
-
-- `Processor` is the root marker; `AnnotationProcessor`, `ProxyHandler` and `InvocationHandler` extend it. Only annotation declarations may implement `AnnotationProcessor` (`E2060`); exactly one `override void process(Description)` is required (`E2058`/`E2059`/`E2060`).
-- An annotation may implement `AnnotationProcessor` and `ProxyHandler` together (compile-time generation plus runtime traps); see [`examples/annotation_processor.coo`](examples/annotation_processor.coo).
-- Available generation primitives: `addFunction`, `addFunctionReturning`, `addConstant`, `addAnnotatedFunction`, plus `line(file, line)`.
-
-### 7.6 Package Dependencies
+Native projects keep their own build system for `.c`/`.cpp`, then call `coorc`:
 
 ```bat
-coorc init app --name app
-cd app
-coorc add math@^1.2
-coorc install --locked
-coorc build . -o out\app.exe
-```
-
-### 7.7 Native Bridge (C and C++)
-
-Native code is declared with `@Native` and configured in the manifest; `coorc`
-generates an ABI-compatible C bridge and links what the project built. The
-checked-in projects live under [`examples/native`](examples/native).
-
-```coo
-// examples/native/cpp_class/src/main.coo
-@Native(file: "native/include/counter.h", abi: "c++")
-class Counter {
-public:
-    Counter();
-    Counter(integer initial);
-    ~Counter();
-    integer value();
-    void increment();
-    integer add(integer delta);
-    string label();
-}
-
-@Unsafe
-integer main() {
-    Counter counter = Counter(10);
-    counter.increment();
-    print(counter.value());   // 11
-    print(counter.add(5));    // 16
-    print(counter.label());   // counter
-    return 0;
-}
-```
-
-```bat
-cmake --preset x64-debug
-cmake --build out\build\x64-debug
 cd examples\native\cpp_class
-native\build.cmd                :: project-owned native build -> native\build\counter.obj
+native\build.cmd
 coorc run .
 ```
 
-Responsibilities split:
-
-| Layer | Responsibility |
-| --- | --- |
-| `coordination.toml` | target triple, `cc`/`cxx`, sysroot/flags, native include dirs, objects and libraries; the only source of compiler truth |
-| `@Native(file:, abi:, symbol:)` | header/ABI of a body-less function; a native class uses `abi: "c++"` and cannot carry `symbol`; `symbol` is function-only and defaults to the declaration name |
-| project build system | compiles the user `.c`/`.cpp` into objects/libraries (coorc never does) |
-| generated bridge (`<program>.native.cpp`) | `extern "C"` wrappers; C functions called directly, strings as `const char*`, C++ classes through a move-only opaque handle with external `new (std::nothrow)`/`delete`; no `try`/`catch`, no exception leakage |
-| generated program | calls the bridge and converts values (null `const char*` → empty string, native handle → value class) |
-
-Fail-closed behavior: missing `[build].target`, missing/incomplete
-`[toolchain.<target>]`, missing objects/libraries/includes or headers and
-command-line target conflicts are errors (`E2112`–`E2119`) — never a fallback
-to the host compiler. Native calls stay behind `@Unsafe` (`E2096`).
+`coorc` never compiles user C/C++; it compiles the generated `extern "C"` bridge and links the declared objects/libraries. Full contract: [framework.md](framework.md) §7.4.
 
 ## 8 Repository Layout
 
@@ -644,14 +293,13 @@ to the host compiler. Native calls stay behind `@Unsafe` (`E2096`).
 | [`tools/coorc`](tools/coorc) | CLI: compile, test, package management, mirror and diagnostics |
 | [`tests`](tests) | Unit tests, CTest, e2e scripts and fixtures |
 | [`examples`](examples) | Runnable `.coo` examples |
-| [`lib/standard`](lib/standard) | Standard-library sources (`annotations.coo` and `utility.coo` wired in) |
+| [`lib/standard`](lib/standard) | Current standard-library sources: `annotations.coo` and `utility.coo`; `documentation.coo` is a design draft and is not loaded |
 | [`framework.md`](framework.md) / [`framework.zh-CN.md`](framework.zh-CN.md) | Authoritative framework and language specification |
-| [`docs/grammar.ebnf`](docs/grammar.ebnf) | Formal grammar |
-| [`docs/archive`](docs/archive) | Historical documents; `framework.md` is authoritative |
+| [`docs/grammar.ebnf`](docs/grammar.ebnf) | Formal grammar tracking the lexer/parser |
 
 ## 9 Limitations and Known Issues
 
-- Lambda has a subset: function-type targets, expression/block bodies, implicit/explicit captures (`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`), capture validation (`E2087`), read-only explicit by-value captures (`E2088`), by-reference closure escape checks (`E2039`) for returns, field/container-literal stores and outer-scope variables, initialization/assignment, calls, arguments and returns. Omitted capture lists produce mutable by-value copies. Functional-interface targets are available as a function-value subset: `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` from `lib/standard/utility.coo` lower to function types (generic arguments substituted, `.apply`/`.accept`/`.test`/`.get` call forms); nominal interface values and classes implementing a `@FunctionalInterface` are ⏳ (`E2004`/`E2089`), and `@FunctionalInterface` is deprecated until the Lambda module structures `operator()` (slice 12). Unbound instance method references and function-pointer targets are ⏳; thread-entry capture is checked by `Thread` creation (`E2090`), while the rest of cross-thread borrow analysis is ⏳; static (`Type::method`) and bound (`object::method`) method references, calls through function-typed fields and chained calls on returned function values work, with bound receivers following the by-reference escape rules. `if` expressions support expression branches (`if (c) a else b` and `else if` chains); block branches are ⏳. `match` supports constants, ranges, or-patterns, bindings and guards, with enumerate/boolean/scalar exhaustiveness; type patterns and class destructuring are ⏳. `@Native`/FFI is project-configured: `@Native(file:, abi:, symbol:)` declares the header/ABI only, `[build]`/`[toolchain.<target>]`/`[native]` in `coordination.toml` provide the compiler/target/objects/libraries, and `coorc` generates an `extern "C"` bridge (C function wrappers, `const char*` strings, move-only opaque C++ class handles, no `try`/`catch`). The old `@Native("symbol")` form is `E2114`; single-file use is `E2112`. See §7.7 and `examples/native`. `@Wrap` and `unsafe`/`new`/`delete`/`extern` remain ⏳; `@Copy` and `Weak<T>` are implemented; `@Wrap` is deferred (declaration removed); see [framework.md](framework.md) §11.
+- Lambda has a subset: function-type targets, expression/block bodies, implicit/explicit captures (`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`), capture validation (`E2087`), read-only explicit by-value captures (`E2088`), by-reference closure escape checks (`E2039`) for returns, field/container-literal stores and outer-scope variables, initialization/assignment, calls, arguments and returns. Omitted capture lists produce mutable by-value copies. `@FunctionalInterface` is removed; lambdas are function values typed `(A) -> R`. Callable interfaces use `operator()`, and unbound instance references and function-pointer thunks remain 🚧. Unbound instance method references and function-pointer targets are ⏳; thread-entry capture is checked by `Thread` creation (`E2090`), while the rest of cross-thread borrow analysis is ⏳; static (`Type::method`) and bound (`object::method`) method references, calls through function-typed fields and chained calls on returned function values work, with bound receivers following the by-reference escape rules. `if` expressions support expression branches (`if (c) a else b` and `else if` chains); block branches are ⏳. `match` supports constants, ranges, or-patterns, bindings and guards, with enumerate/boolean/scalar exhaustiveness; type patterns and class destructuring are ⏳. `@Native`/FFI is project-configured: `@Native(file:, abi:, symbol:)` declares the header/ABI only, `[build]`/`[toolchain.<target>]`/`[native]` in `coordination.toml` provide the compiler/target/objects/libraries, and `coorc` generates an `extern "C"` bridge (C function wrappers, `const char*` strings, move-only opaque C++ class handles, no `try`/`catch`). The old `@Native("symbol")` form is `E2114`; single-file use is `E2112`. See §7.7 and `examples/native`. `@Wrap` and `unsafe`/`new`/`delete`/`extern` remain ⏳; `@Copy` and `Weak<T>` are implemented; `@Wrap` is deferred (declaration removed); see [framework.md](framework.md) §11.
 - `ProxyPolicy` execution covers local `T*`/`@Unique`/`@Share` variables plus basic `Skip`/`Default` on parameters, fields and returns (`coord_e2e_optional_params`/`_fields`/`_return`), and `@Proxy` `Skip`/`Abort`/`Error` destructuring. `@Proxy` `Default(expr)` construction/destructuring, runtime pre-construction hooks, and `Skip` defaults for arbitrary non-default-constructible classes are still 🚧.
 - `@Constructure` typed/named construction and `@Retention(Compile/Runtime)` blocks are implemented at a basic level; compile-time blocks cannot depend on runtime local state, and `Invocation`/`enum` on a block reports `E2044`. Complex constructor-overload disambiguation remains 🚧.
 - Atomic v0: a built-in non-copyable `Atomic` lowers to `std::atomic<std::int64_t>` with `load()`, `store(v)`, `fetchAdd(v)`/`fetchSub(v)` (return the previous value), `exchange(v)` (returns the previous value) and `compareExchange(expected, desired)` (returns true when the value equalled `expected` and was replaced; `expected` is not updated). All operations are seq_cst with no memory-order parameters; there is no `Atomic<T>`, floating-point/pointer atomic, condition variable or data-race static analysis. Locals and class fields are supported; parameters/returns are ⏳. Copying or assigning reports `E2092`.
@@ -675,7 +323,7 @@ to the host compiler. Native calls stay behind `@Unsafe` (`E2096`).
 - Framework and language specification: [framework.md](framework.md) / [framework.zh-CN.md](framework.zh-CN.md)
 - Chinese QuickStart: [readme.zh-CN.md](readme.zh-CN.md)
 - Formal grammar: [docs/grammar.ebnf](docs/grammar.ebnf)
-- Historical archive: [docs/archive/](docs/archive/) (unmaintained)
+- Historical archive: removed; [framework.md](framework.md) is the single source.
 
 
 

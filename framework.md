@@ -6,7 +6,8 @@
 - Compiler: `coorc`; package manifests `coordination.toml` / `coord.pkg`; lockfile `coord.lock`.
 - Companion documents: [README (English)](readme.md) · [快速上手（中文）](readme.zh-CN.md) · [Framework (中文)](framework.zh-CN.md).
 - Formal grammar: [docs/grammar.ebnf](docs/grammar.ebnf).
-- Historical documents: [docs/archive/](docs/archive/) is archive-only and **subordinate to this document**.
+- Formal grammar: [docs/grammar.ebnf](docs/grammar.ebnf); it tracks the lexer/parser.
+- Historical archive: removed; this document is the single source.
 - Status legend: ✅ implemented and tested · 🚧 partial/in progress · ⏳ specified or designed only.
 
 ## 1 Positioning and Principles
@@ -76,10 +77,11 @@ Four channels are all required: **annotations** attach intent to a target; **des
 
 | Document | Contents |
 | --- | --- |
-| `framework.md` / `framework.zh-CN.md` | Framework, language, reflection, compiler, standard-library summary, package protocol and backend mapping (this document). |
-| `readme.md` / `readme.zh-CN.md` | QuickStart, build/test, CLI, concise package/mirror usage, cross-platform notes. |
-| [docs/grammar.ebnf](docs/grammar.ebnf) | Formal grammar appendix; where the parser and this document disagree, code wins and this document is corrected. |
-| [docs/archive/](docs/archive/) | Old architecture/spec/roadmap documents; historical reference only, unmaintained. |
+| `framework.md` / `framework.zh-CN.md` | Authoritative framework, language, reflection, compiler, standard-library design/status, package protocol and backend mapping (this document). |
+| `readme.md` / `readme.zh-CN.md` | QuickStart, build/test, CLI, tutorial examples and user-facing limitations only; normative rules live here. |
+| [docs/grammar.ebnf](docs/grammar.ebnf) | Formal grammar tracked from `libs/coord/src/lexer.cpp` and `parser.cpp`; where grammar and parser disagree, the parser wins and the grammar is corrected. |
+
+The former `docs/archive/` tree has been removed; no separate historical archive is maintained.
 
 ## 2 Type Universe
 
@@ -115,12 +117,27 @@ Common confusion: `description` is **data** (read-only snapshot); `descriptor` i
 
 - Integers: `integer` (64-bit signed by default); `@Unsigned` maps to unsigned, `@Signed` explicit signed; `@Length(8/16/32/64/128)` selects width. There are no `int`, `i8`, `usize` aliases.
 - Floating point: `float` is binary floating point (C++ `double`); explicit `f32`/`f64` widths are planned.
-- Fixed point: `fix` stores one signed 8/16/32/64/128-bit raw integer with compile-time `@Length(64) @Radix(10) @Power(0)` defaults. `@Power` on an `integer` or `float` declaration promotes it to `fix`; `@Radix` alone does not. There is no `decimal` type or alias.
+- Fixed point: `fix` is the static fixed-point representation; its raw width, scale radix and exponent use the general numeric annotations in §2.2.1. `@Power` on `integer` or `float` promotes it to `fix`; `@Radix` alone does not. There is no `decimal` type or alias.
 - Text: `char` (32-bit Unicode scalar, not a byte), `string` (immutable UTF-8 byte sequence, runtime).
 - Others: `bool`, `void`, `record`/`Record`; planned: `Result<T, Error>`, `Expect<T, Error>`, `Error`, `@Unique`/`@Share` ownership annotations, `T[N]`, `Array<T>` and views.
 - Standard-library PascalCase names (`Integer`, `String`, `Character`, `Boolean`, `Float`, `Fix`, `Record`) resolve to the same `Type*` as their lowercase keyword; diagnostics and reflection use the canonical name.
 
-`fix` fixed-point rules: the backend representation is `coord_rt::Fix<Power, Radix, Length>` with a single signed 8/16/32/64/128-bit `raw` field and no runtime scale. The invariant is `raw = semantic × radix^power`, so `semantic = raw / radix^power`. Defaults are `@Length(64) @Radix(10) @Power(0)`; `@Power(0)` on `integer`/`float` still promotes to `fix` (with no scaling). Fractional literals default to `float`; a literal assigned to `fix` requires an explicit `@Power` (`E2103`) and is encoded exactly into the raw integer at compile time, rounding half away from zero when it has more fractional digits than the target scale. A `@Length(128)` literal is encoded into a signed 128-bit raw (up to 39 significant decimal digits) and reports `E2105` when it does not fit; the compiler carries portable 128/256-bit intermediates for that encoding. `print` renders the semantic value in the type's radix (2–36) and drops meaningless trailing zero digits. Fix-to-fix conversions are driven by the **target type annotation**: `@Power(4) fix fine = price;` widens power, `@Radix(2) @Power(4) fix q = price;` changes radix, and `@Length(16) ...` widens/narrows the raw width; the same target rule applies to field/parameter/return positions (`@Power(4) fix convert(fix x) { return x; }`). A copy between **identical canonical shapes** (`@Length`/`@Radix`/`@Power` all equal, default `fix` included) is a plain storage copy and needs no target annotation; only a shape change whose target carries no `@Length`/`@Radix`/`@Power` annotation reports `E2109`. That rule also covers array/queue literals and map values (a container element type cannot carry annotations, so a shape change there is `E2109` rather than an implicit conversion). There are deliberately no `toRadix`/`toScale` methods: `toInteger()`/`toFloat()` remain for crossing the fix storage boundary, while `float → fix` needs an explicit target conversion and never happens implicitly. All operators are enabled: `+ - * / %`, unary `-`, `++/--`, comparisons, `& | ^ ~ << >>`. Arithmetic and comparison are semantic: `+`/`-` align to the finer power and result in `max(len1,len2)+1` (bucketized to 8/16/32/64; a 128-bit operand widens the result to 128), `*` adds powers and results in `len1+len2`, `/` uses natural `power = max(power1,power2)` and its result power can be overridden by an explicit target annotation, and `%` aligns first with the sign following the dividend. Bitwise operators and shifts operate on `raw` and require identical radix/power/length (`E2111`); shifts mask/keep the storage width. Overflow, division by zero and out-of-range conversions are checked and abort with a `fix ...` diagnostic instead of wrapping. Length result-width widening is implemented for 8/16/32/64/128; when a `*` or `/` result is assigned to an explicitly annotated target, wider intermediates are used (64×64→128 for the old widths and a portable 256-bit intermediate for 128×128) so a narrower target scale can be produced without truncation. The `@Length(128)` raw is a signed two's-complement 128-bit integer: the backend uses a custom two-limb `coord_rt::UInt128` bit pattern with signed helpers, `__int128` on GCC/Clang for the 64×64→128 primitive and `_mul128` on 64-bit MSVC (portable 32-bit split fallback elsewhere), with no non-standard library dependency. The static `@Power` scale constant must still fit a signed 64-bit integer, so a radix-10 `@Power(20)` remains `E2102` even at `@Length(128)`.
+#### 2.2.1 Numeric Representation Annotations
+
+`@Length`, `@Radix`, `@Signed`, `@Unsigned` and `@Power` are **general numeric representation annotations**, not fix-only. They are `@Target(type)` annotations and apply to the numeric type in local/field/parameter/return positions.
+
+| Annotation | `integer` | `float` | `fix` |
+| --- | --- | --- | --- |
+| `@Length(N)` | storage width 8/16/32/64/128 | storage width 32/64 | raw width 8/16/32/64/128 |
+| `@Radix(R)` | literal/print base 2–36 | literal/print base 2–36 | scale radix and print base 2–36 |
+| `@Signed` / `@Unsigned` | numeric signedness | numeric signedness | signed raw representation |
+| `@Power(P)` | promotes to `fix` with scale exponent `P` | promotes to `fix` with scale exponent `P` | scale exponent |
+
+- `@Power` is the only annotation that promotes an `integer` or `float` declaration to `fix`; `@Radix` alone does not promote.
+- Defaults on a plain `fix` type are `@Length(64) @Radix(10) @Power(0)`.
+- `@Length` outside 8/16/32/64/128 (integer/fix) or 32/64 (float), `@Radix < 2`, and non-integer `@Power` arguments report `E2056`/`E2100`/`E2106` as applicable.
+
+Using the numeric representation semantics in §2.2.1, `fix` adds the following fixed-point rules: the backend representation is `coord_rt::Fix<Power, Radix, Length>` with a single signed raw field and no runtime scale. The invariant is `raw = semantic × radix^power`, so `semantic = raw / radix^power`. Fractional literals default to `float`; a literal assigned to `fix` requires an explicit `@Power` (`E2103`) and is encoded exactly into the raw integer at compile time, rounding half away from zero when it has more fractional digits than the target scale. A `@Length(128)` literal is encoded into a signed 128-bit raw (up to 39 significant decimal digits) and reports `E2105` when it does not fit; the compiler carries portable 128/256-bit intermediates for that encoding. `print` renders the semantic value in the type's radix (2–36) and drops meaningless trailing zero digits. Fix-to-fix conversions are driven by the **target type annotation**: `@Power(4) fix fine = price;` widens power, `@Radix(2) @Power(4) fix q = price;` changes radix, and `@Length(16) ...` widens/narrows the raw width; the same target rule applies to field/parameter/return positions (`@Power(4) fix convert(fix x) { return x; }`). A copy between **identical canonical shapes** (`@Length`/`@Radix`/`@Power` all equal, default `fix` included) is a plain storage copy and needs no target annotation; only a shape change whose target carries no `@Length`/`@Radix`/`@Power` annotation reports `E2109`. That rule also covers array/queue literals and map values (a container element type cannot carry annotations, so a shape change there is `E2109` rather than an implicit conversion). There are deliberately no `toRadix`/`toScale` methods: `toInteger()`/`toFloat()` remain for crossing the fix storage boundary, while `float → fix` needs an explicit target conversion and never happens implicitly. All operators are enabled: `+ - * / %`, unary `-`, `++/--`, comparisons, `& | ^ ~ << >>`. Arithmetic and comparison are semantic: `+`/`-` align to the finer power and result in `max(len1,len2)+1` (bucketized to 8/16/32/64; a 128-bit operand widens the result to 128), `*` adds powers and results in `len1+len2`, `/` uses natural `power = max(power1,power2)` and its result power can be overridden by an explicit target annotation, and `%` aligns first with the sign following the dividend. Bitwise operators and shifts operate on `raw` and require identical radix/power/length (`E2111`); shifts mask/keep the storage width. Overflow, division by zero and out-of-range conversions are checked and abort with a `fix ...` diagnostic instead of wrapping. Length result-width widening is implemented for 8/16/32/64/128; when a `*` or `/` result is assigned to an explicitly annotated target, wider intermediates are used (64×64→128 for the old widths and a portable 256-bit intermediate for 128×128) so a narrower target scale can be produced without truncation. The `@Length(128)` raw is a signed two's-complement 128-bit integer: the backend uses a custom two-limb `coord_rt::UInt128` bit pattern with signed helpers, `__int128` on GCC/Clang for the 64×64→128 primitive and `_mul128` on 64-bit MSVC (portable 32-bit split fallback elsewhere), with no non-standard library dependency. The static `@Power` scale constant must still fit a signed 64-bit integer, so a radix-10 `@Power(20)` remains `E2102` even at `@Length(128)`.
 
 ### 2.3 Subtyping and Assignability
 
@@ -261,7 +278,7 @@ public:
 - Constructors and destructors cannot fail; failure semantics require a `Result`-returning factory (⏳).
 - Initialization forms: `A a{}` is per-field aggregate initialization (requires an aggregate class, else `E2049`); `A a()` calls a constructor; `A a = b` uses an accessible single-argument converting constructor; `A a = { ... }` with typed/named entries selects a `@Constructure` constructor (§4.3.1, §4.8.2).
 - `@Constructure` is a `@Target(constructor)` annotation and may mark only a constructor of the target class. The marked constructor participates in typed/named brace construction; the constructor body remains user-defined and is responsible for the actual conversion. Ordinary positional `Type{1, 2}` construction remains available alongside it.
-- `@Radix` accepts any integer `>= 2` (`0`, `1` and negatives report `E2100`). On `integer` declarations it only changes the **spelling of generated C++ integer literals** for bases 2/8/16 (`@Radix(16) integer mask = 255;` emits `static_cast<std::int64_t>(0XFF)`, base 2 emits `0B...`, base 8 emits a C++ octal literal such as `0100`); other bases fall back to decimal spelling, and runtime `print` of an integer is unchanged. On `fix` it selects the raw scaling base (`raw = semantic × radix^power`) and the `print` base; printing supports radixes 2–36 and reports `E2107` outside that range. `@Radix` alone does not promote `integer`/`float` to `fix`.
+- `@Radix` accepts any integer `>= 2` (`0`, `1` and negatives report `E2100`). It selects the literal/print base 2–36 for `integer` and `float` (C++ literal spelling uses bases 2/8/16 where supported), and on `fix` it selects the raw scaling base (`raw = semantic × radix^power`) and print base; printing outside 2–36 reports `E2107`. `@Radix` alone does not promote `integer`/`float` to `fix`.
 
 #### 4.2.2 Interfaces
 
@@ -318,10 +335,10 @@ class Service {
 - Annotation declarations may take parameters and implement `AnnotationProcessor`; a single `override void process(Description target)` runs at compile time and receives the target `description`.
 - Read-only, append-only (full rules in §4.7): application never overwrites/replaces/modifies earlier annotations and never modifies the target's structure; a processor may only emit new standalone declarations. By default the same annotation type appears once per target; `@Repeatable` permits repetition.
 - Annotations exist only at compile time by default and cannot be runtime field/parameter types (`E2009`); only `@Retention` materializes a runtime read-only metadata table and generation logic. Processors may call the single directive primitive `line(file, line)` to set the generated C++ `#line` mapping.
-- Built-in annotation names (recognized by the compiler; users cannot redefine them): `@Result`, `@Expect`, `@Invocation`, `@Proxy`, `@Get`, `@Set`, `@Destructure`, `@Construct`, `@Constructure`, `@Has`, `@Delete`, `@Keys`, `@Describe`, `@Call`, `@Copy`, `@Native`, `@FunctionalInterface` (deprecated), `@Unique`, `@Share`, `@Weak`, `@Optional`, `@Signed`, `@Unsigned`, `@Length`, `@Radix`, `@Power`, `@Lock`, `@ReadOnly`, `@Unsafe`, `@Safe`, `@Test`, `@Bench`. `@Wrap` is deferred and no longer declared; `@Processor` has been removed.
+- Built-in annotation names (recognized by the compiler; users cannot redefine them): `@Result`, `@Expect`, `@Invocation`, `@Proxy`, `@Get`, `@Set`, `@Destructure`, `@Construct`, `@Constructure`, `@Has`, `@Delete`, `@Keys`, `@Describe`, `@Call`, `@Copy`, `@Native`, `@Unique`, `@Share`, `@Weak`, `@Optional`, `@Signed`, `@Unsigned`, `@Length`, `@Radix`, `@Power`, `@Lock`, `@ReadOnly`, `@Unsafe`, `@Safe`, `@Test`, `@Bench`. `@Wrap` is deferred and no longer declared; `@Processor` has been removed. `@FunctionalInterface` has been removed; migrate callable interfaces to `operator()` (🚧 Lambda module) and pass lambdas as function values.
 - **Target correction**: `@Optional`, `@Unique`, `@Share`, `@Weak`, `@Signed`, `@Unsigned`, `@Length`, `@Radix` and `@Power` are `@Target(type)` annotations; they attach to type expressions at local/field/parameter/return positions, not to the declaration itself. `@Constructure` is `@Target(constructor)`. `@Native` applies to classes and free functions; members of an `@Native` class are implicitly native and must not carry `@Native` (explicit `@Native` on a method reports `E2113`). All other annotations keep their declaration targets.
 - **Layering**: only six meta-annotations are built into C++; all other annotations are ordinary Coo declarations in `lib/standard/annotations.coo`, organised by section (Meta / Processor interfaces / Proxy traps / Value protocols / Ownership-representation / Scope-capability / Native / Tooling). The compiler retains only name-keyed semantic hooks (e.g. `@Result` return wrapping, `@Unsigned` storage mapping) and does not maintain a second built-in table. `Descriptor`/`Reflection` are ordinary classes in that file; `Description`/`Reflector<T>` are compiler-special.
-- `@Native(file: string, abi: "c" | "c++" = "c", symbol: string = declaration name)`: annotates a body-less function or body-less class; it declares only the header and ABI. Compiler, target, flags and link inputs come from the project manifest `[build]`/`[toolchain.<target>]`/`[native]` tables; `coorc` generates and compiles an `extern "C"` bridge with the configured `cxx` and links the declared native objects/libraries (see §7.4). The old `@Native("symbol")` form is rejected with `E2114`. No runtime FFI/dlopen; the declaration introduces no Scope and does not participate in runtime reflection.
+- `@Native(file: string, abi: "c" | "c++" = "c", symbol: string = declaration name)`: annotates a body-less function or body-less class; it declares only the header and ABI. `symbol` is function-only; a native class requires `abi: "c++"` and cannot carry `symbol`. Compiler, target, flags and link inputs come from the project manifest `[build]`/`[toolchain.<target>]`/`[native]` tables; `coorc` generates and compiles an `extern "C"` bridge with the configured `cxx` and links the declared native objects/libraries (see §7.4). The old `@Native("symbol")` form is rejected with `E2114`. No runtime FFI/dlopen; the declaration introduces no Scope and does not participate in runtime reflection.
 
 #### 4.2.5 Functions, Operators and Constants
 
@@ -419,19 +436,19 @@ integer main() {
 - The user constructor body performs the actual conversion. Typed/named construction coexists with ordinary positional `Type{1, 2}` construction and with aggregate object literals (`{x: 1}`).
 - If the target class is a `@Proxy`, the handler's `@Construct` hook runs before the constructor call; see §4.8.2.
 
-#### 4.3.2 Lambda
+#### 4.3.2 Lambda and Function Values
 
-Lambda **target types** follow Java (functional interface, function pointer, method reference), while **capture behavior** follows C++: an explicit capture list follows C++ rules; with an omitted capture list, referenced outer locals are copied by value and mutations affect the copy. Parameters and return types are explicit.
+Lambdas are **function values**. The canonical type is the function type `(A, B) -> R`; no nominal interface-object target is part of the design. A callable interface, once the Lambda module lands, exposes exactly one `operator()` and is used through that operator (🚧).
 
 ```coo
 integer n = 1;
 
-// Omitted capture list: n is copied; the mutation affects the copy only.
-Function<integer, integer> copy =
+// Omitted capture list: n is copied; mutation affects the copy only.
+(integer) -> integer copy =
     (const integer& x): integer -> { n = n + 1; return x + n; };
 
 // Explicit by-reference capture: mutates the original.
-Function<integer, integer> original =
+(integer) -> integer original =
     [&n](const integer& x): integer -> { n = n + 1; return x + n; };
 ```
 
@@ -441,26 +458,17 @@ Full form:
 [ capture-list ]? ( parameters ): return-type -> ( expression | { statements } )
 ```
 
-| Rule | Semantics |
-| --- | --- |
-| Syntax | `[captures](const integer& x): integer -> { ... }`; the capture list is optional; the parameter list requires parentheses; the return type sits after `:` and before `->` |
-| Omitted captures | Referenced outer locals are **copied by value**; the copy is mutable inside the lambda and the original is unchanged. `this` is copied by value (a pointer), so field mutations still affect the original object |
-| Explicit captures | Same as C++: `[]`, `[=]`, `[&]`, `[x]`/`[&x]`, `[this]`, `[=, &x]`/`[&, x]` |
-| Explicit by-value | Copies captured via `[=]`/`[x]` are read-only inside the lambda (assignment/`++`/`--` reports `E2088`); no `mutable` keyword in source (v0) |
-| Explicit by-reference | Mutates the original; a by-reference lambda must not escape the Scope that declares it: returning it, storing it in a field/container literal, or assigning it to a variable in an outer scope reports `E2039` |
-| Unlisted names | With an explicit capture list, unlisted outer names are invisible, as in C++ (`E2087`) |
-| Capture validation | Unknown names, duplicate captures, a misplaced/repeated default capture and mixing `[=, x]`/`[&, &x]` report `E2087` |
-| Target type | Functional interface (exactly one abstract method), function pointer `(A,B) -> R`, method reference, or an equivalent callable type |
-| Functional-interface target | Deprecated `@FunctionalInterface` interfaces with exactly one abstract method lower to the equivalent function type: `Function<A,R>` behaves as `(A) -> R`, `Consumer<T>` as `(T) -> void`, `Predicate<T>` as `(T) -> boolean`, `Supplier<T>` as `() -> T` and `BiFunction<A,B,R>` as `(A,B) -> R`. Lambdas and method references are checked against the abstract method, and `.apply`/`.accept`/`.test`/`.get` invoke the value. `lib/standard/utility.coo` declares these interfaces. Nominal interface values holding a class implementation are ⏳: a class cannot `implements` a functional interface in v0 (`E2004`), and wrong type-argument counts report `E2089` |
-| Function-pointer target | Must capture nothing: `[]`, or an omitted capture list that references no outer names |
-| Type checking | Parameter and return types must be compatible with the target; returns may be covariant; specific rules follow generic assignability |
-| `this` | Copied by value when captures are omitted; with an explicit list, `[this]` is required to access members; capturing `this` prevents conversion to a function pointer |
-| Shadowing | Lambda parameters **may** shadow outer locals/parameters; the compiler warns `W0004` (detection ⏳); the outer name is invisible inside the lambda |
-| Return | Block bodies use `return`; expression bodies return automatically; both must be compatible with the declared return type |
-| Generics | A lambda declares no type parameters of its own; the target type instantiation determines parameters/returns |
-| Method references | `Type::staticMethod` produces a function value; `object::method` produces a bound function value that borrows the receiver and follows the same escape rules as a by-reference closure (`E2039`). Unbound `Type::instanceMethod` references are ⏳. |
+- **Target type**: a function type `(A) -> R` (or `(A, B) -> R`); method references also produce function values. Interfaces are not callable targets in the design.
+- **Omitted captures**: referenced outer locals are copied by value; the copy is mutable inside the lambda and the original is unchanged. `this` is copied as a pointer.
+- **Explicit captures**: `[]`, `[=]`, `[&]`, `[x]`/`[&x]`, `[this]`, `[=, &x]`/`[&, x]` with C++ rules; explicit by-value captures are read-only (`E2088`), explicit captures are validated (`E2087`).
+- **By-reference captures** must not escape the declaring Scope: returning, storing in fields/containers or assigning to an outer-scope variable reports `E2039`.
+- **Function-pointer values** must capture nothing; a capture-free lambda or function reference may convert to a function-pointer representation.
+- **Method references**: `Type::staticMethod` produces a function value; `object::method` produces a bound function value whose receiver follows the by-reference escape rules. Unbound instance references are ⏳.
+- **Shadowing**: lambda parameters may shadow outer locals/parameters (`W0004`); the outer name is invisible inside the lambda.
+- **Return**: block bodies use `return`; expression bodies return automatically; both must match the declared function result type.
+- **Callable interfaces**: the design uses a single `operator()` method when the Lambda module is implemented; callable interfaces are not marked or discovered by an annotation.
 
-A lambda "value" is usable only through a target type: assign, pass, return or store only after the target is fixed. A functional-interface target lowers to its equivalent function type; a function-pointer target produces a capture-free thunk; method references behave the same way. `utility` provides `Function<T,R>`, `Consumer<T>`, `Supplier<T>`, `Predicate<T>`, `BiFunction<A,B,R>`. `@FunctionalInterface` is a deprecated compatibility marker that selects the single abstract method; it is not a nominal-object promise. Lambdas lower to function values (a capture-free function pointer/thunk or a generated closure as needed); no nominal interface object is synthesized and no runtime metadata is added. Status: 🚧. Implemented: function-type targets `(A) -> R`, expression and block bodies, implicit and explicit capture lists (`[]`, `[=]`, `[&]`, `[x]`, `[&x]`, `[this]`), omitted captures as mutable by-value copies, capture-list validation (`E2087`), read-only explicit by-value captures (`E2088`), by-reference escape checking for returns/fields/container literals/outer-scope variables (`E2039`), variable initialization/assignment, calls, lambda arguments and returns, static (`Type::method`) and bound (`object::method`) method references, calls through function-typed fields and chained calls on returned function values, and `@FunctionalInterface` targets lowered to function values with generic substitution and interface-method call forms (`Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` from `lib/standard/utility.coo`). Not yet: nominal functional-interface values/class implementations, unbound instance method references, function-pointer thunk conversion, cross-thread closure escape, `this` lifetime enforcement.
+Status: **🚧**. The parser currently accepts function-type targets, expression/block bodies, capture lists, capture validation (`E2087`/`E2088`), by-reference escape checks (`E2039`), assignment/arguments/returns, static and bound method references, and calls through function-typed fields; callable-interface `operator()` lowering, unbound instance references, function-pointer thunks and full Lambda-module semantics are not complete.
 
 #### 4.3.3 Control Flow and Pattern Matching
 
@@ -1140,7 +1148,7 @@ struct ClassDescriptor {
 
 ### 5.8 Documentation
 
-`lib/standard/documentation.coo` provides ordinary `Document` (summary, structured tags, raw text) and `DocumentTag` (name, subject, text). Documents attach to `Description`/`Member`/`FunctionMember`/`Module`; the reflection model class is `FunctionMember` so that `Function` can name the functional interface; the runtime Descriptor keeps a read-only Document reference; the compiler only extracts `///` and `/** */` and builds the Document, while parsing/rendering stays in the standard library; the existing `@parameter/@return/@template` validation remains.
+`lib/standard/documentation.coo` is a **design draft and is not loaded by the compiler**. It sketches `Document` (summary, structured tags, raw text) and `DocumentTag` (name, subject, text), but the bootstrap currently only extracts `///` and `/** */` and validates `@parameter`/`@param`, `@return` and `@template` (`E2076`); no `Document` type or runtime descriptor reference is available yet. The attachment/rendering model below is design-only until the file enters the standard-library import set.
 
 ### 5.9 Confirmed Decisions and Open Questions
 
@@ -1268,11 +1276,11 @@ The front end does not depend on package management; scanners do not depend on t
 | Linux (WSL Ubuntu 26.04, g++ 15.2) | 214 | 214 | full suite, `ctest -j 8` |
 | macOS | 214 expected | not run | same registration; no macOS host in this environment |
 
-The unit test covers lexing/parsing, Scope/RAII, compile-time evaluation, codegen, Optional/ownership, proxy/reflection, fix, lambda/match, threads/synchronization/copy, annotation processors, package graph, outline/hint and `@Test`. The e2e suite covers examples and fixtures: compile/run, negative cases, determinism/incremental builds, package manager/mirror/registry, annotation processors, Optional/`@Constructure`/`@Destructure`, block retention, fix/radix, lambda/match, function values/functional interfaces, thread/mutex/atomic/lock, copy, Safe/Unsafe and the native bridge. The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
+The unit test covers lexing/parsing, Scope/RAII, compile-time evaluation, codegen, Optional/ownership, proxy/reflection, fix, lambda/match, threads/synchronization/copy, annotation processors, package graph, outline/hint and `@Test`. The e2e suite covers examples and fixtures: compile/run, negative cases, determinism/incremental builds, package manager/mirror/registry, annotation processors, Optional/`@Constructure`/`@Destructure`, block retention, fix/radix, lambda/match, function values, thread/mutex/atomic/lock, copy, Safe/Unsafe and the native bridge. The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
 
 ## 7 Standard Library Design
 
-> The standard library ships with the compiler. Public APIs are written in Coordination; native code appears only behind private `@Native` boundaries linked at compile time. Where this section conflicts with the implementation, language semantics defer to this specification and standard-library APIs defer to §7.
+> This section is the standard-library **design target**, not a complete implementation inventory. The current compiler bootstrap loads only `lib/standard/annotations.coo` and `lib/standard/utility.coo` (`libs/coord/src/driver.cpp:825-853`); the other modules below are design drafts and are not importable yet. Where this section conflicts with the implementation, the implementation wins and this section is corrected.
 
 ### 7.1 Goals and Constraints
 
@@ -1311,7 +1319,7 @@ import collection as c;     // qualified: c.Array<T>
 import string;              // string extensions and StringBuilder
 ```
 
-A module may span files internally, but `import collection;` sees the module's exported set. Standard library v0 implements each top-level module as one `.coo` (or one export facade), split later.
+This map is the design target. Only `lib/standard/annotations.coo` and `lib/standard/utility.coo` are currently loaded; `import collection;`, `import file;` and similar imports are not available until those modules exist and are added to the bootstrap. A module may span files internally, but `import collection;` is intended to see the module's exported set.
 
 ### 7.3 Prelude and Naming
 
@@ -1429,42 +1437,17 @@ libraries = ["m"]
 ### 7.5 Core Protocols (utility)
 
 ```coo
-interface Iterator<T> {
-    T? next();
-}
-
-interface Iterable<T> {
-    Iterator<T> iterator();
-}
-
-interface Hash {
-    integer hash() const;
-}
-
-interface Eq<T> {
-    bool equals(const T& other) const;
-}
-
-interface Ord<T> {
-    int compare(const T& other) const;   // <0, 0, >0
-}
-
-@FunctionalInterface
-interface Function<T, R> { R apply(T value); }
-@FunctionalInterface
-interface Consumer<T> { void accept(T value); }
-@FunctionalInterface
-interface Supplier<T> { T get(); }
-@FunctionalInterface
-interface Predicate<T> { bool test(T value); }
-@FunctionalInterface
-interface BiFunction<A, B, R> { R apply(A first, B second); }
+interface Iterator<T> { T? next(); }
+interface Iterable<T> { Iterator<T> iterator(); }
+interface Hash { integer hash() const; }
+interface Eq<T> { bool equals(const T& other) const; }
+interface Ord<T> { int compare(const T& other) const; }   // <0, 0, >0
 ```
 
-- `Function`/`Consumer`/`Supplier`/`Predicate`/`BiFunction` are `@FunctionalInterface` declarations in `lib/standard/utility.coo`. In v0 they lower to equivalent function types (generic arguments substituted); `.apply`/`.accept`/`.test`/`.get` are the call forms. Nominal interface values and class implementations are not supported (`E2004`); wrong type-argument counts or a non-single abstract method report `E2089`. `@FunctionalInterface` is a deprecated compatibility marker used by these declarations.
 - `T?` means `T | void`; `next()` returning `void` signals the end.
 - `for x in xs` expands to `iterator()` + `next()`, without requiring an index.
-- `Hash`/`Eq` serve `UnorderedMap`/`UnorderedSet`; `Ord` serves `OrderedMap`/`OrderedSet` and sorting. User classes implement these explicitly in v0; annotation derivation comes later.
+- `Hash`/`Eq` serve `UnorderedMap`/`UnorderedSet`; `Ord` serves `OrderedMap`/`OrderedSet` and sorting. User classes implement these explicitly in v0.
+- Callable values are function types `(A) -> R`; callable interfaces will expose one `operator()` when the Lambda module lands (🚧). Interfaces are not annotation-marked callable targets.
 
 ### 7.6 Collections (collection)
 
@@ -1660,11 +1643,10 @@ interface Error {
 
 ### 7.16 Implementation and Release
 
-- Sources: `lib/utility/`, `lib/memory/`, `lib/collection/`, `lib/string/`, `lib/io/`, `lib/file/`, `lib/atomic/`, `lib/thread/`, `lib/reflection/`, `lib/time/`, `lib/mathematics/`, `lib/random/`, `lib/test/`.
-- Public layers are pure Coo; platform-specific pieces declare `@Native` in `lib/*/internal/*.coo`.
-- The compiler resolves modules from the toolchain `lib/` and project dependencies according to `import`, generating/caching `.coox`.
-- The library shares the compiler version; `.coox` records version and public API digest; library tests live in `lib/*/tests/*.coo` using `@Test` and `coorc test`.
-- Releases contain sources and precompiled `.coox`; no independent package-manager version.
+- Current sources: `lib/standard/annotations.coo` and `lib/standard/utility.coo`, loaded by the bootstrap. `lib/standard/documentation.coo` exists but is not loaded.
+- The `lib/utility/`, `lib/memory/`, `lib/collection/`, `lib/string/`, `lib/io/`, `lib/file/`, `lib/atomic/`, `lib/thread/`, `lib/reflection/`, `lib/time/`, `lib/mathematics/`, `lib/random/` and `lib/test/` layout is the design target, not a current source tree.
+- The design assumes public layers are pure Coo; platform-specific pieces declare `@Native` in `lib/*/internal/*.coo` once those modules exist.
+- `.coox` caching, library tests in `lib/*/tests/*.coo`, versioned public API digests and precompiled release artifacts are design targets; the current bootstrap only loads the two sources above.
 
 ### 7.17 Milestones and Open Questions
 
@@ -2115,7 +2097,6 @@ Generated C++ uses standard C++20 plus a conditional `<windows.h>`; platform dif
 | `E2077` | `match` is not exhaustive (missing enum variant/boolean value, or no `_` for another scalar), the value type is unsupported, a pattern does not fit the value, a range is not on integer/character, or a binding/or-pattern is illegal |
 | `E2087` | Invalid lambda capture: unknown identifier, duplicate capture, misplaced/repeated default capture, mixed default mode, unlisted outer name with an explicit list, implicit `this` without `[this]` |
 | `E2088` | Assignment or `++`/`--` to an explicit by-value lambda capture (read-only in v0) |
-| `E2089` | Invalid `@FunctionalInterface`: not exactly one abstract method, or a functional-interface type reference with the wrong number of type arguments |
 | `E2090` | Thread/ScopedThread rules: bad entry call/signature, by-reference/`this` capture, call-scoped function value, copying/assigning a thread value, or `hardwareConcurrency()` with arguments |
 | `E2091` | Mutex values cannot be copied or assigned |
 | `E2092` | `ScopedLock`/`Atomic` values cannot be copied or assigned, or a `ScopedLock` is not initialized with `ScopedLock(mutex)` |
@@ -2171,7 +2152,7 @@ Diagnostic format: `path:line:col: error[E2030]: message`, followed by the sourc
 | `fix` + `@Power`/`@Radix`/`@Length` | ✅ | Static 8/16/32/64/128-bit raw literals, print, comparisons, same-shape copies and target-annotation conversions, `+ - * / %`, unary `-`, `++/--`, bitwise/shift, length-result widening and overflow checks; `@Length(128)` literals/arithmetic with portable 128/256-bit intermediates are implemented, while a static `@Power` scale beyond a signed 64-bit raw (`E2102`) and implicit cross-radix copies without an annotated target (`E2109`) remain rejected |
 | `Result` / `Expect` | ✅ | Type-argument validation, distinct type, consumption checks |
 | Annotation processors, `line`, proxy, five reflection layers | ✅/🚧 | `AnnotationProcessor.process` + `line`, proxy class/annotation/runtime, `@Invocation`, `Reflector` work; full descriptor/runtime reflection continues |
-| `.coox`, multi-module linking, standard library | 🚧 | Relative imports, project dirs, `.coox`, outline/hint, `@Test`, `coorc deps`, containers work; remaining library APIs pending |
+| `.coox`, multi-module linking, standard library | 🚧 | Relative imports, project dirs, `.coox`, outline/hint and containers work; only `annotations.coo` and `utility.coo` are loaded by the bootstrap, while the rest of the standard-library design is not importable yet |
 | Package manager and mirror manager | ✅ | Manifests, backtracking, lockfile, vendor, file/HTTP registries, SHA-256, `[trust]` checksum/HTTPS policy, offline, mirror failover, pack/publish |
 | Cross-platform toolchain (Windows/macOS/Linux/FreeBSD) | ✅ | Host discovery, argv spawn, UTF-8 paths, CMake presets; Linux/macOS verified with g++ |
 | Cross-platform generated programs (wmain/UTF-8 console/platform builtins) | ✅ | `coord_e2e_platform` covers OS/path/file/env builtins |
@@ -2192,10 +2173,10 @@ Diagnostic format: `path:line:col: error[E2030]: message`, followed by the sourc
 | Cross-compilation `--target`/`--sysroot` | 🚧 | Native projects are target/toolchain driven (`[build].target` + `[toolchain.<target>]`), a foreign target emits main + bridge compile-only (`coord_e2e_native_cross`); linking a foreign target needs an installed cross toolchain, and MSVC cannot cross-compile |
 | workspace / features / signatures / git dependencies | ⏳ | Workspace `members` parsed only |
 | Thread model | 🚧 | Built-in move-only `Thread` from `() -> void` with `join()`/`detach()`/`joinable()`/`hardwareConcurrency()` and cross-thread capture checks (`E2090`); built-in non-copyable `Mutex` with manual `lock()`/`unlock()`/`tryLock()` (`E2091`, `coord_e2e_mutex`), RAII `ScopedLock` (`E2092`), `ScopedThread`/`std::jthread` auto-join (`coord_e2e_scoped_thread`), seq_cst `Atomic` with `load`/`store`/`fetchAdd`/`fetchSub`/`exchange`/`compareExchange` (`coord_e2e_atomic`, `coord_e2e_atomic_ops`), and `@Lock(Exclusive, mutex, [captures])` block annotations with value/mutable/const captures, `@ReadOnly` method effects and write-set checks (`E2094`, `coord_e2e_lock_capture`), explicit `@Copy(Deep|Shallow)` with generated deep copies for `@Unique` trees (`E2095`, `coord_e2e_copy_deep`); data-race safety, atomics of other types, condition variables, scoped threads and non-local positions ⏳ |
-| lambda / `if` expressions / full pattern matching | 🚧 | Lambda subset: function-type target, expression/block body, implicit/explicit captures (`E2087` capture validation, `E2088` read-only by-value), by-reference escape checks (`E2039`), assignment/argument/return, static/bound method references and chained calls; `@FunctionalInterface` targets lower to function values with generic substitution (`E2089`, `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` in `lib/standard/utility.coo`, tests `coord_e2e_functional_interface*`); nominal functional-interface values/class implementations, unbound instance refs, function-pointer thunks and cross-thread escape ⏳; tests `coord_e2e_lambda*`, `coord_e2e_method_ref*`. `if` expressions with expression branches work (`coord_e2e_if_expression`; block branches ⏳). `match` supports constants/or/ranges/bindings/guards with enum/boolean/scalar exhaustiveness (`coord_e2e_match_patterns`, negatives `_missing`/`_no_wildcard`/`_bad_pattern`); type patterns and class destructuring ⏳ |
+| lambda / function values / `if` expressions | 🚧 | Target model: lambdas are function values typed `(A) -> R`; callable interfaces use `operator()` and are not annotation-marked. Parser subset currently accepts function-type targets, expression/block bodies, capture lists/validation (`E2087`/`E2088`), by-reference escape checks (`E2039`), assignment/arguments/returns, static/bound method references and calls through function-typed fields; callable-interface `operator()` lowering, unbound instance references and function-pointer thunks are not complete. `if` expressions with expression branches work (`coord_e2e_if_expression`; block branches ⏳). `match` supports constants/or/ranges/bindings/guards with enum/boolean/scalar exhaustiveness (`coord_e2e_match_patterns`); type patterns and class destructuring ⏳ |
 | Safe/Unsafe | 🚧 | `@Safe`/`@Unsafe` scopes with downward propagation and block override (`E2096`); v0 enforces raw-pointer dereference and FFI/`@Native` calls, pointer arithmetic/unsafe casts documented but not yet fully enforced |
 | `@Native` / FFI bridge | ✅/🚧 | `@Native(file:, abi:, symbol:)` declares only header/ABI; `[build].target`, `[toolchain.<target>].cc/cxx` (+ `sysroot`/`cflags`/`cxxflags`/`ldflags`) and `[native].include/objects/libraries` drive the build. Generated `extern "C"` bridge: C function wrappers, `string` as `const char*`, and C++ classes through a move-only opaque handle (`new (std::nothrow)`/`delete`, ctor/dtor/method wrappers, no `try`/`catch`). Fail closed with `E2112`–`E2119`; legacy `@Native("symbol")` is `E2114`. Tests: `coord_e2e_native_config`, `coord_e2e_native_annotations`, `coord_e2e_native_c_functions`, `coord_e2e_native_cpp_class`, `coord_e2e_native_cross`, `coord_e2e_native_unsafe`. Leftovers: per-object target verification, Result-proxy error mapping, callbacks, cross-toolchain linking verification, single-file native use |
-| `@Copy` / `@Wrap` / `@FunctionalInterface` semantics | 🚧 | `@Copy(Deep/Shallow)` implemented; `@Wrap` deferred (declaration removed); `@FunctionalInterface` deprecated until structured `operator()` lands in the Lambda module; `AnnotationProcessor` hierarchy implemented |
+| `@Copy` / `@Wrap` semantics | 🚧 | `@Copy(Deep/Shallow)` implemented; `@Wrap` deferred (declaration removed); `AnnotationProcessor` hierarchy implemented |
 | `is` / `new` / `delete` / `unsafe` / `extern` | ⏳ | Reserved, not implemented |
 | `operator` / `where` | 🚧 | Parseable; full semantics pending |
 | `T?` | ⏳ | Not parsed |
@@ -2254,65 +2235,9 @@ Open questions: ① final `description`/`descriptor` API names and members; proc
 
 ## 12 Appendices
 
-### 12.1 Grammar Summary
+### 12.1 Formal Grammar
 
-Below is the currently implemented subset (ISO/IEC 14977 EBNF style); the full grammar (including planned productions) is in [docs/grammar.ebnf](docs/grammar.ebnf). Planned productions are not implemented; the parser reports `E1101` or Sema reports `E2012`.
-
-```ebnf
-compilation-unit = [ "module" path ";" ], { import-decl }, { top-level-decl } ;
-import-decl      = "import", path, [ "as", identifier ],
-                   [ ".", "{", identifier, { ",", identifier }, "}" ], ";" ;
-top-level-decl   = { annotation-use }, [ "export" ],
-                   ( class-decl | interface-decl | annotation-decl
-                   | enum-decl | function-decl | const-decl ) ;
-
-class-decl       = [ "final" ], "class", identifier, [ generic-params ],
-                   [ "extends" type ], [ "implements" type, { ",", type } ],
-                   class-body, [ ";" ] ;
-class-body       = "{", { access-section | class-member }, "}" ;
-access-section   = ( "public" | "private" | "protected" ), ":" ;
-class-member     = { annotation-use },
-                   ( field-decl | method-decl | constructor-decl | destructor-decl ) ;
-field-decl       = [ "final" ], type, identifier, [ "=", expression ], ";" ;
-method-decl      = { "virtual" | "override" | "final" | "static" },
-                   type, identifier, [ generic-params ], "(", params, ")",
-                   [ "const" ], ( block | ";" ) ;
-constructor-decl = identifier, "(", params, ")",
-                   [ ":", initializer, { ",", initializer } ], block ;
-destructor-decl  = "~", identifier, "(", ")", block ;
-
-enum-decl        = "enumerate", identifier, [ "implements", type, { ",", type } ],
-                   "{", [ enum-variant, { ",", enum-variant }, [ "," ] ],
-                   [ ";", { method-decl } ], "}", [ ";" ] ;
-enum-variant     = { annotation-use }, identifier, [ "=", expression ] ;
-interface-decl   = "interface", identifier, [ generic-params ], "{", { method-decl }, "}" ;
-annotation-decl  = "annotation", identifier, [ generic-params ], [ "(", params, ")" ],
-                   ( ";" | "{", { method-decl }, "}" ) ;
-function-decl    = type, ( identifier | operator-name ), [ generic-params ],
-                   "(", params, ")", [ "where", constraint, { ",", constraint } ],
-                   ( block | ";" ) ;
-const-decl       = "const", [ type ], identifier, "=", expression, ";" ;
-
-generic-params   = "<", identifier, [ "extends", type ],
-                   { ",", identifier, [ "extends", type ] }, ">" ;
-params           = [ param, { ",", param } ] ;
-param            = type, identifier, [ "=", expression ] ;
-type             = [ "const" ], path, [ "<", type, { ",", type }, ">" ],
-                   { "&" | "*" | "[", expression, "]" } ;              (* T?: planned *)
-
-block            = "{", { statement }, "}" ;
-statement        = block | var-decl
-                 | "if", "(", expression, ")", statement, [ "else", statement ]
-                 | "while", "(", expression, ")", statement
-                 | "return", [ expression ], ";" | "break", ";" | "continue", ";"
-                 | "~", postfix-expression, ";"                        (* destruction declaration *)
-                 | expression, ";" ;
-var-decl         = [ "const" ], type, identifier, [ "=", expression ], ";" ;
-expression       = assignment | logical-or | ... ;                    (* C++ same-precedence subset *)
-
-annotation-use   = "@", path, [ "(", arguments, ")" ] ;
-(* planned: for / in, unsafe, match and full patterns (_, literal, path(...), p | p, p if e) *)
-```
+The formal grammar is maintained in [docs/grammar.ebnf](docs/grammar.ebnf) and tracks `libs/coord/src/lexer.cpp` and `libs/coord/src/parser.cpp`. There is no inline grammar summary; when this document and the grammar disagree, the parser is authoritative and the grammar is corrected.
 
 ### 12.2 Glossary
 
@@ -2338,16 +2263,4 @@ annotation-use   = "@", path, [ "(", arguments, ")" ] ;
 | `@Constructure` | `@Target(constructor)` marker enabling typed/named brace construction; type labels are optional |
 | `@Destructure` | Dual-form annotation: a `ProxyHandler` trap or a target-class method with reference outputs |
 | Block retention | `@Retention(Compile)` executes at compile time and is omitted by the backend; `@Retention(Runtime)` is emitted and runs normally |
-
-### 12.3 Documentation Map and Archive Policy
-
-- English framework: this document; Chinese framework: [framework.zh-CN.md](framework.zh-CN.md).
-- English QuickStart: [readme.md](readme.md); Chinese QuickStart: [readme.zh-CN.md](readme.zh-CN.md).
-- Formal grammar: [docs/grammar.ebnf](docs/grammar.ebnf).
-- Old architecture, spec, reflection, compiler, roadmap and implementation-plan documents under [docs/archive/](docs/archive/) are **historical archive only** and are no longer updated; this document wins on conflict. `docs/archive/index.md` is itself archived, and its links are only guaranteed within the archive.
-- Maintenance rule: language/framework/backend/package-protocol changes touch only the four main documents; `docs/grammar.ebnf` tracks the parser; the archive is never modified.
-
-
-
-
 

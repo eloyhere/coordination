@@ -5,8 +5,8 @@
 - 语言名：**Coordination**；源文件 `.coo`；模块接口 `.coox`。
 - 编译器：`coorc`；包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
 - 配套文档：[快速上手（中文）](readme.zh-CN.md)｜[README (English)](readme.md)｜[Framework (English)](framework.md)。
-- 形式文法：[docs/grammar.ebnf](docs/grammar.ebnf)。
-- 历史文档：[docs/archive/](docs/archive/) 仅为历史归档，**以本文为准**。
+- 形式文法：[docs/grammar.ebnf](docs/grammar.ebnf)，随 lexer/parser 同步。
+- 历史归档：已移除；本文是唯一来源。
 - 状态图例：✅ 已实现并有测试｜🚧 部分实现（进行中）｜⏳ 仅有规范/设计，未实现。
 
 ## 1 定位与原则
@@ -76,10 +76,11 @@ Coordination 把“编译期计算”当作一等能力，而不是外挂一个�
 
 | 文档 | 内容 |
 | --- | --- |
-| `framework.md` / `framework.zh-CN.md` | 框架、语言、反射、编译器、标准库摘要、包协议与后端映射（本文）。 |
-| `readme.md` / `readme.zh-CN.md` | QuickStart、构建/测试、CLI、包与镜像简明用法、跨平台说明。 |
-| [docs/grammar.ebnf](docs/grammar.ebnf) | 形式文法附录；解析器实现与本文冲突时以代码为准并回写本文。 |
-| [docs/archive/](docs/archive/) | 旧架构/规范/路线图，仅作历史参考，不再维护。 |
+| `framework.md` / `framework.zh-CN.md` | 权威框架、语言、反射、编译器、标准库设计/状态、包协议与后端映射（本文）。 |
+| `readme.md` / `readme.zh-CN.md` | 仅 QuickStart、构建/测试、CLI、教程示例与用户限制摘要；规范规则以本文为准。 |
+| [docs/grammar.ebnf](docs/grammar.ebnf) | 跟随 `libs/coord/src/lexer.cpp` 与 `parser.cpp` 的形式文法；文法与解析器冲突时以解析器为准并回写文法。 |
+
+原 `docs/archive/` 目录已删除，不再维护独立历史归档。
 
 ## 2 类型宇宙
 
@@ -115,12 +116,27 @@ Coordination 把“编译期计算”当作一等能力，而不是外挂一个�
 
 - 整数：`integer`（默认 64 位有符号）；`@Unsigned` 映射无符号，`@Signed` 显式有符号；`@Length(8/16/32/64/128)` 指定位宽，默认 64。没有 `int`、`i8`、`usize` 等别名。
 - 浮点：`float` 是二进制浮点数（C++ `double`）；`f32`/`f64` 为规划中的显式宽度写法。
-- 定点：`fix` 用一个有符号 8/16/32/64/128 位 raw 整数存储，编译期默认 `@Length(64) @Radix(10) @Power(0)`。`@Power` 作用于 `integer` 或 `float` 声明时提升为 `fix`；`@Radix` 单独不提升。不存在 `decimal` 类型或别名。
+- 定点：`fix` 是静态定点表示；raw 宽度、scale 基数与指数使用 §2.2.1 的通用数值注解。`@Power` 作用于 `integer` 或 `float` 声明时提升为 `fix`；`@Radix` 单独不提升。不存在 `decimal` 类型或别名。
 - 文本：`char`（32 位 Unicode 标量，不是字节）、`string`（不可变 UTF-8 字节序列，运行期）。
 - 其他：`bool`、`void`、`record`/`Record`；规划：`Result<T, Error>`、`Expect<T, Error>`、`Error`、`@Unique`/`@Share` 所有权注解、`T[N]`、`Array<T>` 及其视图。
 - 标准库风格的大写类型名（`Integer`、`String`、`Character`、`Boolean`、`Float`、`Fix`、`Record`）与对应小写关键字解析到同一个 `Type*`，诊断与反射使用规范名。
 
-`fix` 的定点规则：后端表示为 `coord_rt::Fix<Power, Radix, Length>`，只含一个有符号 8/16/32/64/128 位 `raw` 字段，没有运行期 scale。不变量为 `raw = semantic × radix^power`，即 `semantic = raw / radix^power`。默认 `@Length(64) @Radix(10) @Power(0)`；`@Power(0)` 作用于 `integer`/`float` 也会提升为 `fix`（无缩放）。小数字面量默认 `float`；赋给 `fix` 需要显式 `@Power`（`E2103`），并在编译期精确编码为 raw 整数；小数位超过目标 scale 时按 half away from zero 舍入。`@Length(128)` 字面量编码到有符号 128 位 raw（最多 39 位有效十进制数字），超出范围报 `E2105`，编译器为此携带可移植的 128/256 位中间值。`print` 按该类型的 radix（2–36）输出语义值并去掉无意义尾零。fix→fix 转换由**目标类型注解**驱动：`@Power(4) fix fine = price;` 改变 power，`@Radix(2) @Power(4) fix q = price;` 改变 radix，`@Length(16) ...` 改变 raw 宽度；字段/参数/返回值位置同样按目标类型注解转换（`@Power(4) fix convert(fix x) { return x; }`）。**canonical 形状完全相同**（`@Length`/`@Radix`/`@Power` 均相同，含默认 `fix`）的复制是普通 storage 复制，不需要目标注解；只有形状改变且目标没有 `@Length`/`@Radix`/`@Power` 注解时才报 `E2109`。该规则同样覆盖数组/队列字面量与 map value（容器元素类型无法携带注解，因此那里的形状改变是 `E2109` 而不是隐式转换）。故意不提供 `toRadix`/`toScale` 方法：`toInteger()`/`toFloat()` 仅用于跨 storage 边界，`float → fix` 需要显式目标转换，绝不隐式。所有运算符均启用：`+ - * / %`、一元 `-`、`++/--`、比较、`& | ^ ~ << >>`。算术与比较按语义：`+`/`-` 对齐到更细 power，结果长度 `max(len1,len2)+1`（按 8/16/32/64 分桶；含 128 位操作数时结果加宽到 128），`*` 的 power 相加、结果长度 `len1+len2`，`/` 自然 `power = max(power1,power2)` 且可由显式目标注解覆盖，`%` 先对齐、符号跟随被除数。位运算/移位按 `raw`，要求相同 radix/power/length（`E2111`）；移位在 storage 宽度内按位处理。溢出、除零与越界转换 checked，打印 `fix ...` 诊断并终止，不做静默 wrap。长度结果加宽已实现 8/16/32/64/128；当 `*`/`/` 的结果赋给带显式注解的目标时使用更宽中间值（旧宽度用 64×64→128，128×128 用可移植 256 位中间值），从而可在不截断的情况下转换到更窄目标 scale。`@Length(128)` 的 raw 是有符号二进制补码 128 位：后端用自定义双 limb `coord_rt::UInt128` 位模式叠加有符号 helper，GCC/Clang 下 64×64→128 原语用 `__int128`，64 位 MSVC 用 `_mul128`（其它平台可移植 32 位拆分），不依赖非标准库。静态 `@Power` scale 常量仍必须放入有符号 64 位整数，因此 radix 10 的 `@Power(20)` 即使 `@Length(128)` 仍报 `E2102`。
+#### 2.2.1 数值表示注解
+
+`@Length`、`@Radix`、`@Signed`、`@Unsigned`、`@Power` 是**通用数值表示注解**，不是 `fix` 专属。它们都是 `@Target(type)` 注解，作用于局部变量/字段/参数/返回值位置的数值类型。
+
+| 注解 | `integer` | `float` | `fix` |
+| --- | --- | --- | --- |
+| `@Length(N)` | 存储宽度 8/16/32/64/128 | 存储宽度 32/64 | raw 宽度 8/16/32/64/128 |
+| `@Radix(R)` | 字面量/打印进制 2–36 | 字面量/打印进制 2–36 | scale 基数与打印进制 2–36 |
+| `@Signed` / `@Unsigned` | 数值符号 | 数值符号 | signed raw 表示 |
+| `@Power(P)` | 提升为 `fix`，scale 指数 `P` | 提升为 `fix`，scale 指数 `P` | scale 指数 |
+
+- 只有 `@Power` 会把 `integer`/`float` 声明提升为 `fix`；`@Radix` 单独不提升。
+- 普通 `fix` 的默认值为 `@Length(64) @Radix(10) @Power(0)`。
+- `@Length` 超出 integer/fix 的 8/16/32/64/128 或 float 的 32/64、`@Radix < 2`、非整数 `@Power` 分别报 `E2056`/`E2100`/`E2106` 等。
+
+使用 §2.2.1 的数值表示语义，`fix` 追加以下定点规则：后端表示为 `coord_rt::Fix<Power, Radix, Length>`，只含一个 signed raw 字段，没有运行期 scale。不变量为 `raw = semantic × radix^power`，即 `semantic = raw / radix^power`。小数字面量默认 `float`；赋给 `fix` 需要显式 `@Power`（`E2103`），并在编译期精确编码为 raw 整数；小数位超过目标 scale 时按 half away from zero 舍入。`@Length(128)` 字面量编码到有符号 128 位 raw（最多 39 位有效十进制数字），超出范围报 `E2105`，编译器为此携带可移植的 128/256 位中间值。`print` 按该类型的 radix（2–36）输出语义值并去掉无意义尾零。fix→fix 转换由**目标类型注解**驱动：`@Power(4) fix fine = price;` 改变 power，`@Radix(2) @Power(4) fix q = price;` 改变 radix，`@Length(16) ...` 改变 raw 宽度；字段/参数/返回值位置同样按目标类型注解转换（`@Power(4) fix convert(fix x) { return x; }`）。**canonical 形状完全相同**（`@Length`/`@Radix`/`@Power` 均相同，含默认 `fix`）的复制是普通 storage 复制，不需要目标注解；只有形状改变且目标没有 `@Length`/`@Radix`/`@Power` 注解时才报 `E2109`。该规则同样覆盖数组/队列字面量与 map value（容器元素类型无法携带注解，因此那里的形状改变是 `E2109` 而不是隐式转换）。故意不提供 `toRadix`/`toScale` 方法：`toInteger()`/`toFloat()` 仅用于跨 storage 边界，`float → fix` 需要显式目标转换，绝不隐式。所有运算符均启用：`+ - * / %`、一元 `-`、`++/--`、比较、`& | ^ ~ << >>`。算术与比较按语义：`+`/`-` 对齐到更细 power，结果长度 `max(len1,len2)+1`（按 8/16/32/64 分桶；含 128 位操作数时结果加宽到 128），`*` 的 power 相加、结果长度 `len1+len2`，`/` 自然 `power = max(power1,power2)` 且可由显式目标注解覆盖，`%` 先对齐、符号跟随被除数。位运算/移位按 `raw`，要求相同 radix/power/length（`E2111`）；移位在 storage 宽度内按位处理。溢出、除零与越界转换 checked，打印 `fix ...` 诊断并终止，不做静默 wrap。长度结果加宽已实现 8/16/32/64/128；当 `*`/`/` 的结果赋给带显式注解的目标时使用更宽中间值（旧宽度用 64×64→128，128×128 用可移植 256 位中间值），从而可在不截断的情况下转换到更窄目标 scale。`@Length(128)` 的 raw 是有符号二进制补码 128 位：后端用自定义双 limb `coord_rt::UInt128` 位模式叠加有符号 helper，GCC/Clang 下 64×64→128 原语用 `__int128`，64 位 MSVC 用 `_mul128`（其它平台可移植 32 位拆分），不依赖非标准库。静态 `@Power` scale 常量仍必须放入有符号 64 位整数，因此 radix 10 的 `@Power(20)` 即使 `@Length(128)` 仍报 `E2102`。
 
 ### 2.3 子类型与可赋值
 
@@ -263,7 +279,7 @@ public:
 - 构造与析构不能失败；需要失败语义时用返回 `Result` 的工厂函数（⏳）。
 - 初始化形式：`A a{}` 是逐属性聚合初始化（要求聚合类，否则 `E2049`）；`A a()` 走构造函数；`A a = b` 走可访问的单参数转换构造；`A a = { ... }` 用类型化/命名条目选择 `@Constructure` 构造（§4.3.1、§4.8.2）。
 - `@Constructure` 是 `@Target(constructor)` 注解，只能标在目标类的构造函数上；被标构造参与类型化/命名字面量构造，构造函数体仍由用户定义并负责实际转换。普通位置 `Type{1, 2}` 构造与它并存。
-- `@Radix` 接受任意整数 `>= 2`（`0`、`1` 与负数报 `E2100`）。作用于 `integer` 声明时只改变生成 C++ 的整数字面量写法（进制 2/8/16：`@Radix(16) integer mask = 255;` 生成 `static_cast<std::int64_t>(0XFF)`，2 进制生成 `0B...`，8 进制生成 C++ 八进制字面量如 `0100`）；其他进制退回十进制写法，运行期 `print` 整数不变。作用于 `fix` 时它决定 raw 缩放基数（`raw = semantic × radix^power`）和 `print` 的进制；打印支持 2–36，超出报 `E2107`。`@Radix` 单独不会把 `integer`/`float` 提升为 `fix`。
+- `@Radix` 接受任意整数 `>= 2`（`0`、`1` 与负数报 `E2100`）。它选择 `integer`/`float` 的字面量/打印进制 2–36（C++ 字面量在 2/8/16 进制使用对应写法），对 `fix` 选择 raw 缩放基数（`raw = semantic × radix^power`）与打印进制；打印超出 2–36 报 `E2107`。`@Radix` 单独不会把 `integer`/`float` 提升为 `fix`。
 
 #### 4.2.2 接口
 
@@ -320,10 +336,10 @@ class Service {
 - 注解声明可带参数并实现 `AnnotationProcessor`；唯一的 `override void process(Description target)` 在编译期执行，接收目标的 `description`。
 - 只读、只增（完整规则见 §4.7）：应用不会覆盖/替换/修改先前注解，不能修改目标结构，处理器只能生成新的独立声明；默认同一目标上同类型注解只能出现一次，`@Repeatable` 才可重复。
 - 注解默认只存在于编译期，不能作为运行期字段/参数类型（`E2009`）；被 `@Retention` 标注的注解才物化为运行期只读元数据表与生成逻辑。处理器可调用唯一指令原语 `line(file, line)` 设置生成代码的 `#line` 映射。
-- 内建注解名（编译器识别，用户不能重定义同名内建）：`@Result`、`@Expect`、`@Invocation`、`@Proxy`、`@Get`、`@Set`、`@Destructure`、`@Construct`、`@Constructure`、`@Has`、`@Delete`、`@Keys`、`@Describe`、`@Call`、`@Copy`、`@Native`、`@FunctionalInterface`（已弃用）、`@Unique`、`@Share`、`@Weak`、`@Optional`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power`、`@Lock`、`@ReadOnly`、`@Unsafe`、`@Safe`、`@Test`、`@Bench`。`@Wrap` 已移出声明并标为 deferred；`@Processor` 已删除。
+- 内建注解名（编译器识别，用户不能重定义同名内建）：`@Result`、`@Expect`、`@Invocation`、`@Proxy`、`@Get`、`@Set`、`@Destructure`、`@Construct`、`@Constructure`、`@Has`、`@Delete`、`@Keys`、`@Describe`、`@Call`、`@Copy`、`@Native`、`@Unique`、`@Share`、`@Weak`、`@Optional`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power`、`@Lock`、`@ReadOnly`、`@Unsafe`、`@Safe`、`@Test`、`@Bench`。`@Wrap` 已移出声明并标为 deferred；`@Processor` 已删除。`@FunctionalInterface` 已移除；callable interface 迁移到 `operator()`（🚧 Lambda 模块），lambda 以函数值传递。
 - **目标修正**：`@Optional`、`@Unique`、`@Share`、`@Weak`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power` 是 `@Target(type)` 注解，附着在局部变量/字段/参数/返回值位置的类型表达式上，而不是声明本身；`@Constructure` 是 `@Target(constructor)`。`@Native` 作用于 class 与自由 function；`@Native` class 的成员隐式为 native，不能再写 `@Native`（显式标在 method 上报 `E2113`）。其它注解保持原有的声明目标。
 - **分层原则**：元注解只有 6 个，只在 C++ 端实现；其余注解全部是标准库里的普通 Coo 声明（`lib/standard/annotations.coo`），按节组织（Meta / Processor interfaces / Proxy traps / Value protocols / Ownership-representation / Scope-capability / Native / Tooling）。编译器只保留按名字识别的语义 hook（如 `@Result` 的返回包装、`@Unsigned` 的存储映射），不维护第二套内建注解表。`Descriptor`/`Reflection` 是该文件中的普通类，`Description`/`Reflector<T>` 由编译器特殊处理。
-- `@Native(file: string, abi: "c" | "c++" = "c", symbol: string = 声明名)`：标注无 body 的 function 或无 body 的 class，只声明头文件与 ABI。编译器、target、flags 与链接输入来自项目清单 `[build]`/`[toolchain.<target>]`/`[native]`；`coorc` 用配置的 `cxx` 生成并编译 `extern "C"` bridge，再链接声明的 native objects/libs（见 §7.4）。旧的 `@Native("symbol")` 形式报 `E2114`。没有运行期 FFI/dlopen；声明不引入 Scope，也不参与运行期反射。
+- `@Native(file: string, abi: "c" | "c++" = "c", symbol: string = 声明名)`：标注无 body 的 function 或无 body 的 class，只声明头文件与 ABI。`symbol` 只用于 function；native class 必须 `abi: "c++"` 且不能带 `symbol`。编译器、target、flags 与链接输入来自项目清单 `[build]`/`[toolchain.<target>]`/`[native]`；`coorc` 用配置的 `cxx` 生成并编译 `extern "C"` bridge，再链接声明的 native objects/libs（见 §7.4）。旧的 `@Native("symbol")` 形式报 `E2114`。没有运行期 FFI/dlopen；声明不引入 Scope，也不参与运行期反射。
 
 #### 4.2.5 函数、算子与常量
 
@@ -423,48 +439,39 @@ integer main() {
 - 构造体由用户定义，负责实际转换。类型化/命名构造与普通位置 `Type{1, 2}` 构造、聚合对象字面量（`{x: 1}`）并存。
 - 目标类是 `@Proxy` 时，handler 的 `@Construct` 钩子在构造前执行；见 §4.8.2。
 
-#### 4.3.2 lambda
+#### 4.3.2 Lambda 与函数值
 
-lambda 的**目标类型**沿用 Java（函数式接口/函数指针/方法引用），**捕获行为**与 C++ 一致：显式捕获列表按 C++ 规则；省略捕获列表时，被引用的外部变量按值复制，lambda 内修改的是副本。参数与返回类型显式书写。
+Lambda 是**函数值**。规范类型是函数类型 `(A, B) -> R`；设计中没有具名接口对象作为 lambda 目标。callable interface 在 Lambda 模块落地后只暴露一个 `operator()`，通过该 operator 使用（🚧）。
 
 ```coo
 integer n = 1;
 
-// 省略捕获列表：n 被按值复制，修改的是副本；外部 n 不变
-Function<integer, integer> copy =
+// 省略捕获列表：n 被按值复制；修改的是副本。
+(integer) -> integer copy =
     (const integer& x): integer -> { n = n + 1; return x + n; };
 
-// 显式按引用捕获：修改原变量
-Function<integer, integer> original =
+// 显式按引用捕获：修改原变量。
+(integer) -> integer original =
     [&n](const integer& x): integer -> { n = n + 1; return x + n; };
 ```
 
-完整写法：
+完整形式：
 
 ```text
-[ 捕获列表 ]? ( 参数列表 ): 返回类型 -> (表达式 | { 语句块 })
+[ capture-list ]? ( parameters ): return-type -> ( expression | { statements } )
 ```
 
-| 规则 | 语义 |
-| --- | --- |
-| 语法 | `[captures](const integer& x): integer -> { ... }`；捕获列表可省略；参数列表必须有括号；返回类型写在 `:` 后、`->` 前 |
-| 省略捕获列表 | 被引用的外部局部变量按**值复制**；副本在 lambda 内可修改，原变量不受影响。`this` 按值复制（指针），通过它修改字段仍作用于原对象 |
-| 显式捕获 | 与 C++ 相同：`[]`、`[=]`、`[&]`、`[x]`/`[&x]`、`[this]`、`[=, &x]`/`[&, x]` |
-| 显式按值捕获 | `[=]`/`[x]` 捕获的副本在 lambda 内只读（赋值/`++`/`--` 报 `E2088`）；源码没有 `mutable` 关键字（v0） |
-| 显式按引用捕获 | 修改原变量；引用捕获的 lambda 不得逃逸声明它的 Scope：返回、存字段/容器字面量、赋给外层作用域变量均报 `E2039` |
-| 未列出变量 | 写捕获列表时，未列出的外层变量不可见，与 C++ 一致（`E2087`） |
-| 捕获校验 | 未知名字、重复捕获、默认捕获位置/重复、混用 `[=, x]`/`[&, &x]` 报 `E2087` |
-| 目标类型 | 函数式接口（恰好一个抽象方法）、函数指针 `(A,B) -> R`、方法引用，或等价的后续可调用类型 |
-| 函数式接口目标 | 已弃用的 `@FunctionalInterface` 且恰好一个抽象方法的接口降为等价函数类型：`Function<A,R>` 等价 `(A) -> R`，`Consumer<T>` 等价 `(T) -> void`，`Predicate<T>` 等价 `(T) -> boolean`，`Supplier<T>` 等价 `() -> T`，`BiFunction<A,B,R>` 等价 `(A,B) -> R`。lambda 与方法引用按抽象方法签名检查，`.apply`/`.accept`/`.test`/`.get` 调用该值。`lib/standard/utility.coo` 声明这些接口。持有类实现的具名接口值 ⏳：v0 中类不能 `implements` 函数式接口（`E2004`），类型实参数量错误报 `E2089` |
-| 函数指针目标 | 必须无捕获：只能 `[]`，或省略捕获列表且不引用任何外部变量 |
-| 类型检查 | 参数类型、返回类型必须与目标类型兼容；返回类型可协变；具体规则按泛型可赋值检查 |
-| `this` | 省略捕获列表时按值复制 `this`；显式捕获时必须写 `[this]` 才能访问成员；捕获 `this` 不能转函数指针 |
-| 遮蔽 | lambda 参数**可以**遮蔽外层局部变量/参数；编译器发 warning `W0004`（检测 ⏳）；遮蔽后外层变量在该 lambda 内不可见 |
-| 返回 | 块体用 `return`；表达式体自动返回；必须与声明的返回类型兼容 |
-| 泛型 | lambda 自身不声明类型参数；目标类型实例化决定参数/返回类型 |
-| 方法引用 | `Type::staticMethod` 生成函数值；`object::method` 生成绑定接收者的函数值，接收者按引用借用并遵循与按引用闭包相同的逃逸规则（`E2039`）。未绑定 `Type::instanceMethod` ⏳。 |
+- **目标类型**：函数类型 `(A) -> R`（或 `(A, B) -> R`）；方法引用也产生函数值。设计中没有接口对象目标类型。
+- **省略捕获**：被引用的外层局部变量按值复制；副本在 lambda 内可变，原变量不变；`this` 按指针复制。
+- **显式捕获**：`[]`、`[=]`、`[&]`、`[x]`/`[&x]`、`[this]`、`[=, &x]`/`[&, x]`，规则同 C++；显式按值捕获只读（`E2088`），捕获列表校验（`E2087`）。
+- **按引用捕获**不得逃逸声明它的 Scope：返回、存入字段/容器或赋给外层变量报 `E2039`。
+- **函数指针值**必须无捕获；无捕获 lambda 或函数引用可转为函数指针表示。
+- **方法引用**：`Type::staticMethod` 产生函数值；`object::method` 产生绑定接收者的函数值，接收者遵循按引用逃逸规则；未绑定实例引用 ⏳。
+- **遮蔽**：lambda 参数可以遮蔽外层局部变量/参数（`W0004`）；外层名字在 lambda 内不可见。
+- **返回**：块体用 `return`；表达式体自动返回；必须与声明的函数返回类型兼容。
+- **Callable interfaces**：Lambda 模块实现时使用单个 `operator()` 方法；callable interface 不通过注解标记或发现。
 
-lambda 的“值”只能通过目标类型使用：赋值、传参、返回、存容器前必须先确定目标类型。目标为函数式接口时降为等价函数类型；目标为函数指针时生成无捕获的函数 thunk；方法引用同理。函数式接口由 `utility` 提供：`Function<T,R>`、`Consumer<T>`、`Supplier<T>`、`Predicate<T>`、`BiFunction<A,B,R>`。`@FunctionalInterface` 是已弃用兼容标记，用于选择唯一抽象方法，不承诺具名对象。lambda 降为函数值（无捕获时用函数指针/thunk，需要时生成闭包）；不合成具名接口对象，也不引入运行期元数据。实现状态：🚧。已实现：函数类型目标 `(A) -> R`、表达式/块体、隐式与显式捕获列表（`[]`、`[=]`、`[&]`、`[x]`、`[&x]`、`[this]`）、省略捕获列表的可变按值副本、捕获列表校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、变量初始化/赋值、调用、lambda 实参与返回、静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用、返回函数值的链式调用，以及 `@FunctionalInterface` 目标降为函数值（泛型实参替换、接口方法调用形式；`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction`）。未实现：具名函数式接口值/类实现、未绑定实例方法引用、函数指针 thunk 转换、跨线程闭包逃逸、`this` 生命周期检查。
+状态：**🚧**。解析器当前已支持函数类型目标、表达式/块体、捕获列表、捕获校验（`E2087`/`E2088`）、按引用逃逸检查（`E2039`）、赋值/实参/返回、静态与绑定方法引用、函数类型字段调用；callable interface `operator()` lowering、未绑定实例引用、函数指针 thunk 与完整 Lambda 模块语义尚未完成。
 
 #### 4.3.3 控制流与模式匹配
 
@@ -1143,7 +1150,7 @@ struct ClassDescriptor {
 
 ### 5.8 Documentation
 
-`lib/standard/documentation.coo` 提供普通标准库类型 `Document`（summary、结构化 tags、原始文本）与 `DocumentTag`（name、subject、text）。文档挂载到 `Description`/`Member`/`FunctionMember`/`Module`；反射模型类改名 `FunctionMember`，以便 `Function` 作为函数式接口名；运行期 Descriptor 保留只读 Document 引用；编译器只负责提取 `///` / `/** */` 并构造 Document，解析/渲染 API 由标准库实现；现有 `@parameter/@return/@template` 校验保留。
+`lib/standard/documentation.coo` 是**设计稿，编译器未加载**。它草拟了 `Document`（summary、结构化 tags、原始文本）与 `DocumentTag`（name、subject、text），但当前 bootstrap 只提取 `///` / `/** */` 并校验 `@parameter`/`@param`、`@return`、`@template`（`E2076`）；尚无可用的 `Document` 类型或运行期 descriptor 引用。下述挂载/渲染模型在该文件进入标准库 import 集合前只是设计。
 
 ### 5.9 已确认决策与待决
 
@@ -1270,11 +1277,11 @@ coorc CLI
 | Linux（WSL Ubuntu 26.04，g++ 15.2） | 214 | 214 | 全量，`ctest -j 8` |
 | macOS | 预期 214 | 未运行 | 同一注册；本环境无 macOS |
 
-单元测试覆盖词法/解析、Scope/RAII、编译期求值、代码生成、Optional/所有权、proxy/反射、`fix`、lambda/match、线程/同步/复制、注解处理器、包依赖图、outline/hint 与 `@Test`。e2e 覆盖示例与 fixtures：编译/运行、负例、确定性与增量、包管理器/镜像/注册表、注解处理器、Optional/`@Constructure`/`@Destructure`、代码块保留、`fix`/radix、lambda/match、函数值/函数式接口、thread/mutex/atomic/lock、copy、Safe/Unsafe 与 native bridge。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+单元测试覆盖词法/解析、Scope/RAII、编译期求值、代码生成、Optional/所有权、proxy/反射、`fix`、lambda/match、线程/同步/复制、注解处理器、包依赖图、outline/hint 与 `@Test`。e2e 覆盖示例与 fixtures：编译/运行、负例、确定性与增量、包管理器/镜像/注册表、注解处理器、Optional/`@Constructure`/`@Destructure`、代码块保留、`fix`/radix、lambda/match、函数值、thread/mutex/atomic/lock、copy、Safe/Unsafe 与 native bridge。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
-> 标准库与编译器同版本发布；公开 API 用 Coordination 编写，底层通过 `@Native` 接 C/C++ 并在编译期链接。本文与实现冲突时，语言语义以本规范为准，标准库 API 以 §7 为准。
+> 本节是标准库的**设计目标**，不是完整实现清单。当前编译器 bootstrap 只加载 `lib/standard/annotations.coo` 与 `lib/standard/utility.coo`（`libs/coord/src/driver.cpp:825-853`）；下面的其它模块都是设计稿，尚不可 import。设计与实现冲突时以实现为准，并回写本节。
 
 ### 7.1 目标与约束
 
@@ -1313,7 +1320,7 @@ import collection as c;     // 限定名：c.Array<T>
 import string;              // string 扩展与 StringBuilder
 ```
 
-模块内部可以拆文件，但 `import collection;` 看到的是该模块的公开导出集合。标准库 v0 每个顶层模块先实现为单个 `.coo`（或一个导出门面），后续可拆子模块。
+这张表是设计目标。当前只加载 `lib/standard/annotations.coo` 与 `lib/standard/utility.coo`；`import collection;`、`import file;` 等模块尚不存在，需等实现并加入 bootstrap。模块内部可以拆文件，但 `import collection;` 的语义是看到该模块的公开导出集合。
 
 ### 7.3 Prelude 与命名
 
@@ -1392,42 +1399,17 @@ libraries = ["m"]
 ### 7.5 核心协议（utility）
 
 ```coo
-interface Iterator<T> {
-    T? next();
-}
-
-interface Iterable<T> {
-    Iterator<T> iterator();
-}
-
-interface Hash {
-    integer hash() const;
-}
-
-interface Eq<T> {
-    bool equals(const T& other) const;
-}
-
-interface Ord<T> {
-    int compare(const T& other) const;   // <0, 0, >0
-}
-
-@FunctionalInterface
-interface Function<T, R> { R apply(T value); }
-@FunctionalInterface
-interface Consumer<T> { void accept(T value); }
-@FunctionalInterface
-interface Supplier<T> { T get(); }
-@FunctionalInterface
-interface Predicate<T> { bool test(T value); }
-@FunctionalInterface
-interface BiFunction<A, B, R> { R apply(A first, B second); }
+interface Iterator<T> { T? next(); }
+interface Iterable<T> { Iterator<T> iterator(); }
+interface Hash { integer hash() const; }
+interface Eq<T> { bool equals(const T& other) const; }
+interface Ord<T> { int compare(const T& other) const; }   // <0, 0, >0
 ```
 
-- `Function`/`Consumer`/`Supplier`/`Predicate`/`BiFunction` 在 `lib/standard/utility.coo` 中是 `@FunctionalInterface` 声明。v0 将它们降为等价函数类型（替换泛型实参）；`.apply`/`.accept`/`.test`/`.get` 是调用形式。具名接口值与类实现不支持（`E2004`）；类型实参数量错误或抽象方法数不为 1 报 `E2089`。`@FunctionalInterface` 是这些声明使用的已弃用兼容标记。
-- `T?` 是 `T | void`；`next()` 返回 `void` 表示结束。
-- `for x in xs` 展开为 `iterator()` + `next()` 循环，不要求容器暴露下标。
-- `Hash`/`Eq` 用于 `UnorderedMap`/`UnorderedSet`；`Ord` 用于 `OrderedMap`/`OrderedSet` 与排序。用户 class 可显式实现这些接口；v0 先手写，后续可用注解派生。
+- `T?` 表示 `T | void`；`next()` 返回 `void` 表示结束。
+- `for x in xs` 展开为 `iterator()` + `next()`，不要求容器暴露下标。
+- `Hash`/`Eq` 用于 `UnorderedMap`/`UnorderedSet`；`Ord` 用于 `OrderedMap`/`OrderedSet` 与排序；用户 class 在 v0 显式实现。
+- callable 值使用函数类型 `(A) -> R`；callable interface 在 Lambda 模块落地后使用单个 `operator()`（🚧）。
 
 ### 7.6 容器（collection）
 
@@ -1623,11 +1605,10 @@ interface Error {
 
 ### 7.16 实现与发布
 
-- 源码：`lib/utility/`、`lib/memory/`、`lib/collection/`、`lib/string/`、`lib/io/`、`lib/file/`、`lib/atomic/`、`lib/thread/`、`lib/reflection/`、`lib/time/`、`lib/mathematics/`、`lib/random/`、`lib/test/`。
-- 公开层纯 Coo；平台相关部分在 `lib/*/internal/*.coo` 中用 `@Native` 声明。
-- 编译器按 `import` 从工具链 `lib/` 与项目依赖中解析模块，生成/缓存 `.coox`。
-- 标准库与编译器同版本；`.coox` 记录版本与公开 API 摘要；标准库自身测试放在 `lib/*/tests/*.coo`，用 `@Test` 与 `coorc test`。
-- 发布包含源码与预编译 `.coox`；不使用独立包管理器版本。
+- 当前源码：`lib/standard/annotations.coo` 与 `lib/standard/utility.coo`，由 bootstrap 加载；`lib/standard/documentation.coo` 存在但未加载。
+- `lib/utility/`、`lib/memory/`、`lib/collection/`、`lib/string/`、`lib/io/`、`lib/file/`、`lib/atomic/`、`lib/thread/`、`lib/reflection/`、`lib/time/`、`lib/mathematics/`、`lib/random/`、`lib/test/` 是设计目标目录，不是当前源码树。
+- 设计上公开层纯 Coo；平台相关部分在模块存在后于 `lib/*/internal/*.coo` 中用 `@Native` 声明。
+- `.coox` 缓存、`lib/*/tests/*.coo`、带版本的标准库 API 摘要与预编译发布物都是设计目标；当前 bootstrap 只加载上述两个文件。
 
 ### 7.17 里程碑与待决
 
@@ -2077,7 +2058,6 @@ coorc config list|get|set
 | `E2077` | `match` 未穷尽（缺枚举变体/布尔值，或非枚举标量缺 `_`）、值类型不支持、模式与值类型不符、范围模式不是整数/字符、绑定或 `|` 用法非法 |
 | `E2087` | lambda 捕获非法：未知名字、重复捕获、默认捕获位置/重复、混用默认模式、显式列表下使用未列出外层变量、未写 `[this]` 却隐式使用 `this` |
 | `E2088` | 对显式按值 lambda 捕获赋值或 `++`/`--`（v0 只读） |
-| `E2089` | `@FunctionalInterface` 非法：抽象方法数不为 1，或函数式接口类型实参数量错误 |
 | `E2090` | Thread/ScopedThread 规则：入口调用/签名错误、按引用或捕获 `this`、调用期借用的函数值、拷贝/赋值线程值、`hardwareConcurrency()` 带参数 |
 | `E2091` | `Mutex` 值不能拷贝或赋值 |
 | `E2092` | `ScopedLock`/`Atomic` 值不能拷贝或赋值，或 `ScopedLock` 未用 `ScopedLock(mutex)` 就地初始化 |
@@ -2133,7 +2113,7 @@ coorc config list|get|set
 | `fix` + `@Power`/`@Radix`/`@Length` | ✅ | 静态 8/16/32/64/128 位 raw 的字面量、打印、比较、同形状复制与目标注解转换、`+ - * / %`、一元 `-`、`++/--`、位运算/移位、长度结果加宽与溢出检查；`@Length(128)` 的字面量/算术与可移植 128/256 位中间值已实现；静态 `@Power` scale 超出有符号 64 位 raw（`E2102`）与未注解目标的跨 radix 复制（`E2109`）仍拒绝 |
 | `Result` / `Expect` | ✅ | 类型实参校验、独立类型、消费检查 |
 | 注解处理器、`line`、proxy、反射五层 | ✅/🚧 | `AnnotationProcessor.process` + `line`、proxy class/annotation/runtime、`@Invocation`、`Reflector` 已可用；完整 descriptor API/运行期反射仍推进 |
-| `.coox`、多模块链接、标准库 | 🚧 | 相对 import、工程目录、`.coox` 读写、outline/hint、`@Test`、`coorc deps`、容器已可用；标准库其余 API 待做 |
+| `.coox`、多模块链接、标准库 | 🚧 | 相对 import、工程目录、`.coox`、outline/hint 与容器可用；bootstrap 只加载 `annotations.coo` 与 `utility.coo`，标准库其余设计尚不可 import |
 | 包管理器与镜像管理器 | ✅ | 清单、回溯解析、锁、vendor、file/HTTP 注册表、SHA-256、`[trust]` 校验和/HTTPS 策略、离线、镜像故障转移、pack/publish |
 | 跨平台工具链（Windows/macOS/Linux/FreeBSD） | ✅ | 宿主探测、argv spawn、UTF-8 路径、CMake preset；Linux/macOS 已用 g++ 验证 |
 | 生成程序的跨平台契约（wmain/UTF-8 控制台/平台内建） | ✅ | `coord_e2e_platform` 覆盖 OS/路径/文件/环境内建 |
@@ -2154,10 +2134,10 @@ coorc config list|get|set
 | 交叉编译 `--target`/`--sysroot` | 🚧 | native 项目按 target/工具链配置构建；外部 target 可用 `--emit-cpp` compile-only（`coord_e2e_native_cross`）；链接外部 target 需要已安装的交叉工具链，MSVC 不能交叉编译 |
 | workspace / feature / 签名 / git 依赖 | ⏳ | workspace `members` 只解析 |
 | Thread 模型 | 🚧 | 内建 move-only `Thread`，由 `() -> void` 构造，支持 `join()`/`detach()`/`joinable()`/`hardwareConcurrency()`，跨线程捕获检查 `E2090`；内建不可拷贝 `Mutex`，手动 `lock()`/`unlock()`/`tryLock()`（`E2091`、`coord_e2e_mutex`）、RAII `ScopedLock`（`E2092`）、`ScopedThread`/`std::jthread` 自动 join（`coord_e2e_scoped_thread`）、seq_cst `Atomic` 的 `load`/`store`/`fetchAdd`/`fetchSub`/`exchange`/`compareExchange`（`coord_e2e_atomic`、`coord_e2e_atomic_ops`）与 `@Lock(Exclusive, mutex, [captures])` 块注解（值/可变/只读捕获、`@ReadOnly` 方法效果与写集检查，`E2094`、`coord_e2e_lock_capture`）、显式 `@Copy(Deep|Shallow)` 与 `@Unique` 链深拷贝（`E2095`、`coord_e2e_copy_deep`）；数据竞争安全、其它类型 atomic、condition variable、scoped thread 与非局部位置 ⏳ |
-| lambda / `if` 表达式 / 完整模式匹配 | 🚧 | lambda 子集：函数类型目标、表达式/块体、隐式/显式捕获（`E2087` 捕获校验、`E2088` 按值只读）、按引用逃逸检查（`E2039`）、赋值/实参/返回、静态/绑定方法引用与链式调用；`@FunctionalInterface` 目标降为函数值并做泛型替换（`E2089`，`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction`，测试 `coord_e2e_functional_interface*`）；具名函数式接口值/类实现、未绑定实例引用、函数指针 thunk、跨线程逃逸 ⏳；测试 `coord_e2e_lambda*`、`coord_e2e_method_ref*`。`if` 表达式（表达式分支）已可用（`coord_e2e_if_expression`；块分支 ⏳）。`match` 支持常量/`|`/范围/绑定/guard 与枚举、布尔、标量穷尽性（`coord_e2e_match_patterns`，负例 `_missing`/`_no_wildcard`/`_bad_pattern`）；类型模式与类解构 ⏳ |
+| lambda / 函数值 / `if` 表达式 | 🚧 | 目标模型：lambda 是函数值，类型为 `(A) -> R`；callable interface 使用 `operator()`，不做注解标记。解析器当前支持函数类型目标、表达式/块体、捕获列表/校验（`E2087`/`E2088`）、按引用逃逸检查（`E2039`）、赋值/实参/返回、静态/绑定方法引用与函数类型字段调用；callable interface `operator()` lowering、未绑定实例引用、函数指针 thunk 尚未完成。`if` 表达式（表达式分支）已可用（`coord_e2e_if_expression`；块分支 ⏳）。`match` 支持常量/`|`/范围/绑定/guard 与枚举、布尔、标量穷尽性（`coord_e2e_match_patterns`）；类型模式与类解构 ⏳ |
 | Safe/Unsafe | 🚧 | 支持 `@Safe`/`@Unsafe` 作用域、向下传播与块覆盖（`E2096`）；v0 强制原始指针解引用与 FFI/`@Native` 调用，指针算术/unsafe cast 已记录但尚未完全强制 |
 | `@Native` / FFI bridge | ✅/🚧 | `@Native(file:, abi:, symbol:)` 只声明头文件/ABI；`[build].target`、`[toolchain.<target>].cc/cxx`（可带 `sysroot`/`cflags`/`cxxflags`/`ldflags`）与 `[native].include/objects/libraries` 驱动构建。生成 `extern "C"` bridge：C 函数包装、`string` 以 `const char*` 传递、C++ class 通过 move-only 不透明句柄（`new (std::nothrow)`/`delete`、构造/析构/方法包装、无 `try`/`catch`）。`E2112`–`E2119` fail closed；旧 `@Native("symbol")` 为 `E2114`。测试：`coord_e2e_native_config`、`coord_e2e_native_annotations`、`coord_e2e_native_c_functions`、`coord_e2e_native_cpp_class`、`coord_e2e_native_cross`、`coord_e2e_native_unsafe`。遗留：per-object target 校验、Result proxy 错误映射、回调、交叉工具链链接验证、单文件 native 使用 |
-| `@Copy` / `@Wrap` / `@FunctionalInterface` 语义 | 🚧 | `@Copy(Deep/Shallow)` 已实现；`@Wrap` 标 deferred（声明已移除）；`@FunctionalInterface` 已弃用，等 Lambda 模块的结构化 `operator()`；`AnnotationProcessor` 层级已实现 |
+| `@Copy` / `@Wrap` 语义 | 🚧 | `@Copy(Deep/Shallow)` 已实现；`@Wrap` 标 deferred（声明已移除）；`AnnotationProcessor` 层级已实现 |
 | `is` / `new` / `delete` / `unsafe` / `extern` | ⏳ | 保留字，未实现 |
 | `operator` / `where` | 🚧 | 可解析，完整语义待做 |
 | `T?` | ⏳ | 未解析 |
@@ -2216,65 +2196,9 @@ M4 保留为后端与自举：LLVM 或自研后端、布局/vtable/错误 ABI/�
 
 ## 12 附录
 
-### 12.1 文法摘要
+### 12.1 形式文法
 
-以下是当前实现的子集摘要（ISO/IEC 14977 EBNF 风格）；完整文法（含规划语法）见 [docs/grammar.ebnf](docs/grammar.ebnf)。标注“规划”的产生式尚未实现，解析器会报 `E1101` 或 Sema 报 `E2012`。
-
-```ebnf
-compilation-unit = [ "module" path ";" ], { import-decl }, { top-level-decl } ;
-import-decl      = "import", path, [ "as", identifier ],
-                   [ ".", "{", identifier, { ",", identifier }, "}" ], ";" ;
-top-level-decl   = { annotation-use }, [ "export" ],
-                   ( class-decl | interface-decl | annotation-decl
-                   | enum-decl | function-decl | const-decl ) ;
-
-class-decl       = [ "final" ], "class", identifier, [ generic-params ],
-                   [ "extends" type ], [ "implements" type, { ",", type } ],
-                   class-body, [ ";" ] ;
-class-body       = "{", { access-section | class-member }, "}" ;
-access-section   = ( "public" | "private" | "protected" ), ":" ;
-class-member     = { annotation-use },
-                   ( field-decl | method-decl | constructor-decl | destructor-decl ) ;
-field-decl       = [ "final" ], type, identifier, [ "=", expression ], ";" ;
-method-decl      = { "virtual" | "override" | "final" | "static" },
-                   type, identifier, [ generic-params ], "(", params, ")",
-                   [ "const" ], ( block | ";" ) ;
-constructor-decl = identifier, "(", params, ")",
-                   [ ":", initializer, { ",", initializer } ], block ;
-destructor-decl  = "~", identifier, "(", ")", block ;
-
-enum-decl        = "enumerate", identifier, [ "implements", type, { ",", type } ],
-                   "{", [ enum-variant, { ",", enum-variant }, [ "," ] ],
-                   [ ";", { method-decl } ], "}", [ ";" ] ;
-enum-variant     = { annotation-use }, identifier, [ "=", expression ] ;
-interface-decl   = "interface", identifier, [ generic-params ], "{", { method-decl }, "}" ;
-annotation-decl  = "annotation", identifier, [ generic-params ], [ "(", params, ")" ],
-                   ( ";" | "{", { method-decl }, "}" ) ;
-function-decl    = type, ( identifier | operator-name ), [ generic-params ],
-                   "(", params, ")", [ "where", constraint, { ",", constraint } ],
-                   ( block | ";" ) ;
-const-decl       = "const", [ type ], identifier, "=", expression, ";" ;
-
-generic-params   = "<", identifier, [ "extends", type ],
-                   { ",", identifier, [ "extends", type ] }, ">" ;
-params           = [ param, { ",", param } ] ;
-param            = type, identifier, [ "=", expression ] ;
-type             = [ "const" ], path, [ "<", type, { ",", type }, ">" ],
-                   { "&" | "*" | "[", expression, "]" } ;              (* T?：规划 *)
-
-block            = "{", { statement }, "}" ;
-statement        = block | var-decl
-                 | "if", "(", expression, ")", statement, [ "else", statement ]
-                 | "while", "(", expression, ")", statement
-                 | "return", [ expression ], ";" | "break", ";" | "continue", ";"
-                 | "~", postfix-expression, ";"                        (* 析构声明 *)
-                 | expression, ";" ;
-var-decl         = [ "const" ], type, identifier, [ "=", expression ], ";" ;
-expression       = assignment | logical-or | ... ;                    (* C++ 同优先级子集 *)
-
-annotation-use   = "@", path, [ "(", arguments, ")" ] ;
-(* 规划：for / in、unsafe、match 与完整 pattern（_、literal、path(...)、p | p、p if e） *)
-```
+形式文法维护在 [docs/grammar.ebnf](docs/grammar.ebnf)，跟随 `libs/coord/src/lexer.cpp` 与 `libs/coord/src/parser.cpp`。本文不再内联文法摘要；如有冲突，以解析器为准并回写文法。
 
 ### 12.2 术语表
 
@@ -2300,19 +2224,4 @@ annotation-use   = "@", path, [ "(", arguments, ")" ] ;
 | `@Constructure` | `@Target(constructor)` 标记，开启类型化/命名字面量构造；类型标签可省略 |
 | `@Destructure` | 双形态注解：`ProxyHandler` trap，或带引用输出的目标类方法 |
 | 代码块保留 | `@Retention(Compile)` 编译期执行并由后端省略；`@Retention(Runtime)` 正常运行 |
-
-### 12.3 文档地图与归档说明
-
-- 英文框架：[framework.md](framework.md)；中文框架：本文。
-- 英文 QuickStart：[readme.md](readme.md)；中文 QuickStart：[readme.zh-CN.md](readme.zh-CN.md)。
-- 形式文法：[docs/grammar.ebnf](docs/grammar.ebnf)。
-- [docs/archive/](docs/archive/) 中的旧架构、规范、反射、编译器、路线图与实现计划**仅为历史归档**，不再更新；与本文冲突时以本文为准。`docs/archive/index.md` 也属于归档，其链接只保证在归档内部有效。
-- 维护规则：语言/框架/后端/包协议变更只改四份主文档；`docs/grammar.ebnf` 随解析器同步；归档不修改。
-
-
-
-
-
-
-
 
