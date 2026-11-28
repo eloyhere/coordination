@@ -1,0 +1,14 @@
+// Extended Atomic operations: exchange, compareExchange and fetchSub.
+integer main() {
+    Atomic value = Atomic(10);
+    print(value.load());
+    print(value.exchange(20));
+    print(value.load());
+    print(value.compareExchange(20, 30));
+    print(value.load());
+    print(value.compareExchange(20, 40));
+    print(value.load());
+    print(value.fetchSub(5));
+    print(value.load());
+    return 0;
+}

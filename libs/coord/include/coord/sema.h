@@ -38,6 +38,7 @@ enum class TypeKind {
   SharePtr,
   Pointer,
   Thread,
+  ScopedThread,
   Mutex,
   ScopedLock,
   Atomic,
@@ -355,6 +356,7 @@ private:
   Type* reflectorType_ = nullptr;
   Type* proxyType_ = nullptr;
   Type* threadType_ = nullptr;
+  Type* scopedThreadType_ = nullptr;
   Type* mutexType_ = nullptr;
   Type* scopedLockType_ = nullptr;
   Type* atomicType_ = nullptr;

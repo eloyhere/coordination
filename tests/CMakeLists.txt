@@ -1233,6 +1233,54 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2093
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_scoped_thread
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/scoped_thread.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_scoped_thread
+      -DEXPECTED=true|1
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_atomic_ops
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/atomic_ops.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_atomic_ops
+      -DEXPECTED=10|10|20|true|30|false|30|30|25
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_scopedthread_copy_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/scopedthread_copy_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_scopedthread_copy_error
+      -DEXPECT_SUBSTRING=E2090
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_scopedthread_assign_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/scopedthread_assign_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_scopedthread_assign_error
+      -DEXPECT_SUBSTRING=E2090
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_scopedthread_capture_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/scopedthread_capture_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_scopedthread_capture_error
+      -DEXPECT_SUBSTRING=E2090
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_scopedthread_this_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/scopedthread_this_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_scopedthread_this_error
+      -DEXPECT_SUBSTRING=E2090
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lambda_escape
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

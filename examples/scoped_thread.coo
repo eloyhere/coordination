@@ -1,0 +1,32 @@
+// ScopedThread lowers to std::jthread: leaving the block automatically joins.
+class Counter {
+public:
+    Mutex mutex;
+    integer value;
+
+    Counter() {
+        value = 0;
+    }
+
+    void add(integer amount) {
+        ScopedLock guard = ScopedLock(mutex);
+        value = value + amount;
+    }
+
+    integer get() {
+        ScopedLock guard = ScopedLock(mutex);
+        return value;
+    }
+}
+
+integer main() {
+    @Share Counter counter = Counter();
+    {
+        ScopedThread worker = ScopedThread([counter](): void -> {
+            counter.add(1);
+        });
+        print(worker.joinable());
+    }
+    print(counter.get());
+    return 0;
+}

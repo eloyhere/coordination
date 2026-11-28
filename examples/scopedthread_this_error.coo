@@ -1,0 +1,19 @@
+// ScopedThread entries cannot capture 'this'.
+class Job {
+public:
+    integer value;
+
+    Job() {
+        this.value = 1;
+    }
+
+    void run() {
+        ScopedThread worker = ScopedThread([this](): void -> { print(value); });
+    }
+}
+
+integer main() {
+    Job job;
+    job.run();
+    return 0;
+}

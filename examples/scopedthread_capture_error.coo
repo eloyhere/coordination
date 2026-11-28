@@ -1,0 +1,6 @@
+// ScopedThread entries follow the Thread capture rules: no by-reference capture.
+integer main() {
+    integer value = 1;
+    ScopedThread worker = ScopedThread([&value](): void -> { print(value); });
+    return 0;
+}

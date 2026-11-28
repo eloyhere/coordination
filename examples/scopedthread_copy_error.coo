@@ -1,0 +1,6 @@
+// ScopedThread values cannot be copied.
+integer main() {
+    ScopedThread first = ScopedThread([](): void -> {});
+    ScopedThread second = first;
+    return 0;
+}

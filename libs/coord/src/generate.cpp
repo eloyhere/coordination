@@ -214,6 +214,9 @@ std::string CppEmitter::cppTypeName(const Type* type) const {
   if (type->kind == TypeKind::Thread) {
     return "std::thread";
   }
+  if (type->kind == TypeKind::ScopedThread) {
+    return "std::jthread";
+  }
   if (type->kind == TypeKind::Mutex) {
     return "std::mutex";
   }
@@ -319,6 +322,7 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
           {"character", "char32_t"},
           {"boolean", "bool"},
           {"Thread", "std::thread"},
+          {"ScopedThread", "std::jthread"},
           {"Mutex", "std::mutex"},
           {"ScopedLock", "std::lock_guard<std::mutex>"},
           {"Atomic", "std::atomic<std::int64_t>"},
@@ -3401,8 +3405,9 @@ void CppEmitter::emitExpr(const Expr* expr) {
     case ExprKind::Call: {
       const Expr* callee = expr->lhs.get();
       if (callee != nullptr && callee->kind == ExprKind::Name &&
-          callee->name == "Thread") {
-        out_ << "std::thread(";
+          (callee->name == "Thread" || callee->name == "ScopedThread")) {
+        out_ << (callee->name == "ScopedThread" ? "std::jthread("
+                                                : "std::thread(");
         for (std::size_t i = 0; i < expr->args.size(); ++i) {
           if (i != 0) {
             out_ << ", ";
@@ -3439,6 +3444,34 @@ void CppEmitter::emitExpr(const Expr* expr) {
           emitExpr(expr->args[i].get());
         }
         out_ << ')';
+        return;
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Member &&
+          callee->lhs != nullptr && callee->lhs->resolvedType != nullptr &&
+          callee->lhs->resolvedType->kind == TypeKind::Atomic &&
+          callee->name == "fetchSub") {
+        emitExpr(callee->lhs.get());
+        out_ << ".fetch_sub(";
+        for (std::size_t i = 0; i < expr->args.size(); ++i) {
+          if (i != 0) {
+            out_ << ", ";
+          }
+          emitExpr(expr->args[i].get());
+        }
+        out_ << ')';
+        return;
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Member &&
+          callee->lhs != nullptr && callee->lhs->resolvedType != nullptr &&
+          callee->lhs->resolvedType->kind == TypeKind::Atomic &&
+          callee->name == "compareExchange") {
+        out_ << "([&]() { auto __expected = ";
+        emitExpr(expr->args.empty() ? nullptr : expr->args[0].get());
+        out_ << "; return ";
+        emitExpr(callee->lhs.get());
+        out_ << ".compare_exchange_strong(__expected, ";
+        emitExpr(expr->args.size() > 1 ? expr->args[1].get() : nullptr);
+        out_ << "); }())";
         return;
       }
       if (callee != nullptr && callee->kind == ExprKind::Member &&

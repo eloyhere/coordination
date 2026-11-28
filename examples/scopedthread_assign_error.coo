@@ -1,0 +1,7 @@
+// ScopedThread values cannot be assigned.
+integer main() {
+    ScopedThread first = ScopedThread([](): void -> {});
+    ScopedThread second = ScopedThread([](): void -> {});
+    first = second;
+    return 0;
+}

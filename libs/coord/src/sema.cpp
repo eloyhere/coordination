@@ -287,6 +287,20 @@ void Checker::initializeBuiltins() {
   addThreadMethod("detach", voidType_);
   addThreadMethod("joinable", boolType_);
 
+  scopedThreadType_ = makeType(TypeKind::ScopedThread, "ScopedThread",
+                               classType_);
+  const auto addScopedThreadMethod = [&](const char* name, Type* returnType) {
+    MethodInfo method;
+    method.name = name;
+    method.returnType = returnType;
+    method.owner = scopedThreadType_;
+    method.access = Access::Public;
+    scopedThreadType_->methods.push_back(method);
+  };
+  addScopedThreadMethod("join", voidType_);
+  addScopedThreadMethod("detach", voidType_);
+  addScopedThreadMethod("joinable", boolType_);
+
   mutexType_ = makeType(TypeKind::Mutex, "Mutex", classType_);
   const auto addMutexMethod = [&](const char* name, Type* returnType) {
     MethodInfo method;
@@ -316,6 +330,9 @@ void Checker::initializeBuiltins() {
   addAtomicMethod("load", intType_, {});
   addAtomicMethod("store", voidType_, {intType_});
   addAtomicMethod("fetchAdd", intType_, {intType_});
+  addAtomicMethod("fetchSub", intType_, {intType_});
+  addAtomicMethod("exchange", intType_, {intType_});
+  addAtomicMethod("compareExchange", boolType_, {intType_, intType_});
 }
 
 Type* Checker::makeType(TypeKind kind, std::string name, Type* base) {
@@ -3632,10 +3649,11 @@ Type* Checker::checkBinary(Expr* expr) {
 Type* Checker::checkAssign(Expr* expr) {
   Type* lhs = checkExpr(expr->lhs.get());
   checkCaptureMutation(expr->lhs.get(), expr->span);
-  if (lhs != nullptr && lhs->kind == TypeKind::Thread) {
+  if (lhs != nullptr && (lhs->kind == TypeKind::Thread ||
+                          lhs->kind == TypeKind::ScopedThread)) {
     diagnostics_.error(expr->span, "E2090",
-                       "Thread values cannot be assigned in v0; join/detach "
-                       "the current thread instead");
+                       "Thread/ScopedThread values cannot be assigned in v0; "
+                       "join/detach the current thread instead");
   }
   if (lhs != nullptr && lhs->kind == TypeKind::Mutex) {
     diagnostics_.error(expr->span, "E2091",
@@ -4234,7 +4252,7 @@ Type* Checker::checkCall(Expr* expr) {
       return intType_;
     }
 
-    if (callee->name == "Thread") {
+    if (callee->name == "Thread" || callee->name == "ScopedThread") {
       Type* entryType = makeFunctionType({}, voidType_);
       if (expr->args.size() != 1) {
         diagnostics_.error(expr->span, "E2090",
@@ -4281,8 +4299,11 @@ Type* Checker::checkCall(Expr* expr) {
               "call-scoped closures cannot cross threads");
         }
       }
-      expr->resolvedType = threadType_;
-      return threadType_;
+      Type* threadResult = callee->name == "ScopedThread"
+                               ? scopedThreadType_
+                               : threadType_;
+      expr->resolvedType = threadResult;
+      return threadResult;
     }
 
     if (callee->name == "ScopedLock") {
@@ -5607,7 +5628,9 @@ void Checker::checkStmt(Stmt* stmt) {
           }
         }
       }
-      if (type != nullptr && type->kind == TypeKind::Thread &&
+      if (type != nullptr &&
+          (type->kind == TypeKind::Thread ||
+           type->kind == TypeKind::ScopedThread) &&
           stmt->expr != nullptr &&
           stmt->expr->kind != ExprKind::Call) {
         diagnostics_.error(

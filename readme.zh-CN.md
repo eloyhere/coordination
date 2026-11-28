@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**158 项 CTest**，Windows 全套 **158/158 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 当前基线：**164 项 CTest**，Windows 全套 **164/164 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **158 项**（1 个单元测试 + 157 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 注册 **164 项**（1 个单元测试 + 163 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -522,7 +522,8 @@ coorc build . -o out\app.exe
 - `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口目标以函数值子集提供：`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` 降为函数类型（泛型实参替换，`.apply`/`.accept`/`.test`/`.get` 调用形式）；具名接口值与类实现 `@FunctionalInterface` 仍属 ⏳（`E2004`/`E2089`）。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 为 v1 子集：无函数体、原始类型/string 参数与返回值，通过生成包装调用 C 符号；class/指针/header/library 与 C++ ABI 选择仍属 ⏳。`@Copy`/`@Wrap`、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 仍属 ⏳；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
 - `ProxyPolicy` 的执行主要验证了局部 `T*`/`@Unique`/`@Share` 变量（直接访问、收窄、局部 Optional 解构）与 `@Proxy` 的 `Skip`/`Abort`/`Error` 解构路径。字段/参数/返回值上的 `@Optional` 已解析/校验，但完整 policy 执行仍不完整；`@Proxy` 的 `Default(expr)` 构造/解构、runtime 构造前钩子、任意非默认构造类的 `Skip` 默认值仍属 🚧。
 - `@Constructure` 类型化/命名构造与 `@Retention(Compile/Runtime)` 代码块已实现基础版；编译期块不能依赖运行期局部状态，代码块上的 `Invocation`/`enum` 报 `E2044`；复杂构造重载消歧仍属 🚧。
-- Atomic v0：内建不可拷贝 `Atomic`，降为 `std::atomic<std::int64_t>`，支持 `load()`、`store(v)`、`fetchAdd(v)`（返回加法前的值）。所有操作 seq_cst，无内存序参数；没有 `Atomic<T>` 泛型、浮点/指针原子、condition variable 或数据竞争静态分析。支持局部变量与类字段，参数/返回位置 ⏳。拷贝或赋值报 `E2092`。
+- Atomic v0：内建不可拷贝 `Atomic`，降为 `std::atomic<std::int64_t>`，支持 `load()`、`store(v)`、`fetchAdd(v)`/`fetchSub(v)`（返回操作前的值）、`exchange(v)`（返回旧值）与 `compareExchange(expected, desired)`（值等于 expected 并替换为 desired 时返回 true；expected 不被更新）。所有操作 seq_cst，无内存序参数；没有 `Atomic<T>` 泛型、浮点/指针原子、condition variable 或数据竞争静态分析。支持局部变量与类字段，参数/返回位置 ⏳。拷贝或赋值报 `E2092`。
+- ScopedThread v0：内建 move-only `ScopedThread`，降为 `std::jthread`，析构时自动 join（离开声明块会等待线程结束）。支持 `join()`/`detach()`/`joinable()` 与和 `Thread` 相同的跨线程捕获规则（`E2090`）；不可拷贝/赋值，仅局部变量。没有 `stop_token`/`requestStop`、取消或跨线程异常传播。
 - ScopedLock/@Lock v0：`ScopedLock guard = ScopedLock(mutex);` 是 `std::lock_guard<std::mutex>` 形式的 RAII，由具名 `Mutex` 左值构造并在离开作用域时解锁；不可拷贝（`E2092`）且仅局部变量。`@Lock(mutex) { ... }` 是块形式（恰好一个具名 `Mutex` 左值，否则 `E2093`）。没有超时、try-lock 或重入检查：同一 mutex 嵌套加锁会死锁。
 - Mutex v0：内建不可拷贝 `Mutex`，降为 `std::mutex`，手动 `lock()`/`unlock()`/`tryLock()`；拷贝或赋值报 `E2091`。没有 RAII guard、没有静态数据竞争分析；忘记 unlock 会阻塞其它线程。`Mutex` 可作局部变量或类字段（含 Mutex 的对象用 `@Share` 共享）；参数/返回值位置 ⏳。
 - Thread v0：内建 move-only `Thread`，由 `() -> void` 入口构造，支持 `join()`/`detach()`/`joinable()`/`hardwareConcurrency()`。入口闭包必须拥有捕获（`[]`、`[=]`、`[x]`、`@Share` 拷贝）；`[&]`、`[&x]`、`[this]` 与调用期借用的函数值报 `E2090`。可 join 的线程必须在析构前 join/detach；共享可变状态不保证无数据竞争，同步原语、scoped thread 与非局部 `Thread` 位置仍属 ⏳。
