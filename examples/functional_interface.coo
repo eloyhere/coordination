@@ -1,0 +1,37 @@
+// Functional interfaces lower to function values in v0; their single abstract
+// method is callable through the interface method name.
+class Math {
+public:
+    static integer triple(integer value) {
+        return value * 3;
+    }
+}
+
+integer applyTwice(Function<integer, integer> fn, integer value) {
+    return fn(fn(value));
+}
+
+integer main() {
+    Function<integer, integer> twice = [](integer x): integer -> x * 2;
+    print(twice.apply(21));
+    print(applyTwice(twice, 5));
+    print(applyTwice((integer x): integer -> x + 3, 4));
+
+    Function<integer, integer> triple = Math::triple;
+    print(triple.apply(3));
+
+    Consumer<string> printLine = [](string text): void -> { print(text); };
+    printLine.accept("functional");
+
+    Predicate<integer> positive = (integer value): boolean -> value > 0;
+    print(positive.test(5));
+    print(positive.test(-1));
+
+    Supplier<integer> constant = (): integer -> 9;
+    print(constant.get());
+
+    BiFunction<integer, integer, integer> add =
+        (integer a, integer b): integer -> a + b;
+    print(add.apply(2, 3));
+    return 0;
+}

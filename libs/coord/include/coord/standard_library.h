@@ -11,4 +11,8 @@ namespace coord {
 [[nodiscard]] std::string standardAnnotationsSource(
     std::string* error = nullptr);
 
+/// Read the ordinary Coo source of the standard utility library
+/// (`lib/standard/utility.coo`): functional interfaces and related helpers.
+[[nodiscard]] std::string standardUtilitySource(std::string* error = nullptr);
+
 }  // namespace coord

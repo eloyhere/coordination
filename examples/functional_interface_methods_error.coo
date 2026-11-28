@@ -1,0 +1,11 @@
+// @FunctionalInterface requires exactly one abstract method.
+@FunctionalInterface
+interface Bad {
+    void first();
+
+    void second();
+}
+
+integer main() {
+    return 0;
+}

@@ -1,0 +1,16 @@
+// A @FunctionalInterface is a function-value target in v0; classes cannot
+// implement it nominally yet.
+class Doubler implements Function<integer, integer> {
+public:
+    Doubler() {}
+
+    integer apply(integer value) {
+        return value * 2;
+    }
+}
+
+integer main() {
+    Doubler doubler;
+    print(doubler.apply(2));
+    return 0;
+}

@@ -61,6 +61,7 @@ private:
   void emitShareEdgeRecord(const Expr* assign);
 
   [[nodiscard]] std::string typeToString(const TypeExpr* type) const;
+  [[nodiscard]] std::string cppTypeName(const Type* type) const;
   [[nodiscard]] std::string sanitize(const std::string& name) const;
   [[nodiscard]] std::string literal(const Value& value) const;
   [[nodiscard]] const Value* constant(const std::string& name) const;

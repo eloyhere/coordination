@@ -170,12 +170,82 @@ std::string CppEmitter::literal(const Value& value) const {
   return "0";
 }
 
+std::string CppEmitter::cppTypeName(const Type* type) const {
+  if (type == nullptr) {
+    return "void";
+  }
+  if (type->kind == TypeKind::Function) {
+    std::string result =
+        "std::function<" + cppTypeName(type->returnType) + "(";
+    for (std::size_t i = 0; i < type->alternatives.size(); ++i) {
+      if (i != 0) {
+        result += ", ";
+      }
+      result += cppTypeName(type->alternatives[i]);
+    }
+    result += ")>";
+    return result;
+  }
+  if (type->kind == TypeKind::Class || type->kind == TypeKind::Interface ||
+      type->kind == TypeKind::Enum) {
+    return sanitize(type->name);
+  }
+  if (type->kind == TypeKind::Queue) {
+    return "std::deque<" + cppTypeName(type->pointee) + ">";
+  }
+  if (type->kind == TypeKind::Array) {
+    return "std::array<" + cppTypeName(type->pointee) + ", " +
+           std::to_string(type->arrayLength) + ">";
+  }
+  if (type->kind == TypeKind::ArrayView) {
+    return "coord_rt::ArrayView<" + cppTypeName(type->pointee) + ">";
+  }
+  if (type->kind == TypeKind::Map) {
+    return std::string(type->unordered ? "std::unordered_map<"
+                                      : "std::map<") +
+           cppTypeName(type->alternatives[0]) + ", " +
+           cppTypeName(type->alternatives[1]) + ">";
+  }
+  if (type->kind == TypeKind::Set) {
+    return std::string(type->unordered ? "std::unordered_set<"
+                                      : "std::set<") +
+           cppTypeName(type->pointee) + ">";
+  }
+  const std::string& name = type->name;
+  if (name == "integer") {
+    return "std::int64_t";
+  }
+  if (name == "boolean" || name == "bool") {
+    return "bool";
+  }
+  if (name == "character" || name == "char") {
+    return "char32_t";
+  }
+  if (name == "string") {
+    return "std::string";
+  }
+  if (name == "decimal") {
+    return "coord_rt::Decimal";
+  }
+  if (name == "float") {
+    return "double";
+  }
+  if (name == "void") {
+    return "void";
+  }
+  return sanitize(name);
+}
+
 std::string CppEmitter::typeToString(const TypeExpr* type) const {
   if (type == nullptr) {
     return "void";
   }
   switch (type->kind) {
     case TypeExprKind::Named: {
+      if (type->resolved != nullptr &&
+          type->resolved->kind == TypeKind::Function) {
+        return cppTypeName(type->resolved);
+      }
       if (type->resolved != nullptr &&
           type->name.find('.') != std::string::npos) {
         return sanitize(type->resolved->name);
@@ -4430,6 +4500,23 @@ void CppEmitter::emitExpr(const Expr* expr) {
           return;
         }
       }
+      if (callee != nullptr && callee->kind == ExprKind::Member &&
+          callee->lhs != nullptr && callee->lhs->resolvedType != nullptr &&
+          callee->lhs->resolvedType->kind == TypeKind::Function &&
+          (callee->name == "apply" || callee->name == "accept" ||
+           callee->name == "test" || callee->name == "get" ||
+           callee->name == "run" || callee->name == "call")) {
+        emitExpr(callee->lhs.get());
+        out_ << '(';
+        for (std::size_t i = 0; i < expr->args.size(); ++i) {
+          if (i != 0) {
+            out_ << ", ";
+          }
+          emitExpr(expr->args[i].get());
+        }
+        out_ << ')';
+        return;
+      }
       if (callee != nullptr && callee->kind == ExprKind::Name &&
           callee->name == "print") {
         out_ << "coord_rt::print";
@@ -5202,9 +5289,19 @@ void CppEmitter::emit() {
       case DeclKind::Enum:
         emitEnum(*decl);
         break;
-      case DeclKind::Interface:
-        emitInterface(*decl);
+      case DeclKind::Interface: {
+        bool functional = false;
+        for (const AnnotationUse& use : decl->annotations) {
+          if (use.name == "FunctionalInterface") {
+            functional = true;
+            break;
+          }
+        }
+        if (!functional) {
+          emitInterface(*decl);
+        }
         break;
+      }
       case DeclKind::Function:
         if (decl->name != "main") {
           emitFunction(*decl);

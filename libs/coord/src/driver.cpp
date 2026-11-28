@@ -638,32 +638,43 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
     return 1;
   }
 
-  // Standard-library annotations: ordinary Coo declarations loaded from
-  // lib/standard/annotations.coo; only the meta-annotations are C++.
+  // Standard-library declarations are ordinary Coo sources loaded from
+  // lib/standard: annotations.coo first, then utility.coo (functional
+  // interfaces). Only the meta-annotations are special in C++.
+  const auto loadStandardModule = [&](const std::string& displayName,
+                                      const std::string& source) -> bool {
+    if (source.empty()) {
+      return false;
+    }
+    const std::uint32_t fileId = sources.addFile(displayName, source);
+    Lexer lexer(sources, fileId, diagnostics);
+    Parser parser(lexer.lexAll(), diagnostics);
+    std::unique_ptr<ModuleAst> imported = parser.parseModule(fileId);
+    if (diagnostics.hasErrors()) {
+      return false;
+    }
+    for (auto& decl : imported->decls) {
+      decl->isStandard = true;
+    }
+    module->decls.insert(module->decls.begin(),
+                         std::make_move_iterator(imported->decls.begin()),
+                         std::make_move_iterator(imported->decls.end()));
+    return true;
+  };
+
   std::string standardError;
-  const std::string standardSource =
+  const std::string annotationSource =
       standardAnnotationsSource(&standardError);
-  if (standardSource.empty()) {
+  const std::string utilitySource = standardUtilitySource(&standardError);
+  if (!loadStandardModule("<standard-annotations>", annotationSource) ||
+      !loadStandardModule("<standard-utility>", utilitySource)) {
+    if (standardError.empty()) {
+      standardError = "cannot read the standard library";
+    }
     diagnostics.error({}, "E2071", standardError);
     diagnostics.render(sources, err);
     return 1;
   }
-  const std::uint32_t standardFileId =
-      sources.addFile("<standard-annotations>", standardSource);
-  Lexer standardLexer(sources, standardFileId, diagnostics);
-  Parser standardParser(standardLexer.lexAll(), diagnostics);
-  std::unique_ptr<ModuleAst> standardModule =
-      standardParser.parseModule(standardFileId);
-  if (diagnostics.hasErrors()) {
-    diagnostics.render(sources, err);
-    return 1;
-  }
-  for (auto& decl : standardModule->decls) {
-    decl->isStandard = true;
-  }
-  module->decls.insert(module->decls.begin(),
-                       std::make_move_iterator(standardModule->decls.begin()),
-                       std::make_move_iterator(standardModule->decls.end()));
 
   if (options.dumpAst) {
     dumpAst(*module, out);

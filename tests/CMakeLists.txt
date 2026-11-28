@@ -1097,6 +1097,38 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2005
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_functional_interface
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/functional_interface.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_functional_interface
+      -DEXPECTED=42|20|10|9|functional|true|false|9|5
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_functional_interface_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/functional_interface_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_functional_interface_error
+      -DEXPECT_SUBSTRING=E2004
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_functional_interface_arity_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/functional_interface_arity_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_functional_interface_arity_error
+      -DEXPECT_SUBSTRING=E2089
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_functional_interface_methods_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/functional_interface_methods_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_functional_interface_methods_error
+      -DEXPECT_SUBSTRING=E2089
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lambda_escape
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

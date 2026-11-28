@@ -20,9 +20,7 @@ std::string readText(const std::filesystem::path& path) {
   return buffer.str();
 }
 
-}  // namespace
-
-std::string standardAnnotationsSource(std::string* error) {
+std::string readStandardFile(const char* fileName, std::string* error) {
   std::vector<std::filesystem::path> candidates;
   if (const std::optional<std::string> configured =
           platform::environment("COORD_STDLIB_DIR");
@@ -34,17 +32,27 @@ std::string standardAnnotationsSource(std::string* error) {
 #endif
   candidates.emplace_back("lib/standard");
   for (const auto& directory : candidates) {
-    const std::filesystem::path file = directory / "annotations.coo";
+    const std::filesystem::path file = directory / fileName;
     std::string text = readText(file);
     if (!text.empty()) {
       return text;
     }
     if (error != nullptr) {
-      *error = "cannot read standard annotation library '" +
+      *error = "cannot read standard library file '" +
                platform::pathToUtf8(file) + "'";
     }
   }
   return {};
+}
+
+}  // namespace
+
+std::string standardAnnotationsSource(std::string* error) {
+  return readStandardFile("annotations.coo", error);
+}
+
+std::string standardUtilitySource(std::string* error) {
+  return readStandardFile("utility.coo", error);
 }
 
 }  // namespace coord

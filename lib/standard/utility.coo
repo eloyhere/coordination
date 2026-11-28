@@ -1,0 +1,28 @@
+// Functional interfaces. In v0 a @FunctionalInterface is a function-value
+// target: it lowers to the equivalent function type and lambda values are
+// checked against its single abstract method. Nominal interface values that
+// hold an arbitrary implementation object remain future work.
+@FunctionalInterface
+interface Function<T, R> {
+    R apply(T value);
+}
+
+@FunctionalInterface
+interface Consumer<T> {
+    void accept(T value);
+}
+
+@FunctionalInterface
+interface Predicate<T> {
+    boolean test(T value);
+}
+
+@FunctionalInterface
+interface Supplier<T> {
+    T get();
+}
+
+@FunctionalInterface
+interface BiFunction<A, B, R> {
+    R apply(A first, B second);
+}

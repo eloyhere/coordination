@@ -886,9 +886,11 @@ Type* Checker::resolveNamedType(TypeExpr* type, bool allowMeta) {
                        "unknown type '" + type->name + "'");
     return errorType_;
   }
+  if (found->kind == TypeKind::Interface && found->functional) {
+    return instantiateFunctionalInterface(found, type, allowMeta);
+  }
   if (!type->args.empty()) {
-    if (resolvedName == "Reflector") {
-      std::vector<Type*> arguments;
+    if (resolvedName == "Reflector") {      std::vector<Type*> arguments;
       for (const auto& arg : type->args) {
         arguments.push_back(resolveType(arg.get(), allowMeta));
       }
@@ -906,6 +908,53 @@ Type* Checker::resolveNamedType(TypeExpr* type, bool allowMeta) {
     }
   }
   return found;
+}
+
+Type* Checker::instantiateFunctionalInterface(Type* iface, TypeExpr* type,
+                                              bool allowMeta) {
+  const Decl* decl = iface->decl;
+  if (decl == nullptr) {
+    return errorType_;
+  }
+  const std::size_t expected = decl->generics.size();
+  if (type->args.size() != expected) {
+    diagnostics_.error(
+        type->span, "E2089",
+        "functional interface '" + iface->name + "' expects " +
+            std::to_string(expected) + " type argument(s)");
+    return errorType_;
+  }
+  std::vector<Type*> arguments;
+  arguments.reserve(type->args.size());
+  for (const auto& argument : type->args) {
+    arguments.push_back(resolveType(argument.get(), allowMeta));
+  }
+  const Decl* method = nullptr;
+  for (const auto& member : decl->members) {
+    if (member->kind == DeclKind::Method && member->body == nullptr) {
+      method = member.get();
+      break;
+    }
+  }
+  if (method == nullptr) {
+    diagnostics_.error(type->span, "E2089",
+                       "functional interface '" + iface->name +
+                           "' has no abstract method");
+    return errorType_;
+  }
+  pushTypeScope();
+  for (std::size_t i = 0; i < arguments.size(); ++i) {
+    typeScopes_.back()[decl->generics[i].name] = arguments[i];
+  }
+  std::vector<Type*> parameters;
+  parameters.reserve(method->params.size());
+  for (const Param& parameter : method->params) {
+    parameters.push_back(resolveType(parameter.type.get(), false));
+  }
+  Type* returnType =
+      method->type ? resolveType(method->type.get(), false) : voidType_;
+  popTypeScope();
+  return makeFunctionType(std::move(parameters), returnType);
 }
 
 Type* Checker::resolveType(TypeExpr* type, bool allowMeta) {
@@ -1849,6 +1898,32 @@ void Checker::checkInterface(Decl& decl) {
     if (member->kind == DeclKind::Method) {
       member->isVirtual = true;
       checkMethod(*member, type);
+    }
+  }
+
+  bool functional = false;
+  for (const AnnotationUse& use : decl.annotations) {
+    if (use.name == "FunctionalInterface") {
+      functional = true;
+    }
+  }
+  if (functional) {
+    const Decl* abstractMethod = nullptr;
+    int abstractCount = 0;
+    for (const auto& member : decl.members) {
+      if (member->kind == DeclKind::Method && member->body == nullptr) {
+        ++abstractCount;
+        abstractMethod = member.get();
+      }
+    }
+    if (abstractCount != 1) {
+      diagnostics_.error(
+          decl.span, "E2089",
+          "@FunctionalInterface requires exactly one abstract method, but '" +
+              decl.name + "' declares " + std::to_string(abstractCount));
+    } else {
+      type->functional = true;
+      type->functionalMethod = abstractMethod->name;
     }
   }
 
@@ -4233,6 +4308,33 @@ Type* Checker::checkCall(Expr* expr) {
 
   if (callee->kind == ExprKind::Member) {
     Type* baseType = checkExpr(callee->lhs.get());
+    if (baseType != nullptr && baseType->kind == TypeKind::Function &&
+        (callee->name == "apply" || callee->name == "accept" ||
+         callee->name == "test" || callee->name == "get" ||
+         callee->name == "run" || callee->name == "call")) {
+      const std::size_t count =
+          std::min(expr->args.size(), baseType->alternatives.size());
+      if (expr->args.size() != baseType->alternatives.size()) {
+        diagnostics_.error(
+            expr->span, "E2004",
+            "functional interface method '" + callee->name + "' takes " +
+                std::to_string(baseType->alternatives.size()) +
+                " argument(s)");
+      }
+      for (std::size_t i = 0; i < count; ++i) {
+        if (expr->args[i] != nullptr &&
+            expr->args[i]->kind == ExprKind::Lambda) {
+          checkLambda(expr->args[i].get(), baseType->alternatives[i]);
+        } else {
+          Type* argType = checkExpr(expr->args[i].get());
+          requireAssignable(argType, baseType->alternatives[i],
+                            expr->args[i]->span,
+                            "functional interface argument");
+        }
+      }
+      expr->resolvedType = baseType->returnType;
+      return baseType->returnType;
+    }
     if (callee->lhs != nullptr && callee->lhs->optionalCall) {
       Type* fieldType = callee->lhs->resolvedType;
       Type* valueType =

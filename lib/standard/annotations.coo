@@ -50,13 +50,13 @@ public:
     integer index;
 }
 
-class Function extends Member {
+class FunctionMember extends Member {
 public:
     @Optional Class returnType;
     Array<Class> parameterTypes;
 }
 
-class Method extends Function {
+class Method extends FunctionMember {
 public:
     string name;
     string returnTypeName;
@@ -66,7 +66,7 @@ public:
     string document;
     Array<string> baseNames;
 }
-class Constructor extends Function {}
+class Constructor extends FunctionMember {}
 
 class Descriptor {
 public:
