@@ -214,10 +214,10 @@ constructure-init = "{", [ constructure-entry,
 constructure-entry = [ type ], ( expression
                                | identifier, [ "=", expression ] ) ;
 
-(* Each case body is a single statement; `default` is switch-only and last. *)
+(* Each switch case body is a block; `default()` is switch-only and last. *)
 switch-body      = "{", { switch-case }, "}" ;
-switch-case      = "case", expression, ":", statement
-                 | "default", ":", statement ;
+switch-case      = "case", "(", expression, ")", block
+                 | "default", "(", ")", block ;
 
 match-body       = "{", { match-case }, "}" ;
 match-case       = "case", pattern, ":", ( expression | block ) ;

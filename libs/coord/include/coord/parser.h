@@ -58,7 +58,7 @@ private:
   StmtPtr parseIf();
   StmtPtr parseFor();
   StmtPtr parseWhile();
-  StmtPtr parseSwitch(bool isMatch = false);
+  StmtPtr parseSwitch();
   StmtPtr parseMatch();
   StmtPtr parseLockBlock();
   PatternPtr parsePattern();

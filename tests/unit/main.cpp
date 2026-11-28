@@ -3025,9 +3025,9 @@ void testSwitchStatement() {
 integer main() {
     integer value = 2;
     switch (value) {
-        case 1: { print("one"); }
-        case 2: { print("two"); }
-        default: { print("other"); }
+        case (1) { print("one"); }
+        case (2) { print("two"); }
+        default() { print("other"); }
     }
     return 0;
 }
@@ -3037,7 +3037,7 @@ integer main() {
   Harness badCase(R"(
 integer main() {
     switch (1) {
-        case "one": { print("one"); }
+        case ("one") { print("one"); }
     }
     return 0;
 }

@@ -1513,12 +1513,12 @@ StmtPtr Parser::parseWhile() {
   return stmt;
 }
 
-StmtPtr Parser::parseSwitch(bool isMatch) {
+StmtPtr Parser::parseSwitch() {
   auto stmt = std::make_unique<Stmt>();
   stmt->kind = StmtKind::Switch;
-  stmt->isMatch = isMatch;
+  stmt->isMatch = false;
   stmt->span = current().span;
-  advance();  // switch/match
+  advance();  // switch
   expect(TokKind::LParen, "'('");
   stmt->condition = parseExpression();
   expect(TokKind::RParen, "')'");
@@ -1530,38 +1530,45 @@ StmtPtr Parser::parseSwitch(bool isMatch) {
     bool isDefault = false;
     if (check(TokKind::Identifier) && current().text == "case") {
       advance();
-    } else if (check(TokKind::Identifier) && current().text == "default") {
-      if (isMatch) {
-        error(current(), "match does not allow a default branch");
+      if (!expect(TokKind::LParen, "'(' after 'case'")) {
+        // Recovery: skip the malformed branch so the parser can still report
+        // the missing closing brace instead of cascading.
+        while (!atEnd() && !check(TokKind::RBrace)) {
+          advance();
+        }
+        break;
       }
+      stmt->switchValues.push_back(parseExpression());
+      expect(TokKind::RParen, "')' after a switch case value");
+    } else if (check(TokKind::Identifier) && current().text == "default") {
       advance();
       isDefault = true;
       if (sawDefault) {
         error(current(), "duplicate default branch");
       }
       sawDefault = true;
+      if (!expect(TokKind::LParen, "'(' after 'default'")) {
+        while (!atEnd() && !check(TokKind::RBrace)) {
+          advance();
+        }
+        break;
+      }
+      expect(TokKind::RParen, "')' after 'default'");
+      stmt->switchValues.push_back(nullptr);
     } else {
       error(current(), "expected 'case' or 'default' in switch");
       break;
     }
-    stmt->switchValues.push_back(isDefault ? nullptr : parseExpression());
-    expect(TokKind::Colon, "':'");
-    if (isDefault) {
-      if (!check(TokKind::RBrace)) {
-        // default must be last; still parse its body for recovery
-      }
-    }
-    StmtPtr body = parseStatement();
-    if (body == nullptr) {
-      error(current(), "expected switch branch body");
+    // A switch branch body is always a block; `case (x):` is not part of the
+    // language (match keeps its own pattern syntax).
+    if (!check(TokKind::LBrace)) {
+      error(current(), "a switch branch body must be a block '{ ... }'");
       break;
     }
-    stmt->switchBodies.push_back(std::move(body));
-    if (isDefault) {
-      if (!check(TokKind::RBrace)) {
-        error(current(), "default branch must be last in switch");
-        break;
-      }
+    stmt->switchBodies.push_back(parseBlock());
+    if (isDefault && !check(TokKind::RBrace)) {
+      error(current(), "default branch must be last in switch");
+      break;
     }
   }
   expect(TokKind::RBrace, "'}'");

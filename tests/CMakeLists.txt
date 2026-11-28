@@ -700,6 +700,30 @@ add_test(NAME coord_e2e_switch
     -DEXPECTED=two|fallback|green|b
     -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 
+add_test(NAME coord_e2e_switch_old_syntax_error
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/switch_old_syntax_error.coo
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_switch_old_syntax_error
+    "-DEXPECT_SUBSTRING=after 'case'"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+add_test(NAME coord_e2e_switch_missing_paren_error
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/switch_missing_paren_error.coo
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_switch_missing_paren_error
+    "-DEXPECT_SUBSTRING=after 'case'"
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+add_test(NAME coord_e2e_switch_missing_brace_error
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/switch_missing_brace_error.coo
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_switch_missing_brace_error
+    -DEXPECT_SUBSTRING=must be a block
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
 add_test(NAME coord_e2e_destructure
   COMMAND ${CMAKE_COMMAND}
     -DCOORC=$<TARGET_FILE:coorc>

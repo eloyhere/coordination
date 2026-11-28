@@ -1,0 +1,12 @@
+integer main() {
+    integer value = 1;
+    switch (value) {
+        case 1: {
+            print("one");
+        }
+        default: {
+            print("other");
+        }
+    }
+    return 0;
+}

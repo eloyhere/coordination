@@ -8,48 +8,48 @@ integer main() {
     integer value = 2;
 
     switch (value) {
-        case 1: {
+        case (1) {
             print("one");
         }
-        case 2: {
+        case (2) {
             print("two");
         }
-        default: {
+        default() {
             print("other");
         }
     }
 
     switch (value) {
-        case 99: {
+        case (99) {
             print("never");
         }
-        default: {
+        default() {
             print("fallback");
         }
     }
 
     Color color = Color.Green;
     switch (color) {
-        case Color.Red: {
+        case (Color.Red) {
             print("red");
         }
-        case Color.Green: {
+        case (Color.Green) {
             print("green");
         }
-        default: {
+        default() {
             print("blue");
         }
     }
 
     string name = "b";
     switch (name) {
-        case "a": {
+        case ("a") {
             print("a");
         }
-        case "b": {
+        case ("b") {
             print("b");
         }
-        default: {
+        default() {
             print("unknown");
         }
     }
