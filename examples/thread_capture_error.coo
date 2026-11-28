@@ -1,0 +1,8 @@
+// A thread entry closure must own its captures: by-reference captures are
+// rejected because the borrowed local can die before the thread runs.
+integer main() {
+    integer value = 1;
+    Thread worker = Thread([&value](): void -> { print(value); });
+    worker.join();
+    return 0;
+}

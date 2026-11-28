@@ -1,0 +1,20 @@
+// A thread entry closure cannot capture 'this'.
+class Job {
+public:
+    integer value;
+
+    Job() {
+        this.value = 1;
+    }
+
+    void run() {
+        Thread worker = Thread([this](): void -> { print(value); });
+        worker.join();
+    }
+}
+
+integer main() {
+    Job job;
+    job.run();
+    return 0;
+}

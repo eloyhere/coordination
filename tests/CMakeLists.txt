@@ -1129,6 +1129,38 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2089
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_thread
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/thread.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_thread
+      -DEXPECTED=true|worker|false|true|42|false
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_thread_capture_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/thread_capture_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_thread_capture_error
+      -DEXPECT_SUBSTRING=E2090
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_thread_this_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/thread_this_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_thread_this_error
+      -DEXPECT_SUBSTRING=E2090
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_thread_copy_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/thread_copy_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_thread_copy_error
+      -DEXPECT_SUBSTRING=E2090
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lambda_escape
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

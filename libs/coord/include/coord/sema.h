@@ -37,6 +37,7 @@ enum class TypeKind {
   Proxy,
   SharePtr,
   Pointer,
+  Thread,
   Array,
   Queue,
   ArrayView,
@@ -130,6 +131,7 @@ struct LambdaContext {
   bool hasDefault = false;
   bool defaultByRef = false;
   bool capturesThis = false;
+  bool usesThis = false;
   std::size_t scopeBoundary = 0;
   /// Explicitly named captures: name -> true when captured by reference.
   std::unordered_map<std::string, bool> namedCaptures;
@@ -349,6 +351,7 @@ private:
   Type* reflectionType_ = nullptr;
   Type* reflectorType_ = nullptr;
   Type* proxyType_ = nullptr;
+  Type* threadType_ = nullptr;
 
   std::unordered_map<std::string, Decl*> typeDecls_;
   std::unordered_map<std::string, std::vector<Decl*>> functions_;

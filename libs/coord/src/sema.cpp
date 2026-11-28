@@ -273,6 +273,19 @@ void Checker::initializeBuiltins() {
   functionType_ = makeType(TypeKind::Function, "function", classType_);
   descriptionType_ = makeType(TypeKind::Description, "Description", classType_);
   reflectorType_ = makeType(TypeKind::Reflector, "Reflector", classType_);
+
+  threadType_ = makeType(TypeKind::Thread, "Thread", classType_);
+  const auto addThreadMethod = [&](const char* name, Type* returnType) {
+    MethodInfo method;
+    method.name = name;
+    method.returnType = returnType;
+    method.owner = threadType_;
+    method.access = Access::Public;
+    threadType_->methods.push_back(method);
+  };
+  addThreadMethod("join", voidType_);
+  addThreadMethod("detach", voidType_);
+  addThreadMethod("joinable", boolType_);
 }
 
 Type* Checker::makeType(TypeKind kind, std::string name, Type* base) {
@@ -3008,6 +3021,7 @@ void Checker::recordCaptureUse(const Expr* expr, const std::string& name,
 
 void Checker::recordThisCapture(Span span) {
   for (auto it = lambdaContexts_.rbegin(); it != lambdaContexts_.rend(); ++it) {
+    it->usesThis = true;
     if (!it->explicitList || it->capturesThis) {
       continue;
     }
@@ -3132,6 +3146,7 @@ void Checker::checkLambda(Expr* expr, Type* expected) {
   currentFunction_ = savedFunction;
   inDestructor_ = savedDestructor;
   expr->lambda->borrowDepth = evaluateLambdaBorrow(lambdaContexts_.back());
+  expr->lambda->usesThis = lambdaContexts_.back().usesThis;
   expr->borrowDepth = expr->lambda->borrowDepth;
   popScope();
   lambdaContexts_.pop_back();
@@ -3587,6 +3602,11 @@ Type* Checker::checkBinary(Expr* expr) {
 Type* Checker::checkAssign(Expr* expr) {
   Type* lhs = checkExpr(expr->lhs.get());
   checkCaptureMutation(expr->lhs.get(), expr->span);
+  if (lhs != nullptr && lhs->kind == TypeKind::Thread) {
+    diagnostics_.error(expr->span, "E2090",
+                       "Thread values cannot be assigned in v0; join/detach "
+                       "the current thread instead");
+  }
   bool optional = false;
   if (expr->lhs->kind == ExprKind::Name) {
     if (Variable* variable = lookupVariable(expr->lhs->name)) {
@@ -4164,6 +4184,66 @@ Type* Checker::checkCall(Expr* expr) {
       }
       expr->resolvedType = errorValueType_;
       return errorValueType_;
+    }
+
+    if (callee->name == "hardwareConcurrency") {
+      if (!expr->args.empty()) {
+        diagnostics_.error(expr->span, "E2090",
+                           "hardwareConcurrency() takes no arguments");
+      }
+      expr->resolvedType = intType_;
+      return intType_;
+    }
+
+    if (callee->name == "Thread") {
+      Type* entryType = makeFunctionType({}, voidType_);
+      if (expr->args.size() != 1) {
+        diagnostics_.error(expr->span, "E2090",
+                           "Thread() takes exactly one entry function");
+        for (const auto& arg : expr->args) {
+          checkExpr(arg.get());
+        }
+      } else {
+        Expr* entry = expr->args[0].get();
+        if (entry != nullptr && entry->kind == ExprKind::Lambda) {
+          checkLambda(entry, entryType);
+          for (const Capture& capture : entry->lambda->captures) {
+            if (capture.kind == Capture::Kind::This) {
+              diagnostics_.error(
+                  capture.span, "E2090",
+                  "a thread entry closure cannot capture 'this'; capture the "
+                  "needed values by copy");
+            } else if (capture.kind == Capture::Kind::ByRef) {
+              diagnostics_.error(
+                  capture.span, "E2090",
+                  "a thread entry closure cannot capture by reference; "
+                  "capture by value ([=], [x]) instead");
+            }
+          }
+          if (entry->lambda->usesThis) {
+            diagnostics_.error(entry->span, "E2090",
+                               "a thread entry closure cannot use 'this'");
+          }
+        } else {
+          Type* checked = checkExpr(entry);
+          if (checked == nullptr || checked->kind != TypeKind::Function ||
+              !checked->alternatives.empty() ||
+              checked->returnType == nullptr ||
+              checked->returnType->kind != TypeKind::Void) {
+            diagnostics_.error(
+                expr->span, "E2090",
+                "Thread() entry must have type () -> void");
+          }
+        }
+        if (entry != nullptr && entry->borrowDepth != 0) {
+          diagnostics_.error(
+              entry->span, "E2090",
+              "a thread entry closure must own its captures; by-reference or "
+              "call-scoped closures cannot cross threads");
+        }
+      }
+      expr->resolvedType = threadType_;
+      return threadType_;
     }
 
     const auto typeIt = typeMap_.find(callee->name);
@@ -5424,6 +5504,14 @@ void Checker::checkStmt(Stmt* stmt) {
             break;
           }
         }
+      }
+      if (type != nullptr && type->kind == TypeKind::Thread &&
+          stmt->expr != nullptr &&
+          stmt->expr->kind != ExprKind::Call) {
+        diagnostics_.error(
+            stmt->span, "E2090",
+            "Thread values are move-only: construct the thread in place with "
+            "Thread(entry) instead of copying another thread");
       }
       declareVariable(stmt->name, type, stmt->isConst, nullptr, stmt->span, stmt->isOptional, stmt->proxyPolicy, stmt->optionalDefault.get());
       if (Variable* declared = lookupVariable(stmt->name)) {

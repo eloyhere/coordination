@@ -1,0 +1,7 @@
+// Thread values are move-only and cannot be copied.
+integer main() {
+    Thread first = Thread([](): void -> {});
+    Thread second = first;
+    second.join();
+    return 0;
+}

@@ -1,0 +1,19 @@
+// Thread v0: a thread is created from a () -> void closure that owns its
+// captures, and must be joined or detached before it is destroyed.
+integer main() {
+    Thread worker = Thread([](): void -> { print("worker"); });
+    print(worker.joinable());
+    worker.join();
+    print(worker.joinable());
+
+    print(hardwareConcurrency() > 0);
+
+    integer value = 41;
+    Thread byValue = Thread([value](): void -> { print(value + 1); });
+    byValue.join();
+
+    Thread detached = Thread([](): void -> {});
+    detached.detach();
+    print(detached.joinable());
+    return 0;
+}

@@ -211,6 +211,9 @@ std::string CppEmitter::cppTypeName(const Type* type) const {
                                       : "std::set<") +
            cppTypeName(type->pointee) + ">";
   }
+  if (type->kind == TypeKind::Thread) {
+    return "std::thread";
+  }
   const std::string& name = type->name;
   if (name == "integer") {
     return "std::int64_t";
@@ -306,6 +309,7 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
           {"integer", "std::int64_t"},
           {"character", "char32_t"},
           {"boolean", "bool"},
+          {"Thread", "std::thread"},
           {"Enumeration", "std::int64_t"},
           {"char", "char32_t"},
           {"string", "std::string"},
@@ -3368,6 +3372,23 @@ void CppEmitter::emitExpr(const Expr* expr) {
       return;
     case ExprKind::Call: {
       const Expr* callee = expr->lhs.get();
+      if (callee != nullptr && callee->kind == ExprKind::Name &&
+          callee->name == "Thread") {
+        out_ << "std::thread(";
+        for (std::size_t i = 0; i < expr->args.size(); ++i) {
+          if (i != 0) {
+            out_ << ", ";
+          }
+          emitExpr(expr->args[i].get());
+        }
+        out_ << ')';
+        return;
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Name &&
+          callee->name == "hardwareConcurrency") {
+        out_ << "static_cast<std::int64_t>(std::thread::hardware_concurrency())";
+        return;
+      }
       if (callee != nullptr && callee->kind == ExprKind::Name) {
         const std::string& builtin = callee->name;
         if (builtin == "readFile" || builtin == "writeFile" ||

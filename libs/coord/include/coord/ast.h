@@ -318,6 +318,8 @@ struct LambdaInfo {
   /// (a function-typed parameter), a positive value is the lexical scope depth
   /// of the borrowed local. 0 means the closure owns everything it uses.
   int borrowDepth = 0;
+  /// Set when the lambda body uses `this` (explicitly or implicitly).
+  bool usesThis = false;
 };
 
 struct EnumVariant {
