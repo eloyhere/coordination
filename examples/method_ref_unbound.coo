@@ -1,0 +1,20 @@
+// Unbound instance method references are not part of v0.
+class Counter {
+public:
+    integer value;
+
+    Counter(integer start) {
+        this.value = start;
+    }
+
+    integer add(integer amount) {
+        return value + amount;
+    }
+}
+
+integer main() {
+    (integer) -> integer add = Counter::add;
+    Counter counter = Counter(1);
+    print(add(2));
+    return 0;
+}

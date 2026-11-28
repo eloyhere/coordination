@@ -460,9 +460,9 @@ Function<integer, integer> original =
 | 遮蔽 | lambda 参数**可以**遮蔽外层局部变量/参数；编译器发 warning `W0004`（检测 ⏳）；遮蔽后外层变量在该 lambda 内不可见 |
 | 返回 | 块体用 `return`；表达式体自动返回；必须与声明的返回类型兼容 |
 | 泛型 | lambda 自身不声明类型参数；目标类型实例化决定参数/返回类型 |
-| 方法引用 | `Type::staticMethod`、`Type::instanceMethod`（未绑定接收者）、`object::method`（绑定接收者）；绑定接收者的引用只能转接口/闭包（⏳） |
+| 方法引用 | `Type::staticMethod` 生成函数值；`object::method` 生成绑定接收者的函数值，接收者按引用借用并遵循与按引用闭包相同的逃逸规则（`E2039`）。未绑定 `Type::instanceMethod` ⏳。 |
 
-lambda 的“值”只能通过目标类型使用：赋值、传参、返回、存容器前必须先确定目标类型。目标为函数式接口时生成闭包对象；目标为函数指针时生成无捕获的函数 thunk；方法引用同理。函数式接口由 `utility` 提供：`Function<T,R>`、`Consumer<T>`、`Supplier<T>`、`Predicate<T>`、`BiFunction<A,B,R>`。`@FunctionalInterface` 可选标注，编译器检查“恰好一个抽象方法”。lambda 编译为生成类/闭包对象，捕获值存在字段中；与普通接口实现一样参与单态化，不引入运行期元数据。实现状态：🚧。已实现：函数类型目标 `(A) -> R`、表达式/块体、隐式与显式捕获列表（`[]`、`[=]`、`[&]`、`[x]`、`[&x]`、`[this]`）、省略捕获列表的可变按值副本、捕获列表校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、变量初始化/赋值、调用、lambda 实参与返回。未实现：函数式接口目标、方法引用、函数指针 thunk 转换、返回函数值的链式调用、跨线程闭包逃逸、`this` 生命周期检查。
+lambda 的“值”只能通过目标类型使用：赋值、传参、返回、存容器前必须先确定目标类型。目标为函数式接口时生成闭包对象；目标为函数指针时生成无捕获的函数 thunk；方法引用同理。函数式接口由 `utility` 提供：`Function<T,R>`、`Consumer<T>`、`Supplier<T>`、`Predicate<T>`、`BiFunction<A,B,R>`。`@FunctionalInterface` 可选标注，编译器检查“恰好一个抽象方法”。lambda 编译为生成类/闭包对象，捕获值存在字段中；与普通接口实现一样参与单态化，不引入运行期元数据。实现状态：🚧。已实现：函数类型目标 `(A) -> R`、表达式/块体、隐式与显式捕获列表（`[]`、`[=]`、`[&]`、`[x]`、`[&x]`、`[this]`）、省略捕获列表的可变按值副本、捕获列表校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、变量初始化/赋值、调用、lambda 实参与返回、静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用、返回函数值的链式调用。未实现：函数式接口目标、未绑定实例方法引用、函数指针 thunk 转换、跨线程闭包逃逸、`this` 生命周期检查。
 
 #### 4.3.3 控制流与模式匹配
 
@@ -1165,7 +1165,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **138 项**：`coord_unit` 加 137 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 当前注册 **141 项**：`coord_unit` 加 140 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`，以及函数值切片 `coord_e2e_method_ref`、`coord_e2e_method_ref_escape`、`coord_e2e_method_ref_unbound`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1445,7 +1445,7 @@ for field in r.fields() { Println(field.name()); }
 | `{a, b}` / `{y = "named", x = 9}` | `@Constructure` 类型化/命名构造；类型标签可省略；匹配带注解的构造函数 |
 | `{x: 1}` | 聚合对象字面量（字段初始化），与 `@Constructure` 条目不同 |
 | `[captures](const integer& x): integer -> expr` | lambda（目标类型 Java；显式捕获按 C++；省略捕获时外部变量按值复制且副本可变） |
-| `Type::method` / `object::method` | 方法引用；绑定接收者时只能转接口/闭包，未绑定时可转函数指针 |
+| `Type::method` / `object::method` | 函数类型目标下的方法引用；静态引用降为函数指针，绑定引用按引用捕获接收者并遵循闭包逃逸规则；未绑定实例引用 ⏳ |
 | `if let` / `match` | 解构 `Result`/`Expect`/联合；`match` 对枚举强制穷尽（`if let` 已移除） |
 | `defer expr;` | 当前 Scope 退出时按声明逆序执行；与局部析构同一栈 |
 | `f"{name}: {count}"` | 编译期解析占位符并做类型检查；`{{`/`}}` 转义 |
@@ -1481,7 +1481,7 @@ interface Error {
 
 **P5 首批验收**：`Array`/`OrderedMap`/`UnorderedMap` + 迭代协议 + 字面量/切片/for-in；`@Unique`/`@Share`/`@Optional` + `Shared` + `Allocator`；`string` 字节索引 + `chars()` + `f"..."` + `StringBuilder`；Reader/Writer/Stream/File/Path，LF 归一；Thread/Mutex/Channel/Atomic；`Reflection`/`Reflector<T>`/`Proxy<T,H>`/`ProxyHandler`；`@Test` + `coorc test`；`Instant`/`Duration`、基础数学、`Random`。
 
-**待决**：方法引用语法与重载解析；`OrderedMap` 底层（B-tree vs 有序数组）；`Span<T>`/`ArrayView<T>`/`StringView` 是否合并；`Format`/`f"..."` 占位符语法与本地化；测试并行/fixture/benchmark；自定义 Allocator 是否进入容器泛型；`@Native` C++ ABI 稳定范围与平台 shim 组织。
+**待决**：未绑定实例方法引用与重载/歧义解析策略；`OrderedMap` 底层（B-tree vs 有序数组）；`Span<T>`/`ArrayView<T>`/`StringView` 是否合并；`Format`/`f"..."` 占位符语法与本地化；测试并行/fixture/benchmark；自定义 Allocator 是否进入容器泛型；`@Native` C++ ABI 稳定范围与平台 shim 组织。
 
 ## 8 包、工作区、锁、注册表与镜像
 
@@ -1973,7 +1973,7 @@ coorc config list|get|set
 | ASan/UBSan + 解析器/编译器 fuzz | ✅ | `COORD_SANITIZE`、`COORD_FUZZ`、`linux-sanitize`；解析器 + 编译器 harness；诊断上限 256 |
 | 交叉编译 `--target`/`--sysroot` | 🚧 | 设计锁定，正在实现 |
 | workspace / feature / 签名 / git 依赖 | ⏳ | workspace `members` 只解析 |
-| lambda / `if` 表达式 / 完整模式匹配 | 🚧 | lambda 子集：函数类型目标、表达式/块体、隐式/显式捕获（`E2087` 捕获校验、`E2088` 按值只读）、按引用逃逸检查（`E2039`）、赋值/实参/返回；函数式接口/方法引用/链式调用/跨线程逃逸 ⏳；`coord_e2e_lambda`、`coord_e2e_lambda_capture`、`coord_e2e_lambda_escape`、`coord_e2e_lambda_escape_scope`、`coord_e2e_lambda_unlisted`、`coord_e2e_lambda_readonly`、`coord_e2e_lambda_this`。`if` 表达式（表达式分支）已可用（`coord_e2e_if_expression`；块分支 ⏳）。`match` 支持常量/`|`/范围/绑定/guard 与枚举、布尔、标量穷尽性（`coord_e2e_match_patterns`，负例 `_missing`/`_no_wildcard`/`_bad_pattern`）；类型模式与类解构 ⏳ |
+| lambda / `if` 表达式 / 完整模式匹配 | 🚧 | lambda 子集：函数类型目标、表达式/块体、隐式/显式捕获（`E2087` 捕获校验、`E2088` 按值只读）、按引用逃逸检查（`E2039`）、赋值/实参/返回、静态/绑定方法引用与链式调用；函数式接口目标、未绑定实例引用、函数指针 thunk、跨线程逃逸 ⏳；测试 `coord_e2e_lambda*`、`coord_e2e_method_ref*`。`if` 表达式（表达式分支）已可用（`coord_e2e_if_expression`；块分支 ⏳）。`match` 支持常量/`|`/范围/绑定/guard 与枚举、布尔、标量穷尽性（`coord_e2e_match_patterns`，负例 `_missing`/`_no_wildcard`/`_bad_pattern`）；类型模式与类解构 ⏳ |
 | `@Native` / FFI | 🚧 | 无函数体的原始类型/string 函数通过生成包装调用 C 符号；`coord_e2e_native_ffi`、`coord_e2e_native_ffi_string`；class/指针/header/library ⏳ |
 | `@Copy` / `@Wrap` / `@FunctionalInterface` 语义 | ⏳ | 注解已声明 |
 | `Weak<T>` / 共享环检测 | ⏳ | 设计与映射已定 |
@@ -1987,9 +1987,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器、lambda 闭包切片与 match/if 表达式切片落地后的 138 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器、lambda 闭包切片、match/if 表达式切片与方法引用切片落地后的 141 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-28）**：`ctest` 注册 **138 项**，Windows 全套 **138/138 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
+**基线（2026-11-28）**：`ctest` 注册 **141 项**，Windows 全套 **141/141 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
 
 **最终验收**：
 

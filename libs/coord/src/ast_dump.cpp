@@ -181,6 +181,10 @@ void dumpExpr(const Expr* expr, std::ostream& out, int depth) {
         dumpExpr(expr->ifExpr->elseValue.get(), out, depth + 1);
       }
       return;
+    case ExprKind::MethodRef:
+      out << "MethodRef '" << expr->name << "'\n";
+      dumpExpr(expr->lhs.get(), out, depth + 1);
+      return;
   }
 }
 

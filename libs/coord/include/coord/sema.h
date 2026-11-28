@@ -278,6 +278,10 @@ private:
 
   Type* checkExpr(Expr* expr);
   Type* checkIfExpr(Expr* expr);
+  Type* checkMethodRef(Expr* expr);
+  [[nodiscard]] const MethodInfo* findMethodByName(Type* type,
+                                                   const std::string& name,
+                                                   int& count) const;
   Type* checkCall(Expr* expr);
   Type* checkMember(Expr* expr);
   Type* checkUnary(Expr* expr);

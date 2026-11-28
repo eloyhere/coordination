@@ -3096,6 +3096,40 @@ void CppEmitter::emitExpr(const Expr* expr) {
       }
       out_ << ')';
       return;
+    case ExprKind::MethodRef: {
+      if (expr->lhs == nullptr) {
+        out_ << "nullptr";
+        return;
+      }
+      if (expr->staticRef) {
+        out_ << sanitize(expr->lhs->name) << "::" << sanitize(expr->name);
+        return;
+      }
+      const std::string receiverName = expr->lhs->name;
+      const std::string receiver = sanitize(receiverName);
+      const bool smart = smartLocals_.count(receiverName) != 0;
+      const std::size_t arity =
+          expr->resolvedType != nullptr
+              ? expr->resolvedType->alternatives.size()
+              : 0;
+      out_ << "[&" << receiver << "](";
+      for (std::size_t i = 0; i < arity; ++i) {
+        if (i != 0) {
+          out_ << ", ";
+        }
+        out_ << "auto __arg" << i;
+      }
+      out_ << ") -> decltype(auto) { return " << receiver
+           << (smart ? "->" : ".") << sanitize(expr->name) << '(';
+      for (std::size_t i = 0; i < arity; ++i) {
+        if (i != 0) {
+          out_ << ", ";
+        }
+        out_ << "__arg" << i;
+      }
+      out_ << "); }";
+      return;
+    }
     case ExprKind::IfExpr: {
       if (expr->ifExpr == nullptr) {
         out_ << "0";

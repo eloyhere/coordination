@@ -3118,6 +3118,134 @@ Type* Checker::checkIfExpr(Expr* expr) {
   return result;
 }
 
+const MethodInfo* Checker::findMethodByName(Type* type, const std::string& name,
+                                            int& count) const {
+  if (type == nullptr) {
+    return nullptr;
+  }
+  const MethodInfo* found = nullptr;
+  for (const MethodInfo& method : type->methods) {
+    if (method.name == name) {
+      ++count;
+      found = &method;
+    }
+  }
+  if (type->base != nullptr && type->base->kind != TypeKind::Error &&
+      type->base->name != "class") {
+    if (const MethodInfo* base =
+            findMethodByName(type->base, name, count)) {
+      found = base;
+    }
+  }
+  for (Type* iface : type->interfaces) {
+    if (const MethodInfo* inherited = findMethodByName(iface, name, count)) {
+      found = inherited;
+    }
+  }
+  return found;
+}
+
+Type* Checker::checkMethodRef(Expr* expr) {
+  if (expr->lhs == nullptr) {
+    diagnostics_.error(expr->span, "E2005", "malformed method reference");
+    expr->resolvedType = errorType_;
+    return errorType_;
+  }
+  if (expr->lhs->kind == ExprKind::Name &&
+      lookupVariable(expr->lhs->name) == nullptr) {
+    Type* type = lookupType(expr->lhs->name);
+    if (type != nullptr) {
+      int count = 0;
+      const MethodInfo* method = findMethodByName(type, expr->name, count);
+      if (count == 0) {
+        diagnostics_.error(expr->span, "E2004",
+                           "type '" + type->name + "' has no method '" +
+                               expr->name + "'");
+        expr->resolvedType = errorType_;
+        return errorType_;
+      }
+      if (count > 1) {
+        diagnostics_.error(expr->span, "E2005",
+                           "method reference '" + type->name + "::" +
+                               expr->name + "' is ambiguous over overloads");
+        expr->resolvedType = errorType_;
+        return errorType_;
+      }
+      if (method->decl == nullptr || !method->decl->isStatic) {
+        diagnostics_.error(
+            expr->span, "E2005",
+            "unbound instance method references are not supported in v0; use "
+            "'object::method'");
+        expr->resolvedType = errorType_;
+        return errorType_;
+      }
+      if (!canAccess(method->access, method->owner)) {
+        diagnostics_.error(expr->span, "E2030",
+                           "cannot access " +
+                               std::string(accessName(method->access)) +
+                               " method '" + expr->name + "'");
+      }
+      Type* function = makeFunctionType(method->paramTypes, method->returnType);
+      expr->staticRef = true;
+      expr->resolvedType = function;
+      return function;
+    }
+  }
+  if (expr->lhs->kind != ExprKind::Name) {
+    diagnostics_.error(
+        expr->span, "E2005",
+        "bound method references require a named receiver in v0");
+    expr->resolvedType = errorType_;
+    return errorType_;
+  }
+  Type* receiverType = checkExpr(expr->lhs.get());
+  std::size_t receiverScope = 0;
+  Variable* receiver =
+      lookupVariable(expr->lhs->name, &receiverScope);
+  if (receiver == nullptr || receiverType == nullptr ||
+      (receiverType->kind != TypeKind::Class &&
+       receiverType->kind != TypeKind::Interface)) {
+    diagnostics_.error(expr->span, "E2005",
+                       "method receiver '" + expr->lhs->name +
+                           "' must be a class or interface value");
+    expr->resolvedType = errorType_;
+    return errorType_;
+  }
+  int count = 0;
+  const MethodInfo* method =
+      findMethodByName(receiverType, expr->name, count);
+  if (count == 0) {
+    diagnostics_.error(expr->span, "E2004",
+                       "type '" + receiverType->name + "' has no method '" +
+                           expr->name + "'");
+    expr->resolvedType = errorType_;
+    return errorType_;
+  }
+  if (count > 1) {
+    diagnostics_.error(expr->span, "E2005",
+                       "method reference '" + expr->lhs->name + "::" +
+                           expr->name + "' is ambiguous over overloads");
+    expr->resolvedType = errorType_;
+    return errorType_;
+  }
+  if (method->decl != nullptr && method->decl->isStatic) {
+    diagnostics_.error(expr->span, "E2005",
+                       "static methods must be referenced through the type, "
+                       "not an object");
+  }
+  if (!canAccess(method->access, method->owner)) {
+    diagnostics_.error(expr->span, "E2030",
+                       "cannot access " +
+                           std::string(accessName(method->access)) +
+                           " method '" + expr->name + "'");
+  }
+  Type* function = makeFunctionType(method->paramTypes, method->returnType);
+  expr->boundRef = true;
+  expr->borrowDepth = receiver->scopeDepth;
+  expr->resolvedType = function;
+  return function;
+}
+
 Type* Checker::checkExpr(Expr* expr) {
   if (expr == nullptr) {
     return errorType_;
@@ -3130,6 +3258,8 @@ Type* Checker::checkExpr(Expr* expr) {
       return errorType_;
     case ExprKind::IfExpr:
       return checkIfExpr(expr);
+    case ExprKind::MethodRef:
+      return checkMethodRef(expr);
     case ExprKind::IntLit:
       expr->resolvedType = intType_;
       return intType_;
@@ -4590,6 +4720,32 @@ Type* Checker::checkCall(Expr* expr) {
     const MethodInfo* method =
         lookupMethod(baseType, callee->name, expr->args.size());
     if (method == nullptr) {
+      const FieldInfo* functionField = lookupField(baseType, callee->name);
+      if (functionField != nullptr && functionField->type != nullptr &&
+          functionField->type->kind == TypeKind::Function) {
+        Type* functionType = functionField->type;
+        const std::size_t count =
+            std::min(expr->args.size(), functionType->alternatives.size());
+        if (expr->args.size() != functionType->alternatives.size()) {
+          diagnostics_.error(
+              expr->span, "E2004",
+              "function value '" + callee->name + "' takes " +
+                  std::to_string(functionType->alternatives.size()) +
+                  " argument(s)");
+        }
+        for (std::size_t i = 0; i < count; ++i) {
+          if (expr->args[i] != nullptr &&
+              expr->args[i]->kind == ExprKind::Lambda) {
+            checkLambda(expr->args[i].get(), functionType->alternatives[i]);
+          } else {
+            Type* argType = checkExpr(expr->args[i].get());
+            requireAssignable(argType, functionType->alternatives[i],
+                              expr->args[i]->span, "function argument");
+          }
+        }
+        expr->resolvedType = functionType->returnType;
+        return functionType->returnType;
+      }
       diagnostics_.error(expr->span, "E2004",
                          "no method '" + callee->name + "' on type '" +
                              baseType->name + "' with " +
@@ -4627,6 +4783,31 @@ Type* Checker::checkCall(Expr* expr) {
     return method->returnType;
   }
 
+  Type* calleeType = checkExpr(callee);
+  if (calleeType != nullptr && calleeType->kind == TypeKind::Function) {
+    const std::size_t count =
+        std::min(expr->args.size(), calleeType->alternatives.size());
+    if (expr->args.size() != calleeType->alternatives.size()) {
+      diagnostics_.error(
+          expr->span, "E2004",
+          "function value takes " +
+              std::to_string(calleeType->alternatives.size()) +
+              " argument(s), but " + std::to_string(expr->args.size()) +
+              " were given");
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+      if (expr->args[i] != nullptr &&
+          expr->args[i]->kind == ExprKind::Lambda) {
+        checkLambda(expr->args[i].get(), calleeType->alternatives[i]);
+      } else {
+        Type* argType = checkExpr(expr->args[i].get());
+        requireAssignable(argType, calleeType->alternatives[i],
+                          expr->args[i]->span, "function argument");
+      }
+    }
+    expr->resolvedType = calleeType->returnType;
+    return calleeType->returnType;
+  }
   diagnostics_.error(expr->span, "E2005", "expression is not callable");
   expr->resolvedType = errorType_;
   return errorType_;

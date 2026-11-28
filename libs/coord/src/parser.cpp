@@ -1932,6 +1932,19 @@ ExprPtr Parser::parsePostfix() {
       expr = std::move(member);
       continue;
     }
+    if (match(TokKind::ColonColon)) {
+      auto ref = std::make_unique<Expr>();
+      ref->kind = ExprKind::MethodRef;
+      ref->span = expr->span;
+      ref->lhs = std::move(expr);
+      if (!check(TokKind::Identifier)) {
+        error(current(), "expected a method name after '::'");
+        break;
+      }
+      ref->name = std::string(advance().text);
+      expr = std::move(ref);
+      continue;
+    }
     if (match(TokKind::LBracket)) {
       auto index = std::make_unique<Expr>();
       index->kind = ExprKind::Index;

@@ -68,6 +68,7 @@ enum class ExprKind {
   ObjectLit,
   Lambda,
   IfExpr,
+  MethodRef,
 };
 
 struct LambdaInfo;
@@ -102,6 +103,10 @@ struct Expr : Node {
   bool optionalCall = false;
   std::shared_ptr<LambdaInfo> lambda;
   std::shared_ptr<IfExprInfo> ifExpr;
+  /// Method reference flags filled by Sema: `Type::staticMethod` vs
+  /// `object::method`.
+  bool staticRef = false;
+  bool boundRef = false;
 };
 
 /// Value branches of an `if` expression: `if (c) a else b`.

@@ -1073,6 +1073,30 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2005
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_method_ref
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/method_ref.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_method_ref
+      -DEXPECTED=42|15|11|25|17
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_method_ref_escape
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/method_ref_escape.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_method_ref_escape
+      -DEXPECT_SUBSTRING=E2039
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_method_ref_unbound
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/method_ref_unbound.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_method_ref_unbound
+      -DEXPECT_SUBSTRING=E2005
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lambda_escape
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

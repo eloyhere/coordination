@@ -1,0 +1,43 @@
+// Method references and chained calls.
+class Math {
+public:
+    static integer twice(integer value) {
+        return value * 2;
+    }
+}
+
+class Counter {
+public:
+    integer value;
+
+    Counter(integer start) {
+        this.value = start;
+    }
+
+    integer add(integer amount) {
+        return value + amount;
+    }
+
+    integer next() {
+        return value + 1;
+    }
+}
+
+(integer) -> integer makeAdder(integer base) {
+    return [base](integer x): integer -> x + base;
+}
+
+integer main() {
+    (integer) -> integer twice = Math::twice;
+    print(twice(21));
+
+    Counter counter = Counter(10);
+    (integer) -> integer add = counter::add;
+    () -> integer next = counter::next;
+    print(add(5));
+    print(next());
+
+    print(makeAdder(20)(5));
+    print(counter::add(7));
+    return 0;
+}

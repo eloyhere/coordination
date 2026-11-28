@@ -1,0 +1,24 @@
+// A bound method reference borrows its receiver and must not escape.
+class Counter {
+public:
+    integer value;
+
+    Counter(integer start) {
+        this.value = start;
+    }
+
+    integer add(integer amount) {
+        return value + amount;
+    }
+}
+
+(integer) -> integer makeEscaping() {
+    Counter counter = Counter(1);
+    return counter::add;
+}
+
+integer main() {
+    (integer) -> integer add = makeEscaping();
+    print(add(2));
+    return 0;
+}
