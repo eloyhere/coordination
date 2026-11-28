@@ -5197,6 +5197,10 @@ const Checker::LockCaptureInfo* Checker::findLockCapture(
 }
 
 void Checker::validateLockBlock(Stmt* stmt) {
+  if (!lockBlocks_.empty()) {
+    diagnostics_.error(stmt->span, "E2094",
+                       "nested @Lock blocks are not supported in v0");
+  }
   if (stmt->lockMode != Stmt::LockMode::Exclusive) {
     diagnostics_.error(
         stmt->span, "E2094",
@@ -5310,11 +5314,24 @@ void Checker::checkLockCall(const Expr* base, const MethodInfo* method,
     return;
   }
   const auto found = context.captures.find(name);
+  bool requireReadOnly = false;
+  bool uncaptured = false;
   if (found == context.captures.end()) {
+    uncaptured = true;
+  } else if (found->second.kind == Stmt::LockCaptureKind::MutRef ||
+             found->second.kind == Stmt::LockCaptureKind::Value) {
     return;
+  } else {
+    requireReadOnly = true;
   }
-  if (found->second.kind != Stmt::LockCaptureKind::ConstRef) {
-    return;
+  if (uncaptured) {
+    Variable* variable = lookupVariable(name);
+    if (variable == nullptr || variable->type == nullptr ||
+        (variable->type->kind != TypeKind::Class &&
+         variable->type->kind != TypeKind::Interface)) {
+      return;
+    }
+    requireReadOnly = true;
   }
   bool readOnly = false;
   if (method != nullptr && method->decl != nullptr) {
@@ -5326,11 +5343,19 @@ void Checker::checkLockCall(const Expr* base, const MethodInfo* method,
     }
   }
   if (!readOnly) {
-    diagnostics_.error(
-        span, "E2094",
-        "const& capture '" + name +
-            "' can only call @ReadOnly methods; annotate the method or use "
-            "[&" + name + "]");
+    if (uncaptured) {
+      diagnostics_.error(
+          span, "E2094",
+          "object '" + name +
+              "' is not in the @Lock capture list; only @ReadOnly methods "
+              "may be called on it");
+    } else {
+      diagnostics_.error(
+          span, "E2094",
+          "const& capture '" + name +
+              "' can only call @ReadOnly methods; annotate the method or use "
+              "[&" + name + "]");
+    }
   }
 }
 
@@ -6182,12 +6207,16 @@ void Checker::checkStmt(Stmt* stmt) {
           currentReturnType_ != nullptr ? currentReturnType_ : voidType_;
       if (stmt->expr) {
         Type* actual = nullptr;
-        if (stmt->expr->kind == ExprKind::Name &&
-            findLockCapture(stmt->expr->name) != nullptr) {
-          diagnostics_.error(
-              stmt->span, "E2039",
-              "@Lock capture '" + stmt->expr->name +
-                  "' cannot be returned; it is scope-bound");
+        if (stmt->expr->kind == ExprKind::Name) {
+          const LockCaptureInfo* capture =
+              findLockCapture(stmt->expr->name);
+          if (capture != nullptr &&
+              capture->kind != Stmt::LockCaptureKind::Value) {
+            diagnostics_.error(
+                stmt->span, "E2039",
+                "@Lock borrow capture '" + stmt->expr->name +
+                    "' cannot be returned; it is scope-bound");
+          }
         }
         if (stmt->expr->kind == ExprKind::Lambda &&
             expected->kind == TypeKind::Function) {

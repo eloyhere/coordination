@@ -1289,6 +1289,30 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2094
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_lock_nested_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_nested_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_nested_error
+      -DEXPECT_SUBSTRING=E2094
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_uncaptured_call
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_uncaptured_call.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_uncaptured_call
+      -DEXPECT_SUBSTRING=E2094
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_capture_value_return
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_capture_value_return.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_capture_value_return
+      -DEXPECTED=3
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
   add_test(NAME coord_e2e_scoped_thread
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

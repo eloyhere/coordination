@@ -1,0 +1,14 @@
+// A value capture is an owned copy, so returning it is allowed.
+integer take() {
+    Mutex mutex;
+    integer value = 3;
+    @Lock(Exclusive, mutex, [value]) {
+        return value;
+    }
+    return 0;
+}
+
+integer main() {
+    print(take());
+    return 0;
+}

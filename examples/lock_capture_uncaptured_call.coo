@@ -1,0 +1,23 @@
+// An uncaptured class object can only be read through @ReadOnly methods
+// inside a @Lock block.
+class Counter {
+public:
+    integer value;
+
+    Counter() {
+        value = 0;
+    }
+
+    void add(integer amount) {
+        value = value + amount;
+    }
+}
+
+integer main() {
+    Mutex mutex;
+    Counter counter;
+    @Lock(Exclusive, mutex) {
+        counter.add(1);
+    }
+    return 0;
+}

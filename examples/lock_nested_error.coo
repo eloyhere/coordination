@@ -1,0 +1,11 @@
+// Nested @Lock blocks are rejected in v0.
+integer main() {
+    Mutex mutex;
+    integer value = 0;
+    @Lock(Exclusive, mutex, [&value]) {
+        @Lock(Exclusive, mutex, [&value]) {
+            value = 1;
+        }
+    }
+    return 0;
+}
