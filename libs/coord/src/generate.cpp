@@ -402,6 +402,7 @@ void CppEmitter::emitPrelude() {
   out_ << "#include <cstdint>\n";
   out_ << "#include <iostream>\n";
   out_ << "#include <string>\n";
+  out_ << "#include <cstring>\n";
   out_ << "#include <type_traits>\n";
   out_ << "#include <limits>\n";
   out_ << "#include <vector>\n";
@@ -1924,19 +1925,36 @@ void CppEmitter::emitNativeFunction(const Decl& decl) {
       decl.type == nullptr || decl.type->name == "void" ||
       (decl.type->resolved != nullptr &&
        decl.type->resolved->name == "void");
-  if (!returnsVoid) {
-    out_ << "  return ";
+  const bool returnsString =
+      decl.type != nullptr && decl.type->resolved != nullptr &&
+      decl.type->resolved->kind == TypeKind::String;
+  if (returnsString) {
+    out_ << "  const char* __native_result = ::";
+  } else if (!returnsVoid) {
+    out_ << "  return ::";
   } else {
-    out_ << "  ";
+    out_ << "  ::";
   }
-  out_ << "::" << decl.nativeSymbol << '(';
+  out_ << decl.nativeSymbol << '(';
   for (std::size_t i = 0; i < decl.params.size(); ++i) {
     if (i != 0) {
       out_ << ", ";
     }
-    out_ << sanitize(decl.params[i].name);
+    const Param& param = decl.params[i];
+    const bool string =
+        param.type != nullptr && param.type->resolved != nullptr &&
+        param.type->resolved->kind == TypeKind::String;
+    out_ << sanitize(param.name);
+    if (string) {
+      out_ << ".c_str()";
+    }
   }
-  out_ << ");\n}\n";
+  out_ << ");\n";
+  if (returnsString) {
+    out_ << "  if (__native_result == nullptr) return std::string();\n";
+    out_ << "  return std::string(__native_result);\n";
+  }
+  out_ << "}\n";
 }
 
 void CppEmitter::emitFunction(const Decl& decl) {

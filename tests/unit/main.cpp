@@ -2422,8 +2422,12 @@ integer main() { return nativePid(); }
   CHECK(body.countCode("E2078") >= 1);
 
   Harness unsupported(R"(
+class Payload {
+public:
+    Payload() {}
+}
 @Native("getpid")
-string nativePid();
+Payload nativePid();
 integer main() { return 0; }
 )");
   CHECK(unsupported.countCode("E2078") >= 1);

@@ -2559,19 +2559,20 @@ void Checker::checkFunction(Decl& decl) {
     const auto supported = [](Type* type) {
       return type != nullptr &&
              (type->kind == TypeKind::Int || type->kind == TypeKind::Bool ||
-              type->kind == TypeKind::Float || type->name == "void");
+              type->kind == TypeKind::Float || type->kind == TypeKind::String ||
+              type->name == "void");
     };
     if (!supported(returnType)) {
       diagnostics_.error(
           decl.span, "E2078",
-          "@Native supports only integer/boolean/float/void signatures");
+          "@Native supports only integer/boolean/float/string/void signatures");
     }
     for (const Param& param : decl.params) {
       Type* paramType = param.type ? param.type->resolved : nullptr;
       if (!supported(paramType) || paramType->name == "void") {
         diagnostics_.error(
             param.span, "E2078",
-            "@Native parameters must be integer, boolean or float");
+            "@Native parameters must be integer, boolean, float or string");
       }
     }
   }

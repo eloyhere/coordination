@@ -992,4 +992,12 @@ if(MSVC)
         -DEXPECTED=ok
         -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
   endif()
+
+  add_test(NAME coord_e2e_native_ffi_string
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native_ffi_string.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_ffi_string
+      -DEXPECTED=5|ok
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()
