@@ -1,0 +1,30 @@
+# Native C++ class.
+#
+# The class is opaque to Coordination: the bridge owns `new`/`delete` and
+# forwards constructors, methods and the destructor. The project manifest owns
+# the toolchain; the native sources are built by the project itself
+# (native/build.cmd or native/build.sh).
+#
+# For Linux/macOS replace [build].target, [toolchain.<target>] and the object
+# extension below with the host values (see native/build.sh).
+
+[package]
+name = "native_cpp_class"
+version = "0.1.0"
+edition = "2026"
+source = "src"
+
+[build]
+target = "x86_64-pc-windows-msvc"
+
+[toolchain.x86_64-pc-windows-msvc]
+cc = "cl"
+cxx = "cl"
+cflags = []
+cxxflags = []
+ldflags = []
+
+[native]
+include = ["native/include"]
+objects = ["native/build/counter.obj"]
+libraries = []

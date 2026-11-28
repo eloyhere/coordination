@@ -237,7 +237,12 @@ literal          = integer-literal | fraction-literal | character-lit
 (* Annotations and patterns                                                  *)
 (* ------------------------------------------------------------------------- *)
 
-annotation-use   = "@", path, [ "(", arguments, ")" ] ;
+annotation-use   = "@", path, [ "(", [ annotation-argument,
+                                       { ",", annotation-argument } ], ")" ] ;
+
+(* Named arguments are used by native declarations, e.g.
+   @Native(file: "native/include/foo.h", abi: "c++", symbol: "coo_add").   *)
+annotation-argument = [ identifier, ":" ], expression ;
 
 pattern          = "_"
                  | literal

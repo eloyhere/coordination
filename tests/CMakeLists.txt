@@ -14,6 +14,84 @@ add_test(NAME coord_e2e_packages
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_packages
     -P ${CMAKE_CURRENT_SOURCE_DIR}/package_manager.cmake)
 
+# --- Native bridge (project-configured C/C++ interop) ----------------------
+# The native tests read the toolchain from coordination.toml; the scripts never
+# rely on coorc guessing a compiler.
+if(MSVC)
+  set(COORD_NATIVE_FLAVOR msvc)
+  set(COORD_NATIVE_OBJEXT ".obj")
+else()
+  set(COORD_NATIVE_FLAVOR gnu)
+  set(COORD_NATIVE_OBJEXT ".o")
+endif()
+
+# Fail-closed configuration: target/toolchain/cc/cxx/objects are mandatory and
+# are never defaulted to the host compiler.
+add_test(NAME coord_e2e_native_config
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_config
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/native_config.cmake)
+
+# Annotation syntax: @Native(file:, abi:, symbol:), the removed legacy form and
+# the move-only native class diagnostics.
+add_test(NAME coord_e2e_native_annotations
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_annotations
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/native_annotations.cmake)
+
+# C functions through the generated bridge: the project's own build produces the
+# object, coorc compiles only bridge + main.
+add_test(NAME coord_e2e_native_c_functions
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_c_functions
+    -DEXAMPLES=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native
+    -DMODE=c
+    -DCC=${CMAKE_CXX_COMPILER}
+    -DCXX=${CMAKE_CXX_COMPILER}
+    -DFLAVOR=${COORD_NATIVE_FLAVOR}
+    -DOBJEXT=${COORD_NATIVE_OBJEXT}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/native_build.cmake)
+
+# C++ class through the generated bridge: opaque handle, external new/delete,
+# constructor/method overloads and destructor ordering.
+add_test(NAME coord_e2e_native_cpp_class
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_cpp_class
+    -DEXAMPLES=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native
+    -DMODE=class
+    -DCC=${CMAKE_CXX_COMPILER}
+    -DCXX=${CMAKE_CXX_COMPILER}
+    -DFLAVOR=${COORD_NATIVE_FLAVOR}
+    -DOBJEXT=${COORD_NATIVE_OBJEXT}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/native_build.cmake)
+
+# Cross-target compile-only: the front end and bridge follow [build].target and
+# never fall back to the host compiler.
+add_test(NAME coord_e2e_native_cross
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_cross
+    -DEXAMPLES=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native
+    -DCC=${CMAKE_CXX_COMPILER}
+    -DCXX=${CMAKE_CXX_COMPILER}
+    -DFLAVOR=${COORD_NATIVE_FLAVOR}
+    -DOBJEXT=${COORD_NATIVE_OBJEXT}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/native_cross.cmake)
+
+# @Unsafe/@Safe gating of the migrated native calls.
+add_test(NAME coord_e2e_native_unsafe
+  COMMAND ${CMAKE_COMMAND}
+    -DCOORC=$<TARGET_FILE:coorc>
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_unsafe
+    -DCC=${CMAKE_CXX_COMPILER}
+    -DFLAVOR=${COORD_NATIVE_FLAVOR}
+    -DOBJEXT=${COORD_NATIVE_OBJEXT}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/native_unsafe.cmake)
+
 # End-to-end: `coorc build` lowers to C++, invokes the host MSVC, links an
 # executable, runs it, and compares the observable destruction order.
 if(MSVC)
@@ -1162,32 +1240,6 @@ if(MSVC)
       -DEXPECT_STDERR=W0005
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 
-  if(WIN32)
-    add_test(NAME coord_e2e_native_ffi
-      COMMAND ${CMAKE_COMMAND}
-        -DCOORC=$<TARGET_FILE:coorc>
-        -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native_ffi_windows.coo
-        -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_ffi
-        -DEXPECTED=ok
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
-  else()
-    add_test(NAME coord_e2e_native_ffi
-      COMMAND ${CMAKE_COMMAND}
-        -DCOORC=$<TARGET_FILE:coorc>
-        -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native_ffi_posix.coo
-        -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_ffi
-        -DEXPECTED=ok
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
-  endif()
-
-  add_test(NAME coord_e2e_native_ffi_string
-    COMMAND ${CMAKE_COMMAND}
-      -DCOORC=$<TARGET_FILE:coorc>
-      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/native_ffi_string.coo
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_ffi_string
-      -DEXPECTED=5|ok
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
-
   add_test(NAME coord_e2e_lambda
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>
@@ -1580,22 +1632,6 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2095
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
-  add_test(NAME coord_e2e_unsafe_ffi_error
-    COMMAND ${CMAKE_COMMAND}
-      -DCOORC=$<TARGET_FILE:coorc>
-      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/unsafe_ffi_error.coo
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_unsafe_ffi_error
-      -DEXPECT_SUBSTRING=E2096
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
-
-  add_test(NAME coord_e2e_unsafe_ffi_block
-    COMMAND ${CMAKE_COMMAND}
-      -DCOORC=$<TARGET_FILE:coorc>
-      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/unsafe_ffi_block.coo
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_unsafe_ffi_block
-      -DEXPECTED=ok
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
-
   add_test(NAME coord_e2e_unsafe_pointer_error
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>
@@ -1604,13 +1640,6 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2096
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
-  add_test(NAME coord_e2e_unsafe_safe_override_error
-    COMMAND ${CMAKE_COMMAND}
-      -DCOORC=$<TARGET_FILE:coorc>
-      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/unsafe_safe_override_error.coo
-      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_unsafe_safe_override_error
-      -DEXPECT_SUBSTRING=E2096
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
   add_test(NAME coord_e2e_lock_capture_deep
     COMMAND ${CMAKE_COMMAND}

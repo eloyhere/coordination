@@ -1,0 +1,17 @@
+// C functions provided by the project's own native build.
+// @Native only declares the header and ABI; coordination.toml owns the
+// compiler, target, flags and the objects/libraries to link.
+
+@Native(file: "native/include/sample.h", abi: "c", symbol: "coo_sample_add")
+integer sampleAdd(integer left, integer right);
+
+@Native(file: "native/include/sample.h", abi: "c", symbol: "coo_sample_greet")
+string sampleGreeting(string name);
+
+// FFI calls require an @Unsafe scope; local @Unsafe { ... } blocks are enough.
+@Unsafe
+integer main() {
+    print(sampleAdd(2, 3));
+    print(sampleGreeting("coo"));
+    return 0;
+}

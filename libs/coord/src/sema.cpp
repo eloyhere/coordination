@@ -1,5 +1,7 @@
 #include "coord/sema.h"
 
+#include "coord/native.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -2721,6 +2723,12 @@ void Checker::validateCopyClass(Decl& decl) {
   if (type == nullptr) {
     return;
   }
+  if (decl.isNative) {
+    // A native value owns an opaque handle: it is move-only and never
+    // copyable, so @Copy does not apply.
+    decl.copyKind = Decl::CopyKind::None;
+    return;
+  }
   for (const AnnotationUse& use : decl.annotations) {
     if (use.name != "Copy") {
       continue;
@@ -2800,10 +2808,215 @@ void Checker::validateCopyClass(Decl& decl) {
   }
 }
 
+namespace {
+
+struct NativeAnnotation {
+  bool present = false;
+  bool valid = true;
+  Span span;
+  std::string file;
+  std::string abi;
+  std::string symbol;
+  bool explicitSymbol = false;
+};
+
+/// Reads `@Native(file: ..., abi: ..., symbol: ...)` and rejects the removed
+/// `@Native("symbol")` form. The annotation only declares the header and ABI;
+/// compiler/target/linker settings live in the project manifest.
+NativeAnnotation readNativeAnnotation(
+    const std::vector<AnnotationUse>& annotations,
+    DiagnosticEngine& diagnostics, bool classLevel,
+    const std::string& declarationName) {
+  NativeAnnotation result;
+  for (const AnnotationUse& use : annotations) {
+    if (use.name != "Native") {
+      continue;
+    }
+    if (!result.present) {
+      result.present = true;
+      result.span = use.span;
+      result.abi = "c";
+    }
+    bool positional = false;
+    for (std::size_t i = 0; i < use.args.size(); ++i) {
+      if (i >= use.argNames.size() || use.argNames[i].empty()) {
+        positional = true;
+      }
+    }
+    if (positional) {
+      diagnostics.error(
+          use.span, "E2114",
+          "@Native(\"symbol\") was removed; declare only the header and ABI "
+          "with @Native(file: \"native/include/foo.h\", abi: \"c\") and let "
+          "the project manifest own the compiler, target and linker");
+      result.valid = false;
+      continue;
+    }
+    std::set<std::string> keys;
+    for (std::size_t i = 0; i < use.args.size(); ++i) {
+      const std::string& key = use.argNames[i];
+      const Expr* value = use.args[i].get();
+      if (!keys.insert(key).second) {
+        diagnostics.error(use.span, "E2113",
+                          "duplicate @Native argument '" + key + "'");
+        result.valid = false;
+        continue;
+      }
+      if (value == nullptr || value->kind != ExprKind::StringLit) {
+        diagnostics.error(use.span, "E2113",
+                          "@Native argument '" + key +
+                              "' must be a string literal");
+        result.valid = false;
+        continue;
+      }
+      if (key == "file") {
+        result.file = value->stringValue;
+      } else if (key == "abi") {
+        result.abi = value->stringValue;
+      } else if (key == "symbol") {
+        result.symbol = value->stringValue;
+        result.explicitSymbol = true;
+      } else {
+        diagnostics.error(use.span, "E2113",
+                          "unknown @Native argument '" + key +
+                              "'; expected file, abi or symbol");
+        result.valid = false;
+      }
+    }
+    if (result.file.empty()) {
+      diagnostics.error(use.span, "E2113",
+                        "@Native requires file: \"path/to/header.h\"");
+      result.valid = false;
+    }
+    if (result.abi != "c" && result.abi != "c++") {
+      diagnostics.error(use.span, "E2113",
+                        "@Native abi must be \"c\" or \"c++\"");
+      result.valid = false;
+    }
+    if (classLevel) {
+      if (result.explicitSymbol) {
+        diagnostics.error(use.span, "E2113",
+                          "@Native(symbol:) is only valid on functions; a "
+                          "native class is bridged through generated "
+                          "constructor/destructor/method wrappers");
+        result.valid = false;
+      }
+      if (result.abi != "c++") {
+        diagnostics.error(use.span, "E2113",
+                          "a native class requires abi: \"c++\" (C++ class "
+                          "member functions cannot cross a C ABI)");
+        result.valid = false;
+      }
+      result.symbol.clear();
+    } else if (result.symbol.empty()) {
+      result.symbol = declarationName;
+    }
+  }
+  return result;
+}
+
+bool hasAnnotationNamed(const std::vector<AnnotationUse>& annotations,
+                        std::string_view name) {
+  for (const AnnotationUse& use : annotations) {
+    if (use.name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isValidCSymbol(const std::string& symbol) {
+  if (symbol.empty()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < symbol.size(); ++i) {
+    const char character = symbol[i];
+    const bool alpha = (character >= 'a' && character <= 'z') ||
+                       (character >= 'A' && character <= 'Z');
+    const bool digit = character >= '0' && character <= '9';
+    if (!alpha && character != '_' && (i == 0 || !digit)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool isNativeClassType(const Type* type) {
+  return type != nullptr && type->kind == TypeKind::Class &&
+         type->decl != nullptr && type->decl->isNative;
+}
+
+/// Checks the resolved signature of one native callable.
+void validateNativeSignature(const Decl& callable, const Type* returnType,
+                             DiagnosticEngine& diagnostics) {
+  if (!native::isAbiTypeSupported(returnType,
+                                  callable.length)) {
+    diagnostics.error(
+        callable.span, "E2078",
+        "@Native supports only integer/boolean/float/string/void signatures "
+        "with fixed 8/16/32/64-bit integers");
+  }
+  for (const Param& param : callable.params) {
+    const Type* paramType =
+        param.type != nullptr ? param.type->resolved : nullptr;
+    if (param.name.empty()) {
+      diagnostics.error(param.span, "E2113",
+                        "parameters of a native declaration must be named");
+    }
+    if (paramType != nullptr && paramType->name == "void") {
+      diagnostics.error(param.span, "E2078",
+                        "@Native parameters cannot be void");
+      continue;
+    }
+    if (!native::isAbiTypeSupported(paramType,
+                                    param.type != nullptr
+                                        ? param.type->numericLength
+                                        : 0)) {
+      diagnostics.error(
+          param.span, "E2078",
+          "@Native parameters must be integer, boolean, float or string "
+          "with a fixed 8/16/32/64-bit width");
+    }
+  }
+}
+
+}  // namespace
+
 void Checker::checkClass(Decl& decl) {
   validateDoc(decl);
   validateAnnotations(decl.annotations, "class", decl.span);
   validateProxyHandler(decl);
+
+  if (hasAnnotationNamed(decl.annotations, "Native")) {
+    const NativeAnnotation spec = readNativeAnnotation(
+        decl.annotations, diagnostics_, true, decl.name);
+    decl.isNative = true;
+    decl.nativeFile = spec.file;
+    decl.nativeAbi = spec.abi;
+    if (!spec.valid) {
+      decl.nativeAbi = "c++";
+    }
+    if (!decl.generics.empty()) {
+      diagnostics_.error(decl.span, "E2113",
+                         "@Native classes cannot declare generics");
+    }
+    if (decl.base != nullptr) {
+      diagnostics_.error(decl.span, "E2113",
+                         "@Native classes cannot extend another class");
+    }
+    if (!decl.interfaces.empty()) {
+      diagnostics_.error(decl.span, "E2113",
+                         "@Native classes cannot implement interfaces");
+    }
+    for (const AnnotationUse& use : decl.annotations) {
+      if (use.name == "Copy" || use.name == "Proxy" ||
+          use.name == "Invocation") {
+        diagnostics_.error(use.span, "E2113",
+                           "@" + use.name +
+                               " cannot be combined with @Native");
+      }
+    }
+  }
 
   Type* type = decl.resolvedType;
   if (type == nullptr) {
@@ -2831,10 +3044,62 @@ void Checker::checkClass(Decl& decl) {
     }
   }
 
+  if (decl.isNative) {
+    for (const auto& member : decl.members) {
+      if (member->kind == DeclKind::Field) {
+        continue;  // reported once below
+      }
+      if (member->kind != DeclKind::Constructor &&
+          member->kind != DeclKind::Destructor &&
+          member->kind != DeclKind::Method) {
+        continue;
+      }
+      member->isNative = true;
+      if (member->access != Access::Public) {
+        diagnostics_.error(member->span, "E2113",
+                           "members of an @Native class must be public");
+      }
+      if (member->body != nullptr) {
+        diagnostics_.error(member->span, "E2113",
+                           "members of an @Native class must not have a body; "
+                           "the bridge calls the native implementation");
+      }
+      if (!member->generics.empty()) {
+        diagnostics_.error(member->span, "E2113",
+                           "members of an @Native class cannot be generic");
+      }
+      if (member->kind == DeclKind::Method &&
+          (member->isStatic || member->isVirtual || member->isOverride ||
+           member->isFinal)) {
+        diagnostics_.error(member->span, "E2113",
+                           "@Native class methods are plain instance methods; "
+                           "static/virtual/override/final are not supported");
+      }
+      if (member->kind == DeclKind::Constructor &&
+          (member->hasInitializerList || !member->initializers.empty())) {
+        diagnostics_.error(member->span, "E2113",
+                           "@Native constructors cannot use an initializer "
+                           "list; the native constructor runs in the bridge");
+      }
+      for (const AnnotationUse& use : member->annotations) {
+        if (use.name == "Native") {
+          diagnostics_.error(member->span, "E2113",
+                             "members of an @Native class are implicitly "
+                             "native; file/abi belong on the class");
+        } else {
+          diagnostics_.error(member->span, "E2113",
+                             "annotations on members of an @Native class are "
+                             "not supported; the bridge owns construction "
+                             "and dispatch");
+        }
+      }
+    }
+  }
+
   pushTypeScope();
   bindGenericParams(decl.generics, true);
 
-  if (decl.base) {
+  if (!decl.isNative && decl.base) {
     Type* base = resolveType(decl.base.get(), true);
     if (base->kind != TypeKind::Class && base->kind != TypeKind::Interface) {
       diagnostics_.error(decl.base->span, "E2004",
@@ -2852,6 +3117,9 @@ void Checker::checkClass(Decl& decl) {
   }
 
   for (const auto& ifaceExpr : decl.interfaces) {
+    if (decl.isNative) {
+      break;
+    }
     Type* iface = resolveType(ifaceExpr.get(), true);
     if (iface->kind != TypeKind::Interface) {
       diagnostics_.error(ifaceExpr->span, "E2004",
@@ -2879,6 +3147,12 @@ void Checker::checkClass(Decl& decl) {
 
   for (const auto& member : decl.members) {
     if (member->kind != DeclKind::Field) {
+      continue;
+    }
+    if (decl.isNative) {
+      diagnostics_.error(member->span, "E2113",
+                         "@Native classes are opaque handles and cannot "
+                         "declare fields");
       continue;
     }
     validateAnnotations(member->annotations, "field", member->span, true);
@@ -3033,6 +3307,16 @@ void Checker::checkClass(Decl& decl) {
     }
   }
 
+  if (decl.isNative) {
+    for (const auto& member : decl.members) {
+      if (member->kind == DeclKind::Method) {
+        validateNativeSignature(*member, member->resolvedType, diagnostics_);
+      } else if (member->kind == DeclKind::Constructor) {
+        validateNativeSignature(*member, voidType_, diagnostics_);
+      }
+    }
+  }
+
   for (const MethodInfo& method : type->methods) {
     const MethodInfo* base = lookupMethod(
         type->base, method.name, method.paramTypes.size());
@@ -3105,7 +3389,7 @@ void Checker::checkClass(Decl& decl) {
     }
   }
 
-  if (!decl.hasUserDestructor) {
+  if (!decl.hasUserDestructor && !decl.isNative) {
     synthesizeDestructor(decl);
   }
 
@@ -3506,6 +3790,20 @@ void Checker::validateDoc(Decl& decl) {
 void Checker::checkMethod(Decl& decl, Type* owner, bool allowMeta) {
   validateDoc(decl);
   validateAnnotations(decl.annotations, "method", decl.span, true);
+  for (const AnnotationUse& use : decl.annotations) {
+    if (use.name != "Native") {
+      continue;
+    }
+    const bool nativeOwner =
+        currentClassDecl_ != nullptr && currentClassDecl_->isNative;
+    diagnostics_.error(
+        use.span, "E2113",
+        nativeOwner
+            ? "members of an @Native class are implicitly native; put "
+              "file/abi on the class"
+            : "@Native methods are only supported inside an @Native class; "
+              "free native functions are declared at file scope");
+  }
   for (const AnnotationUse& use : decl.annotations) {
     if (use.name == "Unique") {
       decl.isUnique = true;
@@ -3959,34 +4257,25 @@ void Checker::checkFunction(Decl& decl) {
       decl.proxyPolicy = ProxyPolicy::Error;
       parseOptionalPolicy(use, decl.proxyPolicy, decl.proxyDefault);
     } else if (use.name == "Native") {
-      decl.isNative = true;
-      if (use.args.empty() || use.args[0] == nullptr ||
-          use.args[0]->kind != ExprKind::StringLit) {
-        diagnostics_.error(use.span, "E2078",
-                           "@Native requires a C symbol string, e.g. "
-                           "@Native(\"getpid\")");
-      } else {
-        decl.nativeSymbol = use.args[0]->stringValue;
-      }
+      // Parsed below once; keeps @Unique/@Share/@Optional handling order stable.
+    }
+  }
+  if (hasAnnotationNamed(decl.annotations, "Native")) {
+    const NativeAnnotation spec = readNativeAnnotation(
+        decl.annotations, diagnostics_, false, decl.name);
+    decl.isNative = true;
+    decl.nativeFile = spec.file;
+    decl.nativeAbi = spec.abi;
+    decl.nativeSymbol = spec.symbol;
+    if (!spec.valid) {
+      decl.nativeAbi = "c";
     }
   }
   if (decl.isNative) {
-    bool validSymbol = !decl.nativeSymbol.empty();
-    for (std::size_t i = 0; i < decl.nativeSymbol.size(); ++i) {
-      const char c = decl.nativeSymbol[i];
-      const bool alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-      const bool digit = c >= '0' && c <= '9';
-      if (!alpha && c != '_' && (i == 0 || !digit)) {
-        validSymbol = false;
-      }
-    }
-    if (!validSymbol) {
-      diagnostics_.error(decl.span, "E2078",
-                         "@Native symbol must be a C identifier");
-    }
     if (decl.body != nullptr) {
       diagnostics_.error(decl.span, "E2078",
-                         "@Native functions must not have a body");
+                         "@Native functions must not have a body; the bridge "
+                         "calls the native implementation");
     }
     if (!decl.generics.empty()) {
       diagnostics_.error(decl.span, "E2078",
@@ -3997,6 +4286,13 @@ void Checker::checkFunction(Decl& decl) {
       diagnostics_.error(decl.span, "E2078",
                          "@Native cannot be combined with "
                          "@Result/@Expect/@Test/@Unique/@Share/@Weak/@Optional");
+    }
+    if (decl.nativeAbi == "c" && decl.nativeSymbol.empty()) {
+      decl.nativeSymbol = decl.name;
+    }
+    if (!decl.nativeSymbol.empty() && !isValidCSymbol(decl.nativeSymbol)) {
+      diagnostics_.error(decl.span, "E2113",
+                         "@Native symbol must be a C identifier");
     }
   }
   if (decl.isUnique && decl.isShare) {
@@ -4115,25 +4411,7 @@ void Checker::checkFunction(Decl& decl) {
   copyNumericMetadata(decl.type.get(), decl.length, decl.radix, decl.power,
                       decl.hasLength, decl.hasRadix, decl.hasPower);
   if (decl.isNative) {
-    const auto supported = [](Type* type) {
-      return type != nullptr &&
-             (type->kind == TypeKind::Int || type->kind == TypeKind::Bool ||
-              type->kind == TypeKind::Float || type->kind == TypeKind::String ||
-              type->name == "void");
-    };
-    if (!supported(returnType)) {
-      diagnostics_.error(
-          decl.span, "E2078",
-          "@Native supports only integer/boolean/float/string/void signatures");
-    }
-    for (const Param& param : decl.params) {
-      Type* paramType = param.type ? param.type->resolved : nullptr;
-      if (!supported(paramType) || paramType->name == "void") {
-        diagnostics_.error(
-            param.span, "E2078",
-            "@Native parameters must be integer, boolean, float or string");
-      }
-    }
+    validateNativeSignature(decl, returnType, diagnostics_);
   }
   if ((decl.isUnsigned || decl.isSigned) && returnType != nullptr &&
       returnType->name != "integer") {
@@ -5206,8 +5484,14 @@ Type* Checker::checkAssign(Expr* expr) {
   Type* lhs = checkExpr(expr->lhs.get());
   checkCaptureMutation(expr->lhs.get(), expr->span);
   checkLockWrite(expr->lhs.get(), expr->span);
+  if (isNativeClassType(lhs)) {
+    diagnostics_.error(
+        expr->span, "E2119",
+        "native class '" + lhs->name +
+            "' owns an opaque handle and is move-only; it cannot be assigned");
+  }
   if (lhs != nullptr && lhs->kind == TypeKind::Class &&
-      classRequiresExplicitCopy(lhs)) {
+      !isNativeClassType(lhs) && classRequiresExplicitCopy(lhs)) {
     bool referenceField = false;
     if (expr->lhs != nullptr && expr->lhs->kind == ExprKind::Member &&
         expr->lhs->lhs != nullptr) {
@@ -7554,6 +7838,14 @@ void Checker::checkStmt(Stmt* stmt) {
             stmt->span, "E2092",
             "Atomic values cannot be copied; initialize in place with "
             "Atomic(initial)");
+      }
+      if (isNativeClassType(type) && stmt->expr != nullptr &&
+          stmt->expr->kind != ExprKind::Call) {
+        diagnostics_.error(
+            stmt->span, "E2119",
+            "native class '" + type->name +
+                "' is move-only: initialize it from its constructor instead "
+                "of copying another handle");
       }
       if (type != nullptr && type->kind == TypeKind::Class &&
           stmt->expr != nullptr && stmt->expr->kind != ExprKind::Call &&

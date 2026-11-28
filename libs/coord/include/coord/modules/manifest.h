@@ -42,6 +42,28 @@ struct RegistryEntry {
   std::string url;
 };
 
+/// One `[toolchain.<target>]` table: the only source of truth for the native
+/// compiler and linker configuration. `cc`/`cxx` are required whenever a
+/// project declares native code; nothing is guessed or downloaded.
+struct ToolchainConfig {
+  std::string name;  // the target triple used as the table key
+  std::string cc;
+  std::string cxx;
+  std::string sysroot;
+  std::vector<std::string> cflags;
+  std::vector<std::string> cxxflags;
+  std::vector<std::string> ldflags;
+};
+
+/// `[native]`: header search paths plus the objects/libraries that the
+/// project's own build system produced. Paths are relative to the manifest
+/// directory.
+struct NativeSettings {
+  std::vector<std::string> include;
+  std::vector<std::string> objects;
+  std::vector<std::string> libraries;
+};
+
 struct MirrorEntry {
   std::string name;
   std::string registry = "official";
@@ -87,11 +109,26 @@ struct Manifest {
   std::vector<std::string> members;
   std::vector<RegistryEntry> registries;
   std::vector<MirrorEntry> mirrors;
+  /// `[build] target = "<triple>"`.
+  std::string buildTarget;
+  /// `[toolchain.<target>]` tables, keyed by target triple.
+  std::vector<ToolchainConfig> toolchains;
+  /// `[native]` objects/libraries/includes.
+  NativeSettings native;
   bool requireChecksum = false;
   bool allowInsecureHttp = false;
   bool legacy = false;
 
   [[nodiscard]] const DependencySpec* dependency(std::string_view name) const;
+  [[nodiscard]] const ToolchainConfig* toolchain(std::string_view target) const;
+  /// True when the manifest declares any native build configuration. Such a
+  /// project always builds through `[build]`/`[toolchain]`, never through a
+  /// host default compiler.
+  [[nodiscard]] bool hasNativeConfiguration() const {
+    return !buildTarget.empty() || !toolchains.empty() ||
+           !native.include.empty() || !native.objects.empty() ||
+           !native.libraries.empty();
+  }
   [[nodiscard]] std::vector<const DependencySpec*> dependenciesOf(
       DependencyKind kind, bool includeOptional = false) const;
   [[nodiscard]] std::string id() const;

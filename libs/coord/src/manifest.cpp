@@ -129,6 +129,8 @@ std::string lowerAscii(std::string text) {
   manifest.root = manifestPath.parent_path();
   manifest.legacy = true;
   manifest.source = ".";
+  ToolchainConfig legacyToolchain;
+  bool hasToolchainFields = false;
   std::istringstream lines{std::string(text)};
   std::string line;
   std::size_t lineNumber = 0;
@@ -191,9 +193,50 @@ std::string lowerAscii(std::string text) {
         return fail(error);
       }
       manifest.dependencies.push_back(std::move(spec));
+    } else if (field == "target") {
+      manifest.buildTarget = value;
+    } else if (field == "cc" || field == "cxx" || field == "sysroot") {
+      if (value.empty()) {
+        return fail("field '" + field + "' requires a value");
+      }
+      hasToolchainFields = true;
+      std::string& slot = field == "cc"   ? legacyToolchain.cc
+                          : field == "cxx" ? legacyToolchain.cxx
+                                           : legacyToolchain.sysroot;
+      slot = value;
+    } else if (field == "cflag" || field == "cxxflag" || field == "ldflag") {
+      if (value.empty()) {
+        return fail("field '" + field + "' requires a value");
+      }
+      hasToolchainFields = true;
+      std::vector<std::string>& flags =
+          field == "cflag"     ? legacyToolchain.cflags
+          : field == "cxxflag" ? legacyToolchain.cxxflags
+                               : legacyToolchain.ldflags;
+      flags.push_back(value);
+    } else if (field == "native-include" || field == "native-object" ||
+               field == "native-library") {
+      if (value.empty()) {
+        return fail("field '" + field + "' requires a value");
+      }
+      std::vector<std::string>& values =
+          field == "native-include"
+              ? manifest.native.include
+              : (field == "native-object" ? manifest.native.objects
+                                          : manifest.native.libraries);
+      values.push_back(value);
     } else {
       return fail("unknown package field '" + field + "'");
     }
+  }
+  if (hasToolchainFields) {
+    if (manifest.buildTarget.empty()) {
+      error = platform::pathToUtf8(manifestPath) +
+              ": cc/cxx/flags require a 'target' field";
+      return std::nullopt;
+    }
+    legacyToolchain.name = manifest.buildTarget;
+    manifest.toolchains.push_back(std::move(legacyToolchain));
   }
   if (manifest.name.empty()) {
     error = platform::pathToUtf8(manifestPath) + ": package has no name";
@@ -312,6 +355,146 @@ std::string lowerAscii(std::string text) {
       return false;
     }
     output.push_back(std::move(spec));
+  }
+  return true;
+}
+
+[[nodiscard]] bool readStringArray(const toml::Value& table,
+                                   std::string_view key,
+                                   std::vector<std::string>& target,
+                                   const std::string& context,
+                                   std::string& error) {
+  const toml::Value* value = table.get(key);
+  if (value == nullptr) {
+    return true;
+  }
+  if (!value->isArray()) {
+    error = context + ": '" + std::string(key) + "' must be an array of strings";
+    return false;
+  }
+  target.clear();
+  for (const toml::Value& element : value->elements()) {
+    if (!element.isString()) {
+      error =
+          context + ": '" + std::string(key) + "' must contain strings only";
+      return false;
+    }
+    target.push_back(element.asString());
+  }
+  return true;
+}
+
+[[nodiscard]] bool readBuildTable(const toml::Value& document,
+                                  Manifest& manifest, std::string& error) {
+  const toml::Value* build = document.get("build");
+  if (build == nullptr) {
+    return true;
+  }
+  if (!build->isTable()) {
+    error = "[build] must be a table";
+    return false;
+  }
+  for (std::size_t i = 0; i < build->keys().size(); ++i) {
+    const std::string& key = build->keys()[i];
+    const toml::Value& value = build->values()[i];
+    if (key != "target") {
+      error = "unknown [build] field '" + key + "'";
+      return false;
+    }
+    if (!value.isString()) {
+      error = "build.target must be a string";
+      return false;
+    }
+    manifest.buildTarget = value.asString();
+  }
+  return true;
+}
+
+[[nodiscard]] bool readToolchainTables(const toml::Value& document,
+                                       Manifest& manifest, std::string& error) {
+  const toml::Value* toolchain = document.get("toolchain");
+  if (toolchain == nullptr) {
+    return true;
+  }
+  if (!toolchain->isTable()) {
+    error = "[toolchain] must be a table of tables";
+    return false;
+  }
+  for (std::size_t i = 0; i < toolchain->keys().size(); ++i) {
+    const std::string& target = toolchain->keys()[i];
+    const toml::Value& table = toolchain->values()[i];
+    if (!table.isTable()) {
+      error = "toolchain." + target + " must be a table";
+      return false;
+    }
+    ToolchainConfig config;
+    config.name = target;
+    for (std::size_t j = 0; j < table.keys().size(); ++j) {
+      const std::string& key = table.keys()[j];
+      const toml::Value& value = table.values()[j];
+      const std::string context = "toolchain." + target;
+      if (key == "cc" || key == "cxx" || key == "sysroot") {
+        if (!value.isString()) {
+          error = context + ": '" + key + "' must be a string";
+          return false;
+        }
+        std::string& field = key == "cc"   ? config.cc
+                            : key == "cxx" ? config.cxx
+                                           : config.sysroot;
+        field = value.asString();
+      } else if (key == "cflags") {
+        if (!readStringArray(table, key, config.cflags, context, error)) {
+          return false;
+        }
+      } else if (key == "cxxflags") {
+        if (!readStringArray(table, key, config.cxxflags, context, error)) {
+          return false;
+        }
+      } else if (key == "ldflags") {
+        if (!readStringArray(table, key, config.ldflags, context, error)) {
+          return false;
+        }
+      } else {
+        error = "unknown " + context + " field '" + key + "'";
+        return false;
+      }
+    }
+    manifest.toolchains.push_back(std::move(config));
+  }
+  return true;
+}
+
+[[nodiscard]] bool readNativeTable(const toml::Value& document,
+                                   Manifest& manifest, std::string& error) {
+  const toml::Value* native = document.get("native");
+  if (native == nullptr) {
+    return true;
+  }
+  if (!native->isTable()) {
+    error = "[native] must be a table";
+    return false;
+  }
+  for (std::size_t i = 0; i < native->keys().size(); ++i) {
+    const std::string& key = native->keys()[i];
+    if (key == "include") {
+      if (!readStringArray(*native, key, manifest.native.include, "[native]",
+                           error)) {
+        return false;
+      }
+    } else if (key == "objects") {
+      if (!readStringArray(*native, key, manifest.native.objects, "[native]",
+                           error)) {
+        return false;
+      }
+    } else if (key == "libraries") {
+      if (!readStringArray(*native, key, manifest.native.libraries,
+                           "[native]", error)) {
+        return false;
+      }
+    } else {
+      error = "unknown [native] field '" + key + "'";
+      return false;
+    }
   }
   return true;
 }
@@ -536,6 +719,11 @@ std::string lowerAscii(std::string text) {
       manifest.mirrors.push_back(std::move(mirror));
     }
   }
+  if (!readBuildTable(*document, manifest, error) ||
+      !readToolchainTables(*document, manifest, error) ||
+      !readNativeTable(*document, manifest, error)) {
+    return std::nullopt;
+  }
   if (manifest.name.empty()) {
     error = platform::pathToUtf8(manifestPath) + ": package has no name";
     return std::nullopt;
@@ -584,6 +772,15 @@ const DependencySpec* Manifest::dependency(std::string_view packageName) const {
   for (const DependencySpec& spec : dependencies) {
     if (spec.name == packageName) {
       return &spec;
+    }
+  }
+  return nullptr;
+}
+
+const ToolchainConfig* Manifest::toolchain(std::string_view target) const {
+  for (const ToolchainConfig& config : toolchains) {
+    if (config.name == target) {
+      return &config;
     }
   }
   return nullptr;

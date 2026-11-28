@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**213 项 CTest**，Windows 全套 **213/213 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。
+- 当前基线：**214 项 CTest**，Windows 全套 **214/214 通过**；Linux（WSL Ubuntu，g++ 15）上注册的 8 项（`coord_unit`、`coord_e2e_packages` 与 6 个 native bridge 测试）同样全部通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **213 项**（1 个单元测试 + 212 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- `ctest` 注册 **214 项**（1 个单元测试 + 213 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -237,6 +237,28 @@ priority = 10
 - 版本约束：`^`、`~`、`*`、`>=`/`<`、`=1.2.3`；预发布只在其 `major.minor.patch` 被显式约束时匹配。
 - `platform` 过滤支持 `windows`/`linux`/`macos`/`unix`/架构名与 `!` 取反；`optional = true` 仅在 `--all-optional` 时解析。
 - workspace `[workspace] members` 当前只解析、不递归安装。
+- native 项目新增 `[build]`、`[toolchain.<target>]`、`[native]`；清单是编译器/target 的唯一来源。`coord.pkg` 以行字段兼容同一配置：`target`、`cc`、`cxx`、`sysroot`、`cflag`/`cxxflag`/`ldflag` 与 `native-include`/`native-object`/`native-library`：
+
+```toml
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+[toolchain.x86_64-unknown-linux-gnu]
+cc = "/usr/bin/clang"          # 必填
+cxx = "/usr/bin/clang++"       # 必填；编译生成的 bridge 与主程序
+sysroot = ""                   # 可选
+cflags = []                    # 可选
+cxxflags = []                  # 可选；传给 bridge/主程序编译
+ldflags = []                   # 可选；传给链接
+
+[native]
+include = ["native/include"]         # 头文件搜索路径（项目相对）
+objects = ["native/build/foo.o"]     # 由项目自己的构建系统产出
+libraries = ["m"]                    # 名称（m、user32）或 .a/.lib/.so 路径
+```
+
+- `@Native(file: "native/include/foo.h", abi: "c" | "c++", symbol: "c_name")` 只声明头文件与 ABI（`symbol` 默认取声明名；class 必须 `abi: "c++"`）。bridge 模型见 §7.7。
+- Fail closed：缺 `[build].target`、缺/不完整 `[toolchain.<target>]`、objects/libraries/include 或头文件不存在、命令行 target/flags 与清单冲突都是硬错误（`E2112`–`E2119`）；`coorc` 绝不从 `PATH` 猜编译器、绝不自动下载。单文件使用 `@Native` 报 `E2112`；旧的 `@Native("symbol")` 形式报 `E2114`。
 
 ### 5.2 信任策略与安装
 
@@ -324,7 +346,7 @@ Linux/macOS 已用 g++ 本地验证；Windows 为主开发平台。工具链源�
 
 - 工具链用 `platform::run(argv)` 直接启动子进程，**不经过 shell**；参数按平台规则引用，避免路径空格、引号与 `cmd.exe` 展开问题。
 - Windows 使用 `CreateProcessW`（UTF-16 命令行与环境块），Unix 使用 `fork`/`execvp` + 进程组；支持超时、输出捕获、stdin 管道与取消。
-- MSVC 参数：`/nologo /std:c++20 /EHsc /utf-8 /Fe<exe> /Fo<obj>`；GCC/Clang：`-std=c++20 -O2 -pthread -o <exe>`。`--cxx-flavor` 可覆盖自动判断；`--verbose` 打印命令行。
+- 编译分两步：每个翻译单元先编译成 object（MSVC `/nologo /std:c++20 /EHsc /utf-8 /c <src> /Fo<obj>`；GCC/Clang `-std=c++20 -O2 -pthread -c <src> -o <obj>`），再链接（`cl /nologo <objs> /Fe<exe>`；`cxx <objs> -o <exe>`）。native 项目会额外加 `-I`/`/I` include 目录、把 `cxxflags` 传给两次编译，并把声明的 objects/libraries 与 `ldflags` 传给链接。`--cxx-flavor` 可覆盖自动判断；`--verbose` 打印每条命令行。
 
 ### 6.3 路径、编码与目录
 
@@ -548,6 +570,55 @@ coorc install --locked
 coorc build . -o out\app.exe
 ```
 
+### 7.7 Native Bridge（C 与 C++）
+
+native 代码用 `@Native` 声明、在清单里配置；`coorc` 生成 ABI 兼容的 C bridge，并链接项目自己构建的产物。示例工程见 [`examples/native`](examples/native)。
+
+```coo
+// examples/native/cpp_class/src/main.coo
+@Native(file: "native/include/counter.h", abi: "c++")
+class Counter {
+public:
+    Counter();
+    Counter(integer initial);
+    ~Counter();
+    integer value();
+    void increment();
+    integer add(integer delta);
+    string label();
+}
+
+@Unsafe
+integer main() {
+    Counter counter = Counter(10);
+    counter.increment();
+    print(counter.value());   // 11
+    print(counter.add(5));    // 16
+    print(counter.label());   // counter
+    return 0;
+}
+```
+
+```bat
+cmake --preset x64-debug
+cmake --build out\build\x64-debug
+cd examples\native\cpp_class
+native\build.cmd                :: 项目自己的 native 构建 -> native\build\counter.obj
+coorc run .
+```
+
+职责划分：
+
+| 层 | 职责 |
+| --- | --- |
+| `coordination.toml` | target 三元组、`cc`/`cxx`、sysroot/flags、native include/objects/libraries；编译器信息的唯一来源 |
+| `@Native(file:, abi:, symbol:)` | 一个无函数体 function 或 class 的头文件与 ABI；`symbol` 默认取声明名 |
+| 项目构建系统 | 把用户 `.c`/`.cpp` 编译成 objects/libraries（coorc 不做） |
+| 生成的 bridge（`<program>.native.cpp`） | `extern "C"` 包装；C 函数直接调用、字符串以 `const char*`、C++ class 用 move-only 不透明句柄 + 外部 `new (std::nothrow)`/`delete`；无 `try`/`catch`、无异常泄漏 |
+| 生成的主程序 | 调用 bridge 并转换值（null `const char*` → 空字符串，native 句柄 → 值 class） |
+
+Fail-closed：缺 `[build].target`、缺/不完整 `[toolchain.<target>]`、objects/libraries/include 或头文件不存在、命令行 target 冲突都是错误（`E2112`–`E2119`），绝不回退宿主默认编译器。native 调用仍需 `@Unsafe`（`E2096`）。
+
 ## 8 仓库结构
 
 | 路径 | 内容 |
@@ -563,7 +634,7 @@ coorc build . -o out\app.exe
 
 ## 9 限制与已知问题
 
-- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口目标以函数值子集提供：`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` 降为函数类型（泛型实参替换，`.apply`/`.accept`/`.test`/`.get` 调用形式）；具名接口值与类实现 `@FunctionalInterface` 仍属 ⏳（`E2004`/`E2089`），且 `@FunctionalInterface` 已弃用，等 Lambda 模块（切片 12）结构化 `operator()` 后删除。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 为 v1 子集：无函数体、原始类型/string 参数与返回值，通过生成包装调用 C 符号；class/指针/header/library 与 C++ ABI 选择仍属 ⏳，且 `@Native` 不再以 variable 为目标。`@Copy`/`@Wrap`、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 仍属 ⏳；`@Wrap` 标 deferred（声明已移除）；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
+- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口目标以函数值子集提供：`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` 降为函数类型（泛型实参替换，`.apply`/`.accept`/`.test`/`.get` 调用形式）；具名接口值与类实现 `@FunctionalInterface` 仍属 ⏳（`E2004`/`E2089`），且 `@FunctionalInterface` 已弃用，等 Lambda 模块（切片 12）结构化 `operator()` 后删除。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 已改为项目配置：`@Native(file:, abi:, symbol:)` 只声明头文件/ABI，`coordination.toml` 的 `[build]`/`[toolchain.<target>]`/`[native]` 提供编译器/target/objects/libraries，`coorc` 生成 `extern "C"` bridge（C 函数包装、`const char*` 字符串、move-only 不透明 C++ class 句柄、无 `try`/`catch`）。旧 `@Native("symbol")` 报 `E2114`，单文件使用报 `E2112`；见 §7.7 与 `examples/native`。`@Copy`/`@Wrap`、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 仍属 ⏳；`@Wrap` 标 deferred（声明已移除）；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
 - `ProxyPolicy` 的执行主要验证了局部 `T*`/`@Unique`/`@Share` 变量（直接访问、收窄、局部 Optional 解构）与 `@Proxy` 的 `Skip`/`Abort`/`Error` 解构路径。字段/参数/返回值上的 `@Optional` 已解析/校验，但完整 policy 执行仍不完整；`@Proxy` 的 `Default(expr)` 构造/解构、runtime 构造前钩子、任意非默认构造类的 `Skip` 默认值仍属 🚧。
 - `@Constructure` 类型化/命名构造与 `@Retention(Compile/Runtime)` 代码块已实现基础版；编译期块不能依赖运行期局部状态，代码块上的 `Invocation`/`enum` 报 `E2044`；复杂构造重载消歧仍属 🚧。
 - Atomic v0：内建不可拷贝 `Atomic`，降为 `std::atomic<std::int64_t>`，支持 `load()`、`store(v)`、`fetchAdd(v)`/`fetchSub(v)`（返回操作前的值）、`exchange(v)`（返回旧值）与 `compareExchange(expected, desired)`（值等于 expected 并替换为 desired 时返回 true；expected 不被更新）。所有操作 seq_cst，无内存序参数；没有 `Atomic<T>` 泛型、浮点/指针原子、condition variable 或数据竞争静态分析。支持局部变量与类字段，参数/返回位置 ⏳。拷贝或赋值报 `E2092`。
@@ -576,7 +647,8 @@ coorc build . -o out\app.exe
 - 所有权与 borrow 检查仍是保守子集：`&` 不能返回/存字段/作容器元素；按引用闭包不能返回、存入字段/容器字面量或赋给外层作用域变量（`E2039`），完整跨线程借用与生命周期分析仍待补。函数类型参数按调用期借用处理：返回或存储它们会被拒绝。
 - 别名局部变量声明 `l.Payload p = ...` 有语法歧义，当前只完整支持参数/返回类型位置。
 - 包管理：workspace 只解析不递归安装；无 feature、git 依赖、包签名/信任链；`search` 依赖 `index.toml`。
-- 交叉编译：MSVC 宿主不能交叉编译，交叉目标不能运行。
+- 交叉编译：native 项目由 `[build].target` + `[toolchain.<target>]` 驱动（程序与 bridge 同一 `cxx`）；外部 target 可用 `--emit-cpp` 做 compile-only。链接外部 target 需要已安装的交叉工具链，MSVC 宿主不能交叉编译，交叉目标不能运行。
+- native bridge 遗留：为其它 target 构建的 object 只能由链接器发现；`--incremental` 不跟踪 `@Native` 声明的头文件（只跟踪源码、清单、objects 与工具链配置）；状态码 → Result proxy 映射、用户 C++ 异常（no-throw 契约未强制）、回调与单文件 `@Native` 仍为 ⏳。
 - 修改头文件后必须清理重建；Windows 上 Ninja 对 MSVC 中文 `showIncludes` 不可靠。
 - 测试数量是撰写时已验证的基线；请在本机重新运行 `ctest` 确认。
 - 生成 C++ 后端是单翻译单元；大型项目/多模块链接与标准库完整 API 仍在推进。
@@ -587,3 +659,9 @@ coorc build . -o out\app.exe
 - 英文 QuickStart：[readme.md](readme.md)
 - 形式文法：[docs/grammar.ebnf](docs/grammar.ebnf)
 - 历史归档：[docs/archive/](docs/archive/)（不再维护）
+
+
+
+
+
+

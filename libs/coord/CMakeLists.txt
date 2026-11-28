@@ -4,6 +4,7 @@ add_library(coorc_core STATIC
   src/toml.cpp
   src/archive.cpp
   src/manifest.cpp
+  src/native.cpp
   src/lockfile.cpp
   src/net.cpp
   src/mirror.cpp

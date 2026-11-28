@@ -321,7 +321,7 @@ class Service {
 - Built-in annotation names (recognized by the compiler; users cannot redefine them): `@Result`, `@Expect`, `@Invocation`, `@Proxy`, `@Get`, `@Set`, `@Destructure`, `@Construct`, `@Constructure`, `@Has`, `@Delete`, `@Keys`, `@Describe`, `@Call`, `@Copy`, `@Native`, `@FunctionalInterface` (deprecated), `@Unique`, `@Share`, `@Weak`, `@Optional`, `@Signed`, `@Unsigned`, `@Length`, `@Radix`, `@Power`, `@Lock`, `@ReadOnly`, `@Unsafe`, `@Safe`, `@Test`, `@Bench`. `@Wrap` is deferred and no longer declared; `@Processor` has been removed.
 - **Target correction**: `@Optional`, `@Unique`, `@Share`, `@Weak`, `@Signed`, `@Unsigned`, `@Length`, `@Radix` and `@Power` are `@Target(type)` annotations; they attach to type expressions at local/field/parameter/return positions, not to the declaration itself. `@Constructure` is `@Target(constructor)`. `@Native` targets classes/functions/methods only (no `variable`). All other annotations keep their declaration targets.
 - **Layering**: only six meta-annotations are built into C++; all other annotations are ordinary Coo declarations in `lib/standard/annotations.coo`, organised by section (Meta / Processor interfaces / Proxy traps / Value protocols / Ownership-representation / Scope-capability / Native / Tooling). The compiler retains only name-keyed semantic hooks (e.g. `@Result` return wrapping, `@Unsigned` storage mapping) and does not maintain a second built-in table. `Descriptor`/`Reflection` are ordinary classes in that file; `Description`/`Reflector<T>` are compiler-special.
-- `@Native(header: string, library: string, symbol: string = "", abi: "c" | "c++" = "c")`: annotates a body-less class/function/method; the compiler `#include`s the header in generated C++ and passes the library to the host linker. No runtime FFI/dlopen; the declaration introduces no Scope and does not participate in runtime reflection.
+- `@Native(file: string, abi: "c" | "c++" = "c", symbol: string = declaration name)`: annotates a body-less function or body-less class; it declares only the header and ABI. Compiler, target, flags and link inputs come from the project manifest `[build]`/`[toolchain.<target>]`/`[native]` tables; `coorc` generates and compiles an `extern "C"` bridge with the configured `cxx` and links the declared native objects/libraries (see §7.4). The old `@Native("symbol")` form is rejected with `E2114`. No runtime FFI/dlopen; the declaration introduces no Scope and does not participate in runtime reflection.
 
 #### 4.2.5 Functions, Operators and Constants
 
@@ -1255,11 +1255,12 @@ The front end does not depend on package management; scanners do not depend on t
 - The toolchain spawns subprocesses with `platform::run(argv)` directly, **never through a shell**; Windows uses `CreateProcessW` (UTF-16 command line and environment block), Unix uses `fork`/`execvp` + process group; timeouts, output capture, stdin pipes and cancellation are supported.
 - All cross-module paths are UTF-8; Windows converts to UTF-16 file APIs; sources are LF internally and normalized on read/write; config dirs are `%APPDATA%\coord`, `~/Library/Application Support/coord`, `${XDG_CONFIG_HOME:-~/.config}/coord`; caches are `%LOCALAPPDATA%\coord\cache`, `~/Library/Caches/coord`, `${XDG_CACHE_HOME:-~/.cache}/coord`, overridable with `COORD_CONFIG`/`COORD_CACHE_DIR`.
 - CMake uses `Threads::Threads` and platform presets; Windows uses Ninja + cl, Linux/macOS use `linux-release`/`macos-release`/`linux-debug`. Linux/macOS have been verified locally with g++; Windows is the primary development platform.
-- Cross-compilation: `coorc --target <triple>` passes `--target` to clang; GCC cross toolchains are supplied via `--cxx`; `--sysroot <path>` passes a sysroot; MSVC cannot cross-compile; a cross target cannot be executed with `coorc run`.
+- Cross-compilation: a native project takes its triple and toolchain from `coordination.toml` and passes `--target`/`--sysroot` to clang; GCC cross toolchains are supplied through `[toolchain.<target>].cxx`. Outside native projects, `coorc --target <triple>` still passes `--target` to clang and `--cxx`/`--sysroot` select a toolchain. MSVC cannot cross-compile; a cross target cannot be executed with `coorc run`; a `--target` that contradicts the manifest is `E2117`.
+- Native projects fail closed: `[build].target`, a matching `[toolchain.<target>]` with `cc`/`cxx`, and the `[native]` inputs are required, and nothing falls back to the host default compiler or `PATH` (see §7.4).
 
 ### 6.6 Test Status
 
-`ctest` currently registers **213 tests**: `coord_unit` plus 212 end-to-end tests. `coord_unit` covers lexing, parsing, generics, Scope, RAII, compile-time evaluation, codegen, interfaces, enums, pointers, Unicode/BOM, module scanning, access/inheritance, `super`, meta-annotations, Optional/null, converting constructors, Result/Expect, for-in, `@Signed/@Unsigned/@Length`, fixed arrays, array literals, ArrayView, OrderedMap, OrderedSet, UnorderedMap, UnorderedSet, 128-bit integers, Invocation/multi-handler/virtual dispatch, AnnotationProcessor-generated declarations and the processor contract, Proxy class/annotation/runtime call/field trap/state, reflector, runtime retention/value/member/type, descriptor pipeline, ownership/optional/fields/params/returns/initializer, main signatures, `.coox` reader, package graph, outline/hint and `@Test`; the fix slice covers default/explicit `@Power`, `integer`/`float` promotion, radix 2/10/3, literal encoding, negative power, target-annotation conversions, division target override, 8/16/32/64/128 raw widths, 128-bit literals/arithmetic/print, same-shape copies and result-width widening, all operators, and the `E2100`–`E2111` negatives. The e2e suite covers examples and fixtures (compile/run, negative cases, determinism, incremental builds, dependency cycles, two-package builds, and the full package-manager/mirror/registry flow); the newly landed coverage is the annotation-processor slice `coord_e2e_annotation_processor`, `coord_e2e_annotation_processor_class_error`, `coord_e2e_annotation_processor_missing_process_error`, `coord_e2e_annotation_processor_signature_error`, `coord_e2e_optional_policies`, `coord_e2e_optional_error`, `coord_e2e_optional_implicit`, `coord_e2e_constructure`, `coord_e2e_constructure_error`, `coord_e2e_destructure_annotation`, `coord_e2e_proxy_construct_destructure`, `coord_e2e_platform` and `coord_e2e_retention_block`, the fix slice `coord_e2e_fix`, `coord_e2e_fix_radix`, `coord_e2e_fix_power_error`, `coord_e2e_fix_conversion`, `coord_e2e_fix_operators`, `coord_e2e_fix_division_target`, `coord_e2e_fix_lengths`, `coord_e2e_fix_wide_product`, `coord_e2e_fix_conversion_error`, `coord_e2e_fix_bitwise_error`, `coord_e2e_fix_scale_error`, `coord_e2e_fix128_operators`, `coord_e2e_fix128_integer`, `coord_e2e_fix128_conversion`, `coord_e2e_fix128_overflow`, `coord_e2e_fix128_divzero`, `coord_e2e_fix128_literal_error`, `coord_e2e_fix_copy`, `coord_e2e_fix_container_error`, `coord_e2e_radix`, `coord_e2e_radix_error`, `coord_e2e_radix_zero_error`, `coord_e2e_default_init`, `coord_e2e_weak`, `coord_e2e_bounds`, `coord_e2e_optional_params`, `coord_e2e_optional_fields`, `coord_e2e_optional_return`, `coord_e2e_division`, `coord_e2e_overflow`, `coord_e2e_compound`, `coord_e2e_shift`, `coord_e2e_share_cycle`, `coord_e2e_share_cycle_ctor`, and the lambda closure slice `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`, and the control-flow slice `coord_e2e_match_patterns`, `coord_e2e_if_expression`, `coord_e2e_match_missing`, `coord_e2e_match_no_wildcard`, `coord_e2e_match_bad_pattern`, `coord_e2e_if_expression_type_error`, and the function-value slice `coord_e2e_method_ref`, `coord_e2e_method_ref_escape`, `coord_e2e_method_ref_unbound`, and the functional-interface slice `coord_e2e_functional_interface`, `coord_e2e_functional_interface_error`, `coord_e2e_functional_interface_arity_error`, `coord_e2e_functional_interface_methods_error`, and the thread slice `coord_e2e_thread`, `coord_e2e_thread_capture_error`, `coord_e2e_thread_this_error`, `coord_e2e_thread_copy_error`, and the Mutex slice `coord_e2e_mutex`, `coord_e2e_mutex_copy_error`, `coord_e2e_mutex_assign_error`, and the ScopedLock/Atomic/@Lock slice `coord_e2e_atomic`, `coord_e2e_scopedlock_copy_error`, `coord_e2e_atomic_copy_error`, `coord_e2e_atomic_assign_error`, `coord_e2e_lock_annotation`, `coord_e2e_lock_annotation_error`, and the ScopedThread/Atomic-ops slice `coord_e2e_scoped_thread`, `coord_e2e_atomic_ops`, `coord_e2e_scopedthread_copy_error`, `coord_e2e_scopedthread_assign_error`, `coord_e2e_scopedthread_capture_error`, `coord_e2e_scopedthread_this_error`, and the @Lock capability slice `coord_e2e_lock_capture`, `coord_e2e_lock_capture_uncaptured_write`, `coord_e2e_lock_capture_const_write`, `coord_e2e_lock_capture_readonly_method`, `coord_e2e_lock_capture_value_class`, `coord_e2e_lock_capture_escape`, `coord_e2e_lock_legacy_error`, `coord_e2e_lock_nested_error`, `coord_e2e_lock_capture_uncaptured_call`, `coord_e2e_lock_capture_value_return`, and the @Copy slice `coord_e2e_copy_deep`, `coord_e2e_copy_deep_unique`, `coord_e2e_copy_shallow`, `coord_e2e_copy_deep_share_error`, `coord_e2e_copy_shallow_unique_error`, `coord_e2e_copy_explicit_required_error`, `coord_e2e_copy_bad_mode_error`, `coord_e2e_lock_capture_deep`, `coord_e2e_lock_capture_shallow_error`, `coord_e2e_copy_deep_unique_chain`, `coord_e2e_copy_deep_nested_error`, `coord_e2e_copy_explicit_shell_error`, and the Safe/Unsafe slice `coord_e2e_unsafe_ffi_error`, `coord_e2e_unsafe_ffi_block`, `coord_e2e_unsafe_pointer_error`, `coord_e2e_unsafe_safe_override_error`. The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `COORD_SANITIZE=ON` builds the compiler with ASan/UBSan (including the `linux-sanitize` preset); `COORD_FUZZ=ON` builds Clang/libFuzzer parser and compiler harnesses under [`tests/fuzz`](tests/fuzz); the compiler harness keeps `Checker` alive through emission because `TypeExpr::resolved` points into checker-owned types. Diagnostics are capped at 256 stored entries, and the parser advances after member-recovery errors to avoid unbounded diagnostic growth. `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
+`ctest` currently registers **214 tests**: `coord_unit` plus 213 end-to-end tests. `coord_unit` covers lexing, parsing, generics, Scope, RAII, compile-time evaluation, codegen, interfaces, enums, pointers, Unicode/BOM, module scanning, access/inheritance, `super`, meta-annotations, Optional/null, converting constructors, Result/Expect, for-in, `@Signed/@Unsigned/@Length`, fixed arrays, array literals, ArrayView, OrderedMap, OrderedSet, UnorderedMap, UnorderedSet, 128-bit integers, Invocation/multi-handler/virtual dispatch, AnnotationProcessor-generated declarations and the processor contract, Proxy class/annotation/runtime call/field trap/state, reflector, runtime retention/value/member/type, descriptor pipeline, ownership/optional/fields/params/returns/initializer, main signatures, `.coox` reader, package graph, outline/hint and `@Test`; the fix slice covers default/explicit `@Power`, `integer`/`float` promotion, radix 2/10/3, literal encoding, negative power, target-annotation conversions, division target override, 8/16/32/64/128 raw widths, 128-bit literals/arithmetic/print, same-shape copies and result-width widening, all operators, and the `E2100`–`E2111` negatives. The e2e suite covers examples and fixtures (compile/run, negative cases, determinism, incremental builds, dependency cycles, two-package builds, and the full package-manager/mirror/registry flow); the newly landed coverage is the annotation-processor slice `coord_e2e_annotation_processor`, `coord_e2e_annotation_processor_class_error`, `coord_e2e_annotation_processor_missing_process_error`, `coord_e2e_annotation_processor_signature_error`, `coord_e2e_optional_policies`, `coord_e2e_optional_error`, `coord_e2e_optional_implicit`, `coord_e2e_constructure`, `coord_e2e_constructure_error`, `coord_e2e_destructure_annotation`, `coord_e2e_proxy_construct_destructure`, `coord_e2e_platform` and `coord_e2e_retention_block`, the fix slice `coord_e2e_fix`, `coord_e2e_fix_radix`, `coord_e2e_fix_power_error`, `coord_e2e_fix_conversion`, `coord_e2e_fix_operators`, `coord_e2e_fix_division_target`, `coord_e2e_fix_lengths`, `coord_e2e_fix_wide_product`, `coord_e2e_fix_conversion_error`, `coord_e2e_fix_bitwise_error`, `coord_e2e_fix_scale_error`, `coord_e2e_fix128_operators`, `coord_e2e_fix128_integer`, `coord_e2e_fix128_conversion`, `coord_e2e_fix128_overflow`, `coord_e2e_fix128_divzero`, `coord_e2e_fix128_literal_error`, `coord_e2e_fix_copy`, `coord_e2e_fix_container_error`, `coord_e2e_radix`, `coord_e2e_radix_error`, `coord_e2e_radix_zero_error`, `coord_e2e_default_init`, `coord_e2e_weak`, `coord_e2e_bounds`, `coord_e2e_optional_params`, `coord_e2e_optional_fields`, `coord_e2e_optional_return`, `coord_e2e_division`, `coord_e2e_overflow`, `coord_e2e_compound`, `coord_e2e_shift`, `coord_e2e_share_cycle`, `coord_e2e_share_cycle_ctor`, and the lambda closure slice `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`, and the control-flow slice `coord_e2e_match_patterns`, `coord_e2e_if_expression`, `coord_e2e_match_missing`, `coord_e2e_match_no_wildcard`, `coord_e2e_match_bad_pattern`, `coord_e2e_if_expression_type_error`, and the function-value slice `coord_e2e_method_ref`, `coord_e2e_method_ref_escape`, `coord_e2e_method_ref_unbound`, and the functional-interface slice `coord_e2e_functional_interface`, `coord_e2e_functional_interface_error`, `coord_e2e_functional_interface_arity_error`, `coord_e2e_functional_interface_methods_error`, and the thread slice `coord_e2e_thread`, `coord_e2e_thread_capture_error`, `coord_e2e_thread_this_error`, `coord_e2e_thread_copy_error`, and the Mutex slice `coord_e2e_mutex`, `coord_e2e_mutex_copy_error`, `coord_e2e_mutex_assign_error`, and the ScopedLock/Atomic/@Lock slice `coord_e2e_atomic`, `coord_e2e_scopedlock_copy_error`, `coord_e2e_atomic_copy_error`, `coord_e2e_atomic_assign_error`, `coord_e2e_lock_annotation`, `coord_e2e_lock_annotation_error`, and the ScopedThread/Atomic-ops slice `coord_e2e_scoped_thread`, `coord_e2e_atomic_ops`, `coord_e2e_scopedthread_copy_error`, `coord_e2e_scopedthread_assign_error`, `coord_e2e_scopedthread_capture_error`, `coord_e2e_scopedthread_this_error`, and the @Lock capability slice `coord_e2e_lock_capture`, `coord_e2e_lock_capture_uncaptured_write`, `coord_e2e_lock_capture_const_write`, `coord_e2e_lock_capture_readonly_method`, `coord_e2e_lock_capture_value_class`, `coord_e2e_lock_capture_escape`, `coord_e2e_lock_legacy_error`, `coord_e2e_lock_nested_error`, `coord_e2e_lock_capture_uncaptured_call`, `coord_e2e_lock_capture_value_return`, and the @Copy slice `coord_e2e_copy_deep`, `coord_e2e_copy_deep_unique`, `coord_e2e_copy_shallow`, `coord_e2e_copy_deep_share_error`, `coord_e2e_copy_shallow_unique_error`, `coord_e2e_copy_explicit_required_error`, `coord_e2e_copy_bad_mode_error`, `coord_e2e_lock_capture_deep`, `coord_e2e_lock_capture_shallow_error`, `coord_e2e_copy_deep_unique_chain`, `coord_e2e_copy_deep_nested_error`, `coord_e2e_copy_explicit_shell_error`, the Safe/Unsafe slice `coord_e2e_unsafe_pointer_error`, and the native bridge slice `coord_e2e_native_config` (fail-closed toolchain matrix), `coord_e2e_native_annotations` (`@Native(file:, abi:, symbol:)`, legacy `E2114`, move-only class `E2119`), `coord_e2e_native_c_functions` (C functions + strings through the project-configured object), `coord_e2e_native_cpp_class` (opaque handle, constructor/method overloads, destructor ordering), `coord_e2e_native_cross` (foreign target `--emit-cpp`, no host fallback) and `coord_e2e_native_unsafe` (`E2096` gating of migrated native calls). The complete list is in [`tests/CMakeLists.txt`](tests/CMakeLists.txt). `COORD_SANITIZE=ON` builds the compiler with ASan/UBSan (including the `linux-sanitize` preset); `COORD_FUZZ=ON` builds Clang/libFuzzer parser and compiler harnesses under [`tests/fuzz`](tests/fuzz); the compiler harness keeps `Checker` alive through emission because `TypeExpr::resolved` points into checker-owned types. Diagnostics are capped at 256 stored entries, and the parser advances after member-recovery errors to avoid unbounded diagnostic growth. `coord_e2e_packages` needs neither a host C++ compiler nor network; `coord_e2e_packages_build` requires a working host C++ toolchain.
 
 ## 7 Standard Library Design
 
@@ -1317,24 +1318,105 @@ Names automatically available in every module (everything else needs an explicit
 | Enum variants | PascalCase | `Red`, `Green` |
 | Built-in types | lowercase | `integer`, `string`, `bool` |
 
-### 7.4 `@Native` FFI (v1 subset)
+### 7.4 `@Native` FFI (project-configured bridge)
+
+The annotation only declares the **header and ABI**; everything about the
+compiler, target, flags and link inputs comes from the project manifest
+(`coordination.toml`, or `coord.pkg`).
 
 ```coo
-@Native("getpid")
-integer nativePid();
+// src/main.coo
+@Native(file: "native/include/sample.h", abi: "c", symbol: "coo_sample_add")
+integer sampleAdd(integer left, integer right);
 
+@Native(file: "native/include/sample.h", abi: "c++")
+class Counter {
+public:
+    Counter(integer initial);
+    ~Counter();
+    integer value();
+    void increment();
+}
+
+@Unsafe
 integer main() {
-    print(nativePid());
+    Counter counter = Counter(10);
+    counter.increment();
+    print(sampleAdd(counter.value(), 1));
     return 0;
 }
 ```
 
-- Current implementation accepts `@Native("c_symbol")` on a **body-less function**; the symbol must be a C identifier.
-- Supported signatures: `integer`, `boolean`, `float`, `string`, `void` parameters and return values. A `string` parameter is passed as `.c_str()`; a string return converts a nullable `char*`, mapping `nullptr` to the empty string. No classes, pointers, callbacks or opaque handles yet.
-- The emitter produces a Coord-visible wrapper that calls `::c_symbol(...)`; the C symbol must already be declared by the generated translation unit's platform headers (`windows.h` on Windows, `unistd.h` on POSIX).
-- `@Native` cannot be combined with `@Result`, `@Expect`, `@Test`, `@Unique`, `@Share`, `@Weak`, `@Optional` or generics (`E2078`).
-- This is an **unsafe boundary**: the programmer must ensure the C ABI and signature match. There is no runtime `dlopen`, dynamic lookup or FFI metadata.
-- Full design — `header`/`library` arguments, opaque `@Native class`, native methods, C++ ABI selection, automatic library linking — remains ⏳.
+```toml
+# coordination.toml
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+[toolchain.x86_64-unknown-linux-gnu]
+cc = "/usr/bin/clang"
+cxx = "/usr/bin/clang++"
+sysroot = ""
+cflags = []
+cxxflags = []
+ldflags = []
+
+[native]
+include = ["native/include"]
+objects = ["native/build/sample.o"]
+libraries = ["m"]
+```
+
+- `@Native(file: string, abi: "c" | "c++" = "c", symbol: string = declaration
+  name)` applies to a body-less **function** or to a body-less **class**. A
+  class requires `abi: "c++"`; `symbol:` is only valid on functions and
+  defaults to the declaration name. `@Native` never targets variables or
+  parameters.
+- `[build].target` is mandatory and must be a known triple. The matching
+  `[toolchain.<target>]` table must exist and declare `cc` **and** `cxx`;
+  `sysroot`, `cflags`, `cxxflags` and `ldflags` are optional. `[native]`
+  lists project-relative include directories, object files and libraries.
+- **Coordination never compiles user `.c`/`.cpp` files.** The project's own
+  build system produces the objects/libraries; `coorc` generates an
+  ABI-compatible bridge translation unit, compiles it with the configured
+  `cxx` for the configured target, and links the declared objects/libraries.
+- **Bridge contract**: the bridge exposes only a C ABI (`extern "C"`).
+  - C functions become direct wrappers; `string` crosses the ABI as
+    `const char*` (null maps to the empty string on the Coordination side).
+  - A C++ class becomes an **opaque handle** (`void*`): the bridge owns
+    `new (std::nothrow)`/`delete`, emits constructor/destructor/method
+    wrappers, and the generated Coordination class is **move-only** (copy
+    construction/assignment are deleted and reported as `E2119`).
+  - The bridge adds no `try`/`catch`: the contract is *no-throw*. Failures and
+    state codes are returned as values; mapping them onto Result proxies is
+    future work. A failed allocation yields a null handle, whose method
+    wrappers return zero values.
+  - ABI types are fixed-width: `integer` uses `std::int8/16/32/64_t`
+    (`@Length`), `boolean` is `bool`, `float` is `double`; 128-bit integers,
+    pointers, callbacks, enums and class values as parameters/returns are
+    rejected (`E2078`).
+- **Fail closed**: a missing `[build].target`, a missing or incomplete
+  `[toolchain.<target>]`, a missing/unreadable object, library or include
+  directory, a missing header declared by `@Native`, or a command-line
+  `--target`/`--cxx`/`--sysroot` that contradicts the manifest is a hard error
+  (`E2115`–`E2118`). The compiler is never guessed from `PATH`, never replaced
+  by the host default and never downloaded. A single file (or a package
+  without native configuration) that uses `@Native` reports `E2112`; the old
+  `@Native("symbol")` form reports the migration error `E2114`.
+- **Cross compilation**: the configured triple drives lowering for the main
+  translation unit and the bridge. A clang toolchain receives `--target` and
+  an optional `--sysroot`; GCC cross toolchains are supplied through `cxx`.
+  MSVC cannot cross-compile (hard error); cross targets cannot be executed by
+  `coorc run`. Compile-only verification of a foreign target works with
+  `--emit-cpp` (it emits the main unit plus `<output>.native.cpp`).
+- `@Native` cannot be combined with `@Result`, `@Expect`, `@Test`, `@Unique`,
+  `@Share`, `@Weak`, `@Optional`, `@Copy`, `@Proxy`, `@Invocation` or generics.
+- Native declarations remain an **unsafe boundary**: calls require `@Unsafe`
+  (`E2096`), and the programmer guarantees the C/C++ signature matches.
+  There is no runtime `dlopen`/dynamic lookup.
+- Leftovers: per-object target verification (an object built for another
+  target is only caught by the linker), state/error-code → Result proxy
+  mapping, exceptions from user C++ code (the no-throw contract is not
+  enforced), callbacks and `@Native` in single-file mode.
 
 ### 7.5 Core Protocols (utility)
 
@@ -1844,7 +1926,7 @@ Package commands share: `--manifest <path>`, `--mirror <name|url>`, `--registry 
 - no features/optional-dependency combinations (`--all-optional` is an all-on switch);
 - no git dependencies and no package signatures/trust chain (SHA-256 + TLS + token is the current boundary);
 - registry `search` relies on `index.toml` (local registries scan `index/`);
-- cross-compilation supports `--target`/`--sysroot`/`--cxx`, but an MSVC host cannot cross-compile and cross targets cannot `run`.
+- native projects require a complete `[build]`/`[toolchain.<target>]` configuration (target/cc/cxx); a foreign target is emitted compile-only unless a cross toolchain is installed, an MSVC host cannot cross-compile, and cross targets cannot `run`.
 
 ## 9 C++ Backend Mapping
 
@@ -1919,10 +2001,11 @@ Generated C++ uses standard C++20 plus a conditional `<windows.h>`; platform dif
 
 ### 9.6 Cross-Compilation
 
-- `coorc --target <triple>`: a clang host receives `--target <triple>`; `--sysroot <path>` passes a sysroot.
-- GCC cross toolchains are selected with `--cxx <cross-g++>`; the toolchain organizes arguments per `--cxx-flavor gnu`.
-- MSVC cannot cross-compile; an MSVC host can only build Windows targets.
-- A cross target cannot execute `coorc run` (running fails); only `check`/`build`/`--emit-cpp` are available.
+- A native project takes its target and toolchain from `coordination.toml`: `[build].target` plus `[toolchain.<target>]` (`cc`, `cxx`, optional `sysroot`/`cflags`/`cxxflags`/`ldflags`). The same configured `cxx` and triple compile the main translation unit and the generated bridge, so a foreign target really is lowered with that configuration. A manifest without a matching toolchain fails closed (`E2116`), and a command-line `--target`/`--cxx`/`--sysroot` that contradicts the manifest is `E2117`.
+- A clang toolchain receives `--target <triple>`; `--sysroot <path>` passes a sysroot. GCC cross toolchains are supplied as `[toolchain.<target>].cxx` (or `--cxx` outside native projects); the argument style follows `--cxx-flavor gnu`.
+- MSVC cannot cross-compile; an MSVC host can only build Windows targets (hard error before invoking the compiler).
+- A cross target cannot execute `coorc run`; only `check`/`build`/`--emit-cpp` are available. `--emit-cpp` emits the main unit and `<output>.native.cpp`, which is the compile-only proof for a foreign target when no cross linker is installed.
+- The configured native objects/libraries are linked verbatim; their target is not verified by coorc (the linker is the final check).
 - `coorc platform` prints the host and target triple plus executable/object/library naming; `coorc doctor` additionally checks compiler candidates, `curl`, config/cache directories and the manifest.
 
 ### 9.7 Retention, `#line` and Backend Constraints
@@ -1991,6 +2074,14 @@ Generated C++ uses standard C++20 plus a conditional `<windows.h>`; platform dif
 | `E2108` | fix operands use different radixes or compare fix with float without an explicit conversion |
 | `E2109` | fix shape change without an explicit `@Length`/`@Radix`/`@Power` on the target type (identical canonical shapes copy freely) |
 | `E2111` | bitwise fix operands do not share radix, power and length |
+| `E2112` | `@Native` used without a project configuration (`coordination.toml`/`coord.pkg` with `[build]`/`[toolchain]`/`[native]`); a single file never guesses a compiler |
+| `E2113` | invalid `@Native` declaration: bad/missing/duplicate argument, `abi` other than `"c"`/`"c++"`, `symbol:` on a class, class without `abi: "c++"`, field or body in a native class, member not public, `@Native` method outside a native class |
+| `E2114` | removed `@Native("symbol")` form (migration error; declare `file:`/`abi:` instead) |
+| `E2115` | `[build].target` missing or not a known target triple |
+| `E2116` | `[toolchain.<target>]` missing for the configured target, or `cc`/`cxx` missing/nonexistent |
+| `E2117` | command-line `--target`/`--cxx`/`--sysroot` contradicts the project manifest |
+| `E2118` | `[native]` include directory/object/library or a header declared by `@Native` does not exist |
+| `E2119` | native class value copied/assigned (opaque handle classes are move-only) |
 | `E2058` | `AnnotationProcessor.process` does not return void |
 | `E2059` | `AnnotationProcessor.process` does not take a single `Description` |
 | `E2060` | AnnotationProcessor contract: missing/duplicate `process`, missing `override`, a non-annotation implementer, or a class/interface/enumerate implementing `AnnotationProcessor` |
@@ -2084,11 +2175,12 @@ Diagnostic format: `path:line:col: error[E2030]: message`, followed by the sourc
 | `@Optional` on returns; `@Proxy` `Default(expr)` construction/destructuring; runtime pre-construction hook; `Skip` defaults for arbitrary non-default-constructible classes | 🚧 | Return-value policy execution and some construction/destructuring fallbacks remain partial |
 | `@Has/@Delete/@Keys/@Describe` traps | ⏳ | Declared, not expanded |
 | ASan/UBSan + parser/compiler fuzz | ✅ | `COORD_SANITIZE`, `COORD_FUZZ`, `linux-sanitize`; parser + compiler harnesses; diagnostic cap 256 |
-| Cross-compilation `--target`/`--sysroot` | 🚧 | Design locked, implementation in progress |
+| Cross-compilation `--target`/`--sysroot` | 🚧 | Native projects are target/toolchain driven (`[build].target` + `[toolchain.<target>]`), a foreign target emits main + bridge compile-only (`coord_e2e_native_cross`); linking a foreign target needs an installed cross toolchain, and MSVC cannot cross-compile |
 | workspace / features / signatures / git dependencies | ⏳ | Workspace `members` parsed only |
 | Thread model | 🚧 | Built-in move-only `Thread` from `() -> void` with `join()`/`detach()`/`joinable()`/`hardwareConcurrency()` and cross-thread capture checks (`E2090`); built-in non-copyable `Mutex` with manual `lock()`/`unlock()`/`tryLock()` (`E2091`, `coord_e2e_mutex`), RAII `ScopedLock` (`E2092`), `ScopedThread`/`std::jthread` auto-join (`coord_e2e_scoped_thread`), seq_cst `Atomic` with `load`/`store`/`fetchAdd`/`fetchSub`/`exchange`/`compareExchange` (`coord_e2e_atomic`, `coord_e2e_atomic_ops`), and `@Lock(Exclusive, mutex, [captures])` block annotations with value/mutable/const captures, `@ReadOnly` method effects and write-set checks (`E2094`, `coord_e2e_lock_capture`), explicit `@Copy(Deep|Shallow)` with generated deep copies for `@Unique` trees (`E2095`, `coord_e2e_copy_deep`); data-race safety, atomics of other types, condition variables, scoped threads and non-local positions ⏳ |
 | lambda / `if` expressions / full pattern matching | 🚧 | Lambda subset: function-type target, expression/block body, implicit/explicit captures (`E2087` capture validation, `E2088` read-only by-value), by-reference escape checks (`E2039`), assignment/argument/return, static/bound method references and chained calls; `@FunctionalInterface` targets lower to function values with generic substitution (`E2089`, `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` in `lib/standard/utility.coo`, tests `coord_e2e_functional_interface*`); nominal functional-interface values/class implementations, unbound instance refs, function-pointer thunks and cross-thread escape ⏳; tests `coord_e2e_lambda*`, `coord_e2e_method_ref*`. `if` expressions with expression branches work (`coord_e2e_if_expression`; block branches ⏳). `match` supports constants/or/ranges/bindings/guards with enum/boolean/scalar exhaustiveness (`coord_e2e_match_patterns`, negatives `_missing`/`_no_wildcard`/`_bad_pattern`); type patterns and class destructuring ⏳ |
-| Safe/Unsafe | 🚧 | `@Safe`/`@Unsafe` scopes with downward propagation and block override (`E2096`); v0 enforces raw-pointer dereference and FFI/`@Native` calls, pointer arithmetic/unsafe casts documented but not yet fully enforced |\n| `@Native` / FFI | 🚧 | Body-less primitive/string functions call a C symbol through a generated wrapper; `coord_e2e_native_ffi`, `coord_e2e_native_ffi_string`; classes/pointers/headers/libraries ⏳ |
+| Safe/Unsafe | 🚧 | `@Safe`/`@Unsafe` scopes with downward propagation and block override (`E2096`); v0 enforces raw-pointer dereference and FFI/`@Native` calls, pointer arithmetic/unsafe casts documented but not yet fully enforced |
+| `@Native` / FFI bridge | ✅/🚧 | `@Native(file:, abi:, symbol:)` declares only header/ABI; `[build].target`, `[toolchain.<target>].cc/cxx` (+ `sysroot`/`cflags`/`cxxflags`/`ldflags`) and `[native].include/objects/libraries` drive the build. Generated `extern "C"` bridge: C function wrappers, `string` as `const char*`, and C++ classes through a move-only opaque handle (`new (std::nothrow)`/`delete`, ctor/dtor/method wrappers, no `try`/`catch`). Fail closed with `E2112`–`E2119`; legacy `@Native("symbol")` is `E2114`. Tests: `coord_e2e_native_config`, `coord_e2e_native_annotations`, `coord_e2e_native_c_functions`, `coord_e2e_native_cpp_class`, `coord_e2e_native_cross`, `coord_e2e_native_unsafe`. Leftovers: per-object target verification, Result-proxy error mapping, callbacks, cross-toolchain linking verification, single-file native use |
 | `@Copy` / `@Wrap` / `@FunctionalInterface` semantics | 🚧 | `@Copy(Deep/Shallow)` implemented; `@Wrap` deferred (declaration removed); `@FunctionalInterface` deprecated until structured `operator()` lands in the Lambda module; `AnnotationProcessor` hierarchy implemented |
 | `Weak<T>` / shared-cycle detection | ⏳ | Design and mapping finalized |
 | `is` / `new` / `delete` / `unsafe` / `extern` | ⏳ | Reserved, not implemented |
@@ -2101,9 +2193,9 @@ Completed: access-section parsing with default `private`; field/method/construct
 
 ### 11.3 Long-Term Goals and Execution Plan (M3)
 
-**Goal**: complete the M3 minimum closed loop on the 213-test baseline established after descriptor unification, the package manager, the annotation-processor hierarchy, the lambda/match/thread/synchronization/copy/safety slices and the static fixed-point slice.
+**Goal**: complete the M3 minimum closed loop on the 214-test baseline established after descriptor unification, the package manager, the annotation-processor hierarchy, the lambda/match/thread/synchronization/copy/safety slices, the static fixed-point slice and the project-configured native bridge slice.
 
-**Baseline (2026-11-28)**: `ctest` registers **213 tests**, with **213/213 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the newly added examples pass with g++. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager, registry and the static fixed-point (`fix`/`@Power`/`@Radix`/`@Length`, including signed 128-bit raws) slice with target-annotation conversions and same-shape copies are in place.
+**Baseline (2026-11-28)**: `ctest` registers **214 tests**, with **214/214 passing on Windows**; on Linux (WSL Ubuntu, g++ 15) the registered 8 tests (`coord_unit`, `coord_e2e_packages` and the six native-bridge tests) pass as well. P0–P3, descriptor unification, collections/test, relative imports, project directories, `.coox` read/write, outline/hint, basic proxy/reflection/ownership, `ProxyPolicy`, `@Constructure`/`@Destructure`, block retention, main parameter forms, plus the cross-platform driver, package manager, mirror manager, registry and the static fixed-point (`fix`/`@Power`/`@Radix`/`@Length`, including signed 128-bit raws) slice with target-annotation conversions and same-shape copies are in place.
 
 **Final acceptance**:
 
@@ -2241,6 +2333,8 @@ annotation-use   = "@", path, [ "(", arguments, ")" ] ;
 - Formal grammar: [docs/grammar.ebnf](docs/grammar.ebnf).
 - Old architecture, spec, reflection, compiler, roadmap and implementation-plan documents under [docs/archive/](docs/archive/) are **historical archive only** and are no longer updated; this document wins on conflict. `docs/archive/index.md` is itself archived, and its links are only guaranteed within the archive.
 - Maintenance rule: language/framework/backend/package-protocol changes touch only the four main documents; `docs/grammar.ebnf` tracks the parser; the archive is never modified.
+
+
 
 
 

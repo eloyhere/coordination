@@ -361,11 +361,21 @@ std::vector<AnnotationUse> Parser::parseAnnotations() {
               arg->name = std::string(current().text);
               advance();
               use.args.push_back(std::move(arg));
+              use.argNames.emplace_back();
             } else {
               error(current(), "expected @Target name");
             }
           } else {
+            // Named annotation argument: `name: value` (e.g. @Native(file:
+            // "foo.h", abi: "c++")).
+            std::string argumentName;
+            if (check(TokKind::Identifier) &&
+                peek(1).kind == TokKind::Colon) {
+              argumentName = std::string(advance().text);
+              advance();
+            }
             use.args.push_back(parseExpression());
+            use.argNames.push_back(std::move(argumentName));
           }
         } while (match(TokKind::Comma));
       }

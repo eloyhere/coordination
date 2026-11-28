@@ -6,7 +6,7 @@ Coordination is a statically typed systems language with **no macros**: compile-
 
 - Source files `.coo`; module interfaces `.coox`; compiler `coorc`.
 - Package manifests `coordination.toml` / `coord.pkg`; lockfile `coord.lock`.
-- Current baseline: **213 CTest cases**, with **213/213 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
+- Current baseline: **214 CTest cases**, with **214/214 passing on Windows**; on Linux (WSL Ubuntu, g++ 15), `coord_unit`, `coord_e2e_packages` and all six native-bridge tests pass as well (Linux registers 8 of the 214 tests).
 - The language and toolchain are wrapping up M3; [framework.md](framework.md) / [framework.zh-CN.md](framework.zh-CN.md) are authoritative, while this document focuses on usage.
 
 ## 1 Run It in 30 Seconds
@@ -99,7 +99,8 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows uses presets derived from `windows-base` (Ninja + cl); Linux/macOS use `linux-release`/`macos-release`/`linux-debug`.
-- `ctest` registers **213 tests** (1 unit test plus 212 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
+- `ctest` registers **214 tests** (1 unit test plus 213 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain. The native bridge slice adds `coord_e2e_native_config`, `coord_e2e_native_annotations`, `coord_e2e_native_c_functions`, `coord_e2e_native_cpp_class`, `coord_e2e_native_cross` and `coord_e2e_native_unsafe`.
+- Native example projects under `examples/native` build their own objects first (`native/build.cmd` or `native/build.sh`) and then run `coorc run .`; the compiler and target come from their `coordination.toml`.
 - Sanitizers: `cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` builds with ASan + UBSan; `linux-sanitize` preset is provided. Run tests with `ASAN_OPTIONS=detect_leaks=0` when leak checks are not relevant.
 - Parser/compiler fuzzing: build with Clang and `-DCOORD_FUZZ=ON`; see [tests/fuzz/README.md](tests/fuzz/README.md). The parser fuzzer caught unbounded diagnostics; the compiler fuzzer exercises Sema/emitter and requires the `Checker` to outlive emission.
 - Always `--clean-first` after header changes; keep generated C++ for inspection with `coorc --emit-cpp out\x.cpp file.coo`.
@@ -236,6 +237,28 @@ priority = 10
 - Version constraints: `^`, `~`, `*`, `>=`/`<`, `=1.2.3`; prereleases match only when their `major.minor.patch` is explicitly constrained.
 - `platform` filters `windows`/`linux`/`macos`/`unix`/architecture names with `!` negation; `optional = true` resolves only with `--all-optional`.
 - `[workspace] members` is currently parsed but not installed recursively.
+- Native projects add `[build]`, `[toolchain.<target>]` and `[native]`; the manifest is the only source of compiler/target truth. `coord.pkg` accepts the same settings as line fields: `target`, `cc`, `cxx`, `sysroot`, `cflag`/`cxxflag`/`ldflag` and `native-include`/`native-object`/`native-library`:
+
+```toml
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+[toolchain.x86_64-unknown-linux-gnu]
+cc = "/usr/bin/clang"          # required
+cxx = "/usr/bin/clang++"       # required; compiles the generated bridge + program
+sysroot = ""                   # optional
+cflags = []                    # optional (project build hints)
+cxxflags = []                  # optional; passed to the bridge/program compile
+ldflags = []                   # optional; passed to the link step
+
+[native]
+include = ["native/include"]         # header search paths (project-relative)
+objects = ["native/build/foo.o"]     # produced by the project's own build system
+libraries = ["m"]                    # names ((m, user32) or paths to .a/.lib/.so)
+```
+
+- `@Native(file: "native/include/foo.h", abi: "c" | "c++", symbol: "c_name")` only declares the header and ABI (`symbol` defaults to the declaration name; `abi: "c++"` is required for a class). See §7.7 for the bridge model.
+- Fail closed: missing `[build].target`, missing/incomplete `[toolchain.<target>]`, missing objects/libraries/includes or headers and target/flag conflicts with the command line are hard errors (`E2112`–`E2119`); `coorc` never guesses a compiler from `PATH` and never downloads one. Single-file `@Native` use reports `E2112`; the old `@Native("symbol")` form reports `E2114`.
 
 ### 5.2 Trust Policies and Install
 
@@ -323,7 +346,7 @@ Linux/macOS have been verified locally with g++; Windows is the primary developm
 
 - The toolchain spawns subprocesses with `platform::run(argv)` **without a shell**, quoting arguments per platform to avoid spaces, quotes and `cmd.exe` expansion.
 - Windows uses `CreateProcessW` (UTF-16 command line and environment block); Unix uses `fork`/`execvp` + process groups; timeouts, output capture, stdin pipes and cancellation are supported.
-- MSVC flags: `/nologo /std:c++20 /EHsc /utf-8 /Fe<exe> /Fo<obj>`; GCC/Clang: `-std=c++20 -O2 -pthread -o <exe>`. `--cxx-flavor` overrides auto-detection; `--verbose` prints the command line.
+- Compilation is two steps: compile each translation unit to an object (`/nologo /std:c++20 /EHsc /utf-8 /c <src> /Fo<obj>` for MSVC; `-std=c++20 -O2 -pthread -c <src> -o <obj>` for GCC/Clang), then link (`cl /nologo <objs> /Fe<exe>`; `cxx <objs> -o <exe>`). A native project adds `-I`/`/I` include dirs, `cxxflags` to both compiles, and the declared objects/libraries plus `ldflags` to the link. `--cxx-flavor` overrides auto-detection; `--verbose` prints every command line.
 
 ### 6.3 Paths, Encoding and Directories
 
@@ -346,12 +369,14 @@ Program built-ins: `readFile`, `writeFile`, `fileExists`, `deleteFile`, `timeMil
 Cross-compilation:
 
 ```bat
+coorc build examples\native\c_functions        # target/toolchain from coordination.toml
 coorc build src\main.coo --target x86_64-unknown-linux-gnu --sysroot C:\sysroots\linux
 coorc build src\main.coo --cxx C:\toolchains\aarch64-linux-gnu\bin\aarch64-linux-gnu-g++
 ```
 
-- A clang host receives `--target`; GCC cross toolchains are supplied via `--cxx`; `--sysroot` passes a sysroot.
-- MSVC cannot cross-compile; cross targets cannot `coorc run` — only `check`/`build`/`--emit-cpp`.
+- A native project takes `[build].target` and `[toolchain.<target>]` from `coordination.toml`; the same configured `cxx` compiles the main translation unit and the generated bridge. A `--target`/`--cxx`/`--sysroot` that contradicts the manifest is `E2117`; a missing toolchain is `E2116`.
+- Outside native projects a clang host receives `--target`; GCC cross toolchains are supplied via `--cxx`; `--sysroot` passes a sysroot.
+- MSVC cannot cross-compile; cross targets cannot `coorc run` — only `check`/`build`/`--emit-cpp`. `--emit-cpp` also writes `<output>.native.cpp`, which is the compile-only proof of a foreign target.
 
 ## 7 Examples
 
@@ -547,6 +572,60 @@ coorc install --locked
 coorc build . -o out\app.exe
 ```
 
+### 7.7 Native Bridge (C and C++)
+
+Native code is declared with `@Native` and configured in the manifest; `coorc`
+generates an ABI-compatible C bridge and links what the project built. The
+checked-in projects live under [`examples/native`](examples/native).
+
+```coo
+// examples/native/cpp_class/src/main.coo
+@Native(file: "native/include/counter.h", abi: "c++")
+class Counter {
+public:
+    Counter();
+    Counter(integer initial);
+    ~Counter();
+    integer value();
+    void increment();
+    integer add(integer delta);
+    string label();
+}
+
+@Unsafe
+integer main() {
+    Counter counter = Counter(10);
+    counter.increment();
+    print(counter.value());   // 11
+    print(counter.add(5));    // 16
+    print(counter.label());   // counter
+    return 0;
+}
+```
+
+```bat
+cmake --preset x64-debug
+cmake --build out\build\x64-debug
+cd examples\native\cpp_class
+native\build.cmd                :: project-owned native build -> native\build\counter.obj
+coorc run .
+```
+
+Responsibilities split:
+
+| Layer | Responsibility |
+| --- | --- |
+| `coordination.toml` | target triple, `cc`/`cxx`, sysroot/flags, native include dirs, objects and libraries; the only source of compiler truth |
+| `@Native(file:, abi:, symbol:)` | header and ABI of one body-less function or class; `symbol` defaults to the declaration name |
+| project build system | compiles the user `.c`/`.cpp` into objects/libraries (coorc never does) |
+| generated bridge (`<program>.native.cpp`) | `extern "C"` wrappers; C functions called directly, strings as `const char*`, C++ classes through a move-only opaque handle with external `new (std::nothrow)`/`delete`; no `try`/`catch`, no exception leakage |
+| generated program | calls the bridge and converts values (null `const char*` → empty string, native handle → value class) |
+
+Fail-closed behavior: missing `[build].target`, missing/incomplete
+`[toolchain.<target>]`, missing objects/libraries/includes or headers and
+command-line target conflicts are errors (`E2112`–`E2119`) — never a fallback
+to the host compiler. Native calls stay behind `@Unsafe` (`E2096`).
+
 ## 8 Repository Layout
 
 | Path | Contents |
@@ -562,7 +641,7 @@ coorc build . -o out\app.exe
 
 ## 9 Limitations and Known Issues
 
-- Lambda has a subset: function-type targets, expression/block bodies, implicit/explicit captures (`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`), capture validation (`E2087`), read-only explicit by-value captures (`E2088`), by-reference closure escape checks (`E2039`) for returns, field/container-literal stores and outer-scope variables, initialization/assignment, calls, arguments and returns. Omitted capture lists produce mutable by-value copies. Functional-interface targets are available as a function-value subset: `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` from `lib/standard/utility.coo` lower to function types (generic arguments substituted, `.apply`/`.accept`/`.test`/`.get` call forms); nominal interface values and classes implementing a `@FunctionalInterface` are ⏳ (`E2004`/`E2089`), and `@FunctionalInterface` is deprecated until the Lambda module structures `operator()` (slice 12). Unbound instance method references and function-pointer targets are ⏳; thread-entry capture is checked by `Thread` creation (`E2090`), while the rest of cross-thread borrow analysis is ⏳; static (`Type::method`) and bound (`object::method`) method references, calls through function-typed fields and chained calls on returned function values work, with bound receivers following the by-reference escape rules. `if` expressions support expression branches (`if (c) a else b` and `else if` chains); block branches are ⏳. `match` supports constants, ranges, or-patterns, bindings and guards, with enumerate/boolean/scalar exhaustiveness; type patterns and class destructuring are ⏳. `@Native`/FFI has a v1 subset: body-less functions with primitive or string parameters/return values that call a C symbol through a generated wrapper; classes, pointers, headers/libraries and C++ ABI selection remain ⏳, and `@Native` no longer targets variables. `@Copy`/`@Wrap`, `Weak<T>` and `unsafe`/`new`/`delete`/`extern` remain ⏳; `@Wrap` is deferred (declaration removed); see [framework.md](framework.md) §11.
+- Lambda has a subset: function-type targets, expression/block bodies, implicit/explicit captures (`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`), capture validation (`E2087`), read-only explicit by-value captures (`E2088`), by-reference closure escape checks (`E2039`) for returns, field/container-literal stores and outer-scope variables, initialization/assignment, calls, arguments and returns. Omitted capture lists produce mutable by-value copies. Functional-interface targets are available as a function-value subset: `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` from `lib/standard/utility.coo` lower to function types (generic arguments substituted, `.apply`/`.accept`/`.test`/`.get` call forms); nominal interface values and classes implementing a `@FunctionalInterface` are ⏳ (`E2004`/`E2089`), and `@FunctionalInterface` is deprecated until the Lambda module structures `operator()` (slice 12). Unbound instance method references and function-pointer targets are ⏳; thread-entry capture is checked by `Thread` creation (`E2090`), while the rest of cross-thread borrow analysis is ⏳; static (`Type::method`) and bound (`object::method`) method references, calls through function-typed fields and chained calls on returned function values work, with bound receivers following the by-reference escape rules. `if` expressions support expression branches (`if (c) a else b` and `else if` chains); block branches are ⏳. `match` supports constants, ranges, or-patterns, bindings and guards, with enumerate/boolean/scalar exhaustiveness; type patterns and class destructuring are ⏳. `@Native`/FFI is project-configured: `@Native(file:, abi:, symbol:)` declares the header/ABI only, `[build]`/`[toolchain.<target>]`/`[native]` in `coordination.toml` provide the compiler/target/objects/libraries, and `coorc` generates an `extern "C"` bridge (C function wrappers, `const char*` strings, move-only opaque C++ class handles, no `try`/`catch`). The old `@Native("symbol")` form is `E2114`; single-file use is `E2112`. See §7.7 and `examples/native`. `@Copy`/`@Wrap`, `Weak<T>` and `unsafe`/`new`/`delete`/`extern` remain ⏳; `@Wrap` is deferred (declaration removed); see [framework.md](framework.md) §11.
 - `ProxyPolicy` execution covers local `T*`/`@Unique`/`@Share` variables, Optional parameters, fields, returns, and local Optional destructuring, plus `@Proxy` `Skip`/`Abort`/`Error` destructuring. `@Proxy` `Default(expr)` construction/destructuring, runtime pre-construction hooks, and `Skip` defaults for arbitrary non-default-constructible classes are still 🚧.
 - `@Constructure` typed/named construction and `@Retention(Compile/Runtime)` blocks are implemented at a basic level; compile-time blocks cannot depend on runtime local state, and `Invocation`/`enum` on a block reports `E2044`. Complex constructor-overload disambiguation remains 🚧.
 - Atomic v0: a built-in non-copyable `Atomic` lowers to `std::atomic<std::int64_t>` with `load()`, `store(v)`, `fetchAdd(v)`/`fetchSub(v)` (return the previous value), `exchange(v)` (returns the previous value) and `compareExchange(expected, desired)` (returns true when the value equalled `expected` and was replaced; `expected` is not updated). All operations are seq_cst with no memory-order parameters; there is no `Atomic<T>`, floating-point/pointer atomic, condition variable or data-race static analysis. Locals and class fields are supported; parameters/returns are ⏳. Copying or assigning reports `E2092`.
@@ -574,7 +653,8 @@ coorc build . -o out\app.exe
 - Ownership and borrow checking remain a conservative subset: `&` cannot be returned, stored in fields, or used as a container element; by-reference closures cannot be returned, stored in fields/container literals or assigned to outer-scope variables (`E2039`), while full cross-thread borrow analysis and lifetime analysis are incomplete. Function-typed parameters are call-scoped borrows: returning or storing them is rejected. `@Share` cycles have type-graph, self-assignment and runtime edge-graph checks; in-class field initializers and some aliases are not tracked.
 - Aliased local declarations `l.Payload p = ...` are syntactically ambiguous; only parameter/return type positions are fully supported.
 - Packages: workspace is parsed but not installed recursively; no features, git dependencies or signatures/trust chain. `[trust] require_checksum` and non-loopback HTTP refusal are implemented; `search` relies on `index.toml`.
-- Cross-compilation: an MSVC host cannot cross-compile, and cross targets cannot run.
+- Cross-compilation: native projects are driven by `[build].target` + `[toolchain.<target>]` (same `cxx` for program and bridge); a foreign target emits main + bridge compile-only with `--emit-cpp`. Linking a foreign target needs an installed cross toolchain, an MSVC host cannot cross-compile, and cross targets cannot run.
+- Native bridge leftovers: an object built for another target is only caught by the linker; `--incremental` does not track declared native headers (only sources, manifest, objects and toolchain configuration); state/error-code → Result proxy mapping, user C++ exceptions (the no-throw contract is not enforced), callbacks and single-file `@Native` use remain ⏳. The configured toolchain, include dirs, objects and libraries are passed to the compiler/linker verbatim.
 - Header changes require a clean rebuild; on Windows, Ninja cannot reliably parse MSVC's localized `showIncludes` output.
 - Test counts describe the verified baseline at the time of writing; rerun `ctest` for your environment.
 - The C++ backend is a single translation unit; large-project/multi-module linking and the full standard-library API are still in progress.
@@ -585,3 +665,7 @@ coorc build . -o out\app.exe
 - Chinese QuickStart: [readme.zh-CN.md](readme.zh-CN.md)
 - Formal grammar: [docs/grammar.ebnf](docs/grammar.ebnf)
 - Historical archive: [docs/archive/](docs/archive/) (unmaintained)
+
+
+
+

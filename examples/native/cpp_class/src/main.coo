@@ -1,0 +1,25 @@
+// C++ class bridged through an opaque handle.
+// @Native only declares the header and ABI ("c++" is required for a class);
+// the bridge wraps construction, methods and destruction.
+
+@Native(file: "native/include/counter.h", abi: "c++")
+class Counter {
+public:
+    Counter();
+    Counter(integer initial);
+    ~Counter();
+    integer value();
+    void increment();
+    integer add(integer delta);
+    string label();
+}
+
+@Unsafe
+integer main() {
+    Counter counter = Counter(10);
+    counter.increment();
+    print(counter.value());
+    print(counter.add(5));
+    print(counter.label());
+    return 0;
+}

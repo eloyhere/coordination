@@ -1,8 +1,0 @@
-// Calling an @Native function without an @Unsafe scope is rejected.
-@Native("getpid")
-integer nativePid();
-
-integer main() {
-    print(nativePid());
-    return 0;
-}

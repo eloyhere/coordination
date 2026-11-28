@@ -31,6 +31,8 @@ public:
 private:
   void emitPrelude();
   void emitClass(const Decl& decl);
+  void emitNativeClass(const Decl& decl);
+  void emitNativeBridgeDeclarations();
   void emitEnum(const Decl& decl);
   void emitInterface(const Decl& decl);
   void emitFunction(const Decl& decl);
@@ -91,6 +93,10 @@ private:
   const std::map<std::string, Value>& constantValues_;
   std::ostream& out_;
   int depth_ = 0;
+
+  /// Native declarations in module order; the indices feed the bridge symbol
+  /// names shared with the generated bridge translation unit.
+  std::vector<const Decl*> nativeDecls_;
 
   std::set<std::string> typeParams_;
   std::set<std::string> fields_;

@@ -2824,12 +2824,75 @@ integer main() {
 }
 
 void testNativeFFI() {
-  Harness body(R"(
+  // The new @Native(file:, abi:) form is accepted and defaults `symbol` to the
+  // declaration name. Header/compiler checks happen in the driver, not Sema.
+  Harness accepted(R"(
+@Native(file: "native/include/foo.h", abi: "c")
+integer nativePid();
+integer main() { return 0; }
+)");
+  CHECK(!accepted.diagnostics.hasErrors());
+  const coord::Decl* nativePid = nullptr;
+  for (const auto& decl : accepted.module->decls) {
+    if (decl->kind == coord::DeclKind::Function && decl->name == "nativePid") {
+      nativePid = decl.get();
+    }
+  }
+  CHECK(nativePid != nullptr);
+  if (nativePid != nullptr) {
+    CHECK(nativePid->isNative);
+    CHECK(nativePid->nativeFile == "native/include/foo.h");
+    CHECK(nativePid->nativeAbi == "c");
+    CHECK(nativePid->nativeSymbol == "nativePid");
+  }
+
+  Harness explicitSymbol(R"(
+@Native(file: "native/include/foo.h", abi: "c", symbol: "getpid")
+integer nativePid();
+integer main() { return 0; }
+)");
+  CHECK(!explicitSymbol.diagnostics.hasErrors());
+  for (const auto& decl : explicitSymbol.module->decls) {
+    if (decl->kind == coord::DeclKind::Function && decl->name == "nativePid") {
+      CHECK(decl->nativeSymbol == "getpid");
+    }
+  }
+
+  // The removed @Native("symbol") form must ask for a migration.
+  Harness legacy(R"(
 @Native("getpid")
+integer nativePid();
+integer main() { return 0; }
+)");
+  CHECK(legacy.countCode("E2114") >= 1);
+
+  Harness missingFile(R"(
+@Native(abi: "c")
+integer nativePid();
+integer main() { return 0; }
+)");
+  CHECK(missingFile.countCode("E2113") >= 1);
+
+  Harness badAbi(R"(
+@Native(file: "native/include/foo.h", abi: "rust")
+integer nativePid();
+integer main() { return 0; }
+)");
+  CHECK(badAbi.countCode("E2113") >= 1);
+
+  Harness unknownArgument(R"(
+@Native(file: "native/include/foo.h", library: "m")
+integer nativePid();
+integer main() { return 0; }
+)");
+  CHECK(unknownArgument.countCode("E2113") >= 1);
+
+  Harness body(R"(
+@Native(file: "native/include/foo.h", abi: "c")
 integer nativePid() {
     return 0;
 }
-integer main() { return nativePid(); }
+integer main() { return 0; }
 )");
   CHECK(body.countCode("E2078") >= 1);
 
@@ -2838,18 +2901,112 @@ class Payload {
 public:
     Payload() {}
 }
-@Native("getpid")
+@Native(file: "native/include/foo.h", abi: "c")
 Payload nativePid();
 integer main() { return 0; }
 )");
   CHECK(unsupported.countCode("E2078") >= 1);
 
-  Harness missingSymbol(R"(
-@Native()
-integer nativePid();
-integer main() { return nativePid(); }
+  // Native classes are opaque handles with body-less members and abi "c++".
+  Harness nativeClass(R"(
+@Native(file: "native/include/counter.h", abi: "c++")
+class Counter {
+public:
+    Counter();
+    Counter(integer initial);
+    ~Counter();
+    integer value();
+    void increment();
+}
+integer main() { return 0; }
 )");
-  CHECK(missingSymbol.countCode("E2078") >= 1);
+  CHECK(!nativeClass.diagnostics.hasErrors());
+  const coord::Decl* counter = nativeClass.findClass("Counter");
+  CHECK(counter != nullptr);
+  if (counter != nullptr) {
+    CHECK(counter->isNative);
+    CHECK(counter->nativeAbi == "c++");
+    for (const auto& member : counter->members) {
+      if (member->kind == coord::DeclKind::Constructor ||
+          member->kind == coord::DeclKind::Destructor ||
+          member->kind == coord::DeclKind::Method) {
+        CHECK(member->isNative);
+      }
+    }
+  }
+
+  Harness classCAbi(R"(
+@Native(file: "native/include/counter.h", abi: "c")
+class Counter {
+public:
+    Counter();
+    ~Counter();
+    integer value();
+}
+integer main() { return 0; }
+)");
+  CHECK(classCAbi.countCode("E2113") >= 1);
+
+  Harness classField(R"(
+@Native(file: "native/include/counter.h", abi: "c++")
+class Counter {
+public:
+    integer value;
+    Counter();
+    ~Counter();
+}
+integer main() { return 0; }
+)");
+  CHECK(classField.countCode("E2113") >= 1);
+
+  Harness classBody(R"(
+@Native(file: "native/include/counter.h", abi: "c++")
+class Counter {
+public:
+    Counter();
+    ~Counter();
+    integer value() {
+        return 0;
+    }
+}
+integer main() { return 0; }
+)");
+  CHECK(classBody.countCode("E2113") >= 1);
+
+  Harness copyNative(R"(
+@Native(file: "native/include/counter.h", abi: "c++")
+class Counter {
+public:
+    Counter();
+    ~Counter();
+    integer value();
+}
+@Unsafe
+integer main() {
+    Counter first = Counter();
+    Counter second = first;
+    return 0;
+}
+)");
+  CHECK(copyNative.countCode("E2119") >= 1);
+
+  Harness assignNative(R"(
+@Native(file: "native/include/counter.h", abi: "c++")
+class Counter {
+public:
+    Counter();
+    ~Counter();
+    integer value();
+}
+@Unsafe
+integer main() {
+    Counter first = Counter();
+    Counter second = Counter();
+    second = first;
+    return 0;
+}
+)");
+  CHECK(assignNative.countCode("E2119") >= 1);
 }
 
 void testDiagnosticLimit() {

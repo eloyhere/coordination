@@ -213,6 +213,9 @@ struct AnnotationUse {
   Span span;
   std::string name;
   std::vector<ExprPtr> args;
+  /// Parallel to `args`: the argument name for `name: value` arguments and an
+  /// empty string for positional arguments.
+  std::vector<std::string> argNames;
   std::vector<TypeExprPtr> typeArgs;
 };
 
@@ -434,6 +437,10 @@ struct Decl : Node {
   bool synthesizedDestructor = false;
   bool isNative = false;
   std::string nativeSymbol;
+  /// `@Native(file: ..., abi: "c" | "c++")` project interface: the header
+  /// declared by the annotation and the selected ABI ("c" or "c++").
+  std::string nativeFile;
+  std::string nativeAbi;
   bool isUnsafe = false;
   bool isSafe = false;
   /// Copyability of a class: implicit for pure value classes, explicit through

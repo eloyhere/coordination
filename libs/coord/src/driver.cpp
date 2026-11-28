@@ -10,6 +10,7 @@
 #include "coord/modules/outline.h"
 #include "coord/modules/platform.h"
 #include "coord/modules/processor.h"
+#include "coord/native.h"
 #include "coord/parser.h"
 #include "coord/sema.h"
 #include "coord/support.h"
@@ -255,48 +256,47 @@ bool looksLikeClang(std::string compiler) {
   return compiler.find("clang") != std::string::npos;
 }
 
-int invokeHostCompiler(const std::string& compiler, const std::string& flavor,
-                       const std::string& target, const std::string& sysroot,
-                       bool crossTarget,
-                       const std::filesystem::path& cppPath,
-                       const std::filesystem::path& executablePath,
-                       const std::filesystem::path& objectPath, bool verbose,
-                       std::ostream& out, std::ostream& err) {
-  const bool msvc = isMsvcCompiler(compiler, flavor);
-  std::vector<std::string> arguments;
-  if (msvc) {
-    arguments = {compiler,
-                 "/nologo",
-                 "/std:c++20",
-                 "/EHsc",
-                 "/utf-8",
-                 platform::pathToUtf8(cppPath),
-                 "/Fe" + platform::pathToUtf8(executablePath),
-                 "/Fo" + platform::pathToUtf8(objectPath)};
-  } else {
-    arguments = {compiler, "-std=c++20", "-O2"};
-#if !defined(_WIN32)
-    arguments.push_back("-pthread");
-#endif
-    if (crossTarget && looksLikeClang(compiler)) {
-      arguments.push_back("--target=" + target);
-    }
-    if (!sysroot.empty()) {
-      arguments.push_back("--sysroot=" + sysroot);
-    }
-    arguments.push_back(platform::pathToUtf8(cppPath));
-    arguments.push_back("-o");
-    arguments.push_back(platform::pathToUtf8(executablePath));
-  }
+/// Everything the C++ compiler/linker invocation needs. For a plain
+/// Coordination build only `compiler`/`target`/`sysroot` are set; a native
+/// project adds the configured flags, include directories, objects and
+/// libraries. `bridgeCppPath`/`bridgeObjectPath` are empty when the module has
+/// no native declarations.
+struct ToolchainInvocation {
+  std::string compiler;
+  std::string flavor;
+  std::string target;
+  std::string sysroot;
+  bool crossTarget = false;
+  std::vector<std::string> cxxflags;
+  std::vector<std::string> ldflags;
+  std::vector<std::filesystem::path> includeDirs;
+  std::vector<std::filesystem::path> objectFiles;
+  std::vector<std::string> libraries;
+  std::filesystem::path cppPath;
+  std::filesystem::path bridgeCppPath;
+  std::filesystem::path objectPath;
+  std::filesystem::path bridgeObjectPath;
+  std::filesystem::path executablePath;
+};
+
+/// One compiler process. Prints the command line on failure so a broken
+/// project configuration never fails silently.
+int runCompileStep(const std::vector<std::string>& arguments, bool verbose,
+                   bool msvc, std::ostream& out, std::ostream& err,
+                   const char* stage) {
   platform::ProcessOptions processOptions;
   processOptions.captureOutput = true;
   const platform::ProcessResult result =
       platform::run(arguments, processOptions);
   const std::string command = platform::commandLine(arguments);
+  if (verbose) {
+    out << "coorc: " << stage << ": " << command << "\n";
+  }
   if (!result.started) {
-    err << "coorc: cannot start the host C++ compiler: " << result.failure
-        << "\n";
+    err << "coorc: cannot start the configured C++ compiler: "
+        << result.failure << "\n";
     err << "coorc: command: " << command << "\n";
+    err << "coorc: check [toolchain.<target>] cxx in coordination.toml\n";
     return 3;
   }
   const bool hasWarning =
@@ -311,12 +311,12 @@ int invokeHostCompiler(const std::string& compiler, const std::string& flavor,
     if (!result.err.empty()) {
       err << result.err;
     }
-    err << "coorc: host C++ compilation failed (exit " << result.exitCode
-        << ")\n";
+    err << "coorc: " << stage << " failed (exit " << result.exitCode << ")\n";
     err << "coorc: command: " << command << "\n";
     if (msvc) {
-      err << "coorc: on Windows run from a Visual Studio developer prompt, or "
-             "pass --cxx <path-to-cl.exe>\n";
+      err << "coorc: run from a Visual Studio developer prompt so cl.exe can "
+             "find the Windows SDK, or point [toolchain.<target>] at a "
+             "complete compiler\n";
     }
     return 3;
   }
@@ -329,6 +329,131 @@ int invokeHostCompiler(const std::string& compiler, const std::string& flavor,
     }
   }
   return 0;
+}
+
+bool looksLikeLibraryPath(const std::string& value) {
+  if (value.find('/') != std::string::npos ||
+      value.find('\\') != std::string::npos) {
+    return true;
+  }
+  for (const char* suffix :
+       {".a", ".lib", ".so", ".dylib", ".dll", ".o", ".obj"}) {
+    const std::string ending(suffix);
+    if (value.size() >= ending.size() &&
+        value.compare(value.size() - ending.size(), ending.size(), ending) ==
+            0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int invokeToolchain(const ToolchainInvocation& invocation, bool verbose,
+                    std::ostream& out, std::ostream& err) {
+  const bool msvc = isMsvcCompiler(invocation.compiler, invocation.flavor);
+  const auto appendCommonCompileFlags = [&](std::vector<std::string>& arguments) {
+    if (msvc) {
+      arguments.push_back("/nologo");
+      arguments.push_back("/std:c++20");
+      arguments.push_back("/EHsc");
+      arguments.push_back("/utf-8");
+    } else {
+      arguments.push_back("-std=c++20");
+      arguments.push_back("-O2");
+#if !defined(_WIN32)
+      arguments.push_back("-pthread");
+#endif
+      if (invocation.crossTarget && looksLikeClang(invocation.compiler)) {
+        arguments.push_back("--target=" + invocation.target);
+      }
+      if (!invocation.sysroot.empty()) {
+        arguments.push_back("--sysroot=" + invocation.sysroot);
+      }
+    }
+    for (const std::filesystem::path& include : invocation.includeDirs) {
+      arguments.push_back((msvc ? "/I" : "-I") + platform::pathToUtf8(include));
+    }
+    for (const std::string& flag : invocation.cxxflags) {
+      arguments.push_back(flag);
+    }
+  };
+  const auto compileOne =
+      [&](const std::filesystem::path& cpp,
+          const std::filesystem::path& object) -> int {
+    std::vector<std::string> arguments = {invocation.compiler};
+    appendCommonCompileFlags(arguments);
+    if (msvc) {
+      arguments.push_back("/c");
+      arguments.push_back(platform::pathToUtf8(cpp));
+      arguments.push_back("/Fo" + platform::pathToUtf8(object));
+    } else {
+      arguments.push_back("-c");
+      arguments.push_back(platform::pathToUtf8(cpp));
+      arguments.push_back("-o");
+      arguments.push_back(platform::pathToUtf8(object));
+    }
+    return runCompileStep(arguments, verbose, msvc, out, err,
+                          "C++ compilation");
+  };
+
+  if (const int result = compileOne(invocation.cppPath, invocation.objectPath);
+      result != 0) {
+    return result;
+  }
+  const bool hasBridge =
+      !invocation.bridgeCppPath.empty() &&
+      !invocation.bridgeObjectPath.empty();
+  if (hasBridge) {
+    if (const int result = compileOne(invocation.bridgeCppPath,
+                                      invocation.bridgeObjectPath);
+        result != 0) {
+      return result;
+    }
+  }
+
+  // Link step. Objects come from the generated translation units; the
+  // configured objects/libraries come from the project's own native build.
+  std::vector<std::string> arguments = {invocation.compiler};
+  if (msvc) {
+    arguments.push_back("/nologo");
+    arguments.push_back(platform::pathToUtf8(invocation.objectPath));
+  } else {
+    arguments.push_back(platform::pathToUtf8(invocation.objectPath));
+  }
+  if (hasBridge) {
+    arguments.push_back(platform::pathToUtf8(invocation.bridgeObjectPath));
+  }
+  for (const std::filesystem::path& object : invocation.objectFiles) {
+    arguments.push_back(platform::pathToUtf8(object));
+  }
+  for (const std::string& library : invocation.libraries) {
+    if (looksLikeLibraryPath(library)) {
+      arguments.push_back(library);
+    } else if (msvc) {
+      arguments.push_back(library + ".lib");
+    } else {
+      arguments.push_back("-l" + library);
+    }
+  }
+  if (msvc) {
+    arguments.push_back("/Fe" + platform::pathToUtf8(invocation.executablePath));
+  } else {
+    arguments.push_back("-o");
+    arguments.push_back(platform::pathToUtf8(invocation.executablePath));
+    if (invocation.crossTarget && looksLikeClang(invocation.compiler)) {
+      arguments.push_back("--target=" + invocation.target);
+    }
+    if (!invocation.sysroot.empty()) {
+      arguments.push_back("--sysroot=" + invocation.sysroot);
+    }
+#if !defined(_WIN32)
+    arguments.push_back("-pthread");
+#endif
+  }
+  for (const std::string& flag : invocation.ldflags) {
+    arguments.push_back(flag);
+  }
+  return runCompileStep(arguments, verbose, msvc, out, err, "C++ link");
 }
 
 }  // namespace
@@ -390,9 +515,41 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
   diagnostics.setWarningsAsErrors(options.warningsAsErrors);
   auto module = std::make_unique<ModuleAst>();
 
-  // The host compiler is resolved before the incremental check so that a
-  // compiler or target change invalidates the stamp.
-  const std::string compiler = pickCompiler(options.cxxCompiler);
+  // Native build configuration is read exclusively from the project manifest.
+  // A project without [build]/[toolchain]/[native] keeps the host compiler
+  // path; a native project must be complete or the build fails closed.
+  native::Project nativeProject;
+  if (projectMode && projectManifest.has_value()) {
+    std::string manifestError;
+    const std::optional<package::Manifest> loaded =
+        package::Manifest::loadFile(*projectManifest, manifestError);
+    if (!loaded.has_value()) {
+      err << "coorc: " << manifestError << "\n";
+      return 2;
+    }
+    std::vector<native::Issue> issues;
+    if (!native::resolveProject(*loaded, nativeProject, issues)) {
+      for (const native::Issue& issue : issues) {
+        err << "coorc: error[" << issue.code << "]: " << issue.message << "\n";
+      }
+      return 1;
+    }
+    if (nativeProject.active &&
+        !native::validateOptions(nativeProject, options.targetTriple,
+                                 options.cxxCompiler, options.sysroot,
+                                 issues)) {
+      for (const native::Issue& issue : issues) {
+        err << "coorc: error[" << issue.code << "]: " << issue.message << "\n";
+      }
+      return 1;
+    }
+  }
+
+  // The compiler is resolved before the incremental check so that a compiler
+  // or target change invalidates the stamp.
+  const std::string compiler = nativeProject.active
+                                   ? nativeProject.cxx
+                                   : pickCompiler(options.cxxCompiler);
   const std::string compilerFlavor = options.cxxFlavor;
   const bool msvcCompiler = isMsvcCompiler(compiler, compilerFlavor);
   std::string compilerIdentity = compiler;
@@ -402,14 +559,18 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
     compilerIdentity = platform::pathToUtf8(*resolved);
   }
   const std::string target =
-      options.targetTriple.empty() ? platform::targetTriple()
-                                   : options.targetTriple;
+      nativeProject.active
+          ? nativeProject.target
+          : (options.targetTriple.empty() ? platform::targetTriple()
+                                          : options.targetTriple);
   if (!platform::isKnownTargetTriple(target)) {
     err << "coorc: invalid target triple '" << target << "'\n";
     err << "coorc: expected something like x86_64-pc-windows-msvc or "
            "aarch64-unknown-linux-gnu\n";
     return 2;
   }
+  const std::string sysroot =
+      nativeProject.active ? nativeProject.sysroot : options.sysroot;
   const bool crossTarget =
       target != platform::targetTriple();
   if (options.output == OutputKind::Executable) {
@@ -423,8 +584,8 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
           << "' on '" << platform::targetTriple() << "'\n";
       return 2;
     }
-    if (!options.sysroot.empty() && msvcCompiler) {
-      err << "coorc: --sysroot is not supported by MSVC\n";
+    if (!sysroot.empty() && msvcCompiler) {
+      err << "coorc: a sysroot is not supported by MSVC\n";
       return 2;
     }
   }
@@ -489,10 +650,32 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
         }
       }
     }
+    for (const std::filesystem::path& object : nativeProject.objects) {
+      touch(object);
+    }
+    std::string nativeIdentity;
+    if (nativeProject.active) {
+      nativeIdentity = "|native:" + platform::pathToUtf8(nativeProject.manifest);
+      for (const std::string& flag : nativeProject.cxxflags) {
+        nativeIdentity += "|cxx:" + flag;
+      }
+      for (const std::string& flag : nativeProject.ldflags) {
+        nativeIdentity += "|ld:" + flag;
+      }
+      for (const std::filesystem::path& include : nativeProject.includes) {
+        nativeIdentity += "|I:" + platform::pathToUtf8(include);
+      }
+      for (const std::string& library : nativeProject.libraries) {
+        nativeIdentity += "|l:" + library;
+      }
+      for (const std::filesystem::path& object : nativeProject.objects) {
+        nativeIdentity += "|o:" + platform::pathToUtf8(object);
+      }
+    }
     const std::string toolchain =
-        target + "|" + options.sysroot + "|" + compilerIdentity + "|" +
+        target + "|" + sysroot + "|" + compilerIdentity + "|" +
         compilerFlavor + "|" + (msvcCompiler ? "msvc" : "gnu") + "|" +
-        std::to_string(options.warningsAsErrors ? 1 : 0);
+        std::to_string(options.warningsAsErrors ? 1 : 0) + nativeIdentity;
     incrementalStampValue =
         std::to_string(inputFiles.size()) + ":" + std::to_string(latest) + ":" +
         std::to_string(cooxCount) + ":" + toolchain;
@@ -756,6 +939,51 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
     return 1;
   }
 
+  // Native declarations need a complete project configuration: header/ABI come
+  // from @Native, everything else from coordination.toml (or coord.pkg).
+  const std::vector<const Decl*> nativeDecls =
+      native::nativeDeclarations(*module);
+  if (!nativeDecls.empty()) {
+    if (!nativeProject.active) {
+      diagnostics.error(
+          nativeDecls.front()->span, "E2112",
+          projectMode && projectManifest.has_value()
+              ? "@Native requires a complete native configuration in "
+                "coordination.toml: [build] target, [toolchain.<target>] cc "
+                "and cxx, and the [native] objects/libraries produced by the "
+                "project's own build system"
+              : "@Native requires a project configuration (coordination.toml "
+                "or coord.pkg); build the package directory (for example "
+                "`coorc build .`) so the manifest is read - single-file "
+                "compilation never guesses a compiler, target or header "
+                "prelude");
+    } else {
+      for (const Decl* decl : nativeDecls) {
+        if (decl->nativeFile.empty()) {
+          continue;
+        }
+        const std::filesystem::path declared =
+            platform::pathFromUtf8(decl->nativeFile);
+        const std::filesystem::path header =
+            declared.is_absolute()
+                ? declared
+                : (nativeProject.root / declared).lexically_normal();
+        std::error_code headerError;
+        if (!std::filesystem::is_regular_file(header, headerError)) {
+          diagnostics.error(
+              decl->span, "E2118",
+              "native header '" + decl->nativeFile +
+                  "' declared by @" + decl->name + " does not exist ('" +
+                  platform::pathToUtf8(header) + "')");
+        }
+      }
+    }
+    if (diagnostics.hasErrors()) {
+      diagnostics.render(sources, err);
+      return 1;
+    }
+  }
+
   if (!options.interfacePath.empty()) {
     std::ofstream interfaceFile(options.interfacePath, std::ios::binary);
     if (!interfaceFile) {
@@ -799,6 +1027,8 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
   std::filesystem::path executablePath;
   std::filesystem::path cppPath;
   std::filesystem::path objectPath;
+  std::filesystem::path bridgeCppPath;
+  std::filesystem::path bridgeObjectPath;
   bool temporaryCpp = false;
 
   if (options.output == OutputKind::Cpp) {
@@ -834,6 +1064,42 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
     }
   }
 
+  // Generate the ABI-compatible bridge alongside the program. Bridge and main
+  // translation unit are compiled with the same configured [toolchain] cxx.
+  if (options.output != OutputKind::Cpp || options.outputPath != "-") {
+    if (!nativeDecls.empty()) {
+      if (!nativeProject.active) {
+        err << "coorc: internal error: native declarations without a project "
+               "configuration\n";
+        return 2;
+      }
+      std::string bridgeSource;
+      std::string bridgeError;
+      if (!native::generateBridge(*module, nativeDecls, nativeProject,
+                                  bridgeSource, bridgeError)) {
+        err << "coorc: native bridge: " << bridgeError << "\n";
+        return 2;
+      }
+      if (options.output == OutputKind::Cpp) {
+        bridgeCppPath = platform::pathFromUtf8(
+            replaceExtension(platform::pathToUtf8(cppPath), ".native.cpp"));
+      } else {
+        bridgeCppPath = cppPath;
+        bridgeCppPath += ".native.cpp";
+      }
+      if (!writeFile(bridgeCppPath, bridgeSource)) {
+        err << "coorc: cannot write '"
+            << platform::pathToUtf8(bridgeCppPath) << "'\n";
+        return 2;
+      }
+      if (options.output == OutputKind::Executable) {
+        bridgeObjectPath = executablePath;
+        bridgeObjectPath += ".native";
+        bridgeObjectPath += platform::objectFileSuffix();
+      }
+    }
+  }
+
   if (options.output == OutputKind::Cpp) {
     if (diagnostics.warningCount() != 0) {
       diagnostics.render(sources, err);
@@ -841,16 +1107,49 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
     return 0;
   }
 
-  // Stage 6: host C++ compiler and linker. The compiler and its argument
-  // style were chosen before the incremental check.
-  const int compileResult =
-      invokeHostCompiler(compiler, compilerFlavor, target, options.sysroot,
-                         crossTarget, cppPath, executablePath, objectPath,
-                         options.verbose, out, err);
+  // Stage 6: the configured C++ compiler and linker. Never falls back to the
+  // host default: a native project without a complete [toolchain] already
+  // failed closed above.
+  ToolchainInvocation invocation;
+  invocation.compiler = compiler;
+  invocation.flavor = compilerFlavor;
+  invocation.target = target;
+  invocation.sysroot = sysroot;
+  invocation.crossTarget = crossTarget;
+  invocation.cppPath = cppPath;
+  invocation.bridgeCppPath = bridgeCppPath;
+  invocation.objectPath = objectPath;
+  invocation.bridgeObjectPath = bridgeObjectPath;
+  invocation.executablePath = executablePath;
+  if (nativeProject.active) {
+    invocation.cxxflags = nativeProject.cxxflags;
+    invocation.ldflags = nativeProject.ldflags;
+    invocation.includeDirs = nativeProject.includes;
+    bool hasRoot = false;
+    for (const std::filesystem::path& include : invocation.includeDirs) {
+      if (platform::pathKey(include) == platform::pathKey(nativeProject.root)) {
+        hasRoot = true;
+      }
+    }
+    if (!hasRoot) {
+      invocation.includeDirs.push_back(nativeProject.root);
+    }
+    invocation.objectFiles = nativeProject.objects;
+    invocation.libraries = nativeProject.libraries;
+  }
+  const int compileResult = invokeToolchain(invocation, options.verbose, out,
+                                            err);
   if (compileResult != 0) {
     if (temporaryCpp) {
       std::error_code ignored;
       std::filesystem::remove(cppPath, ignored);
+      std::filesystem::remove(objectPath, ignored);
+      if (!bridgeCppPath.empty()) {
+        std::filesystem::remove(bridgeCppPath, ignored);
+      }
+      if (!bridgeObjectPath.empty()) {
+        std::filesystem::remove(bridgeObjectPath, ignored);
+      }
     }
     return compileResult;
   }
@@ -859,6 +1158,12 @@ int runCompiler(const CompileOptions& options, std::ostream& out,
     std::error_code ignored;
     std::filesystem::remove(cppPath, ignored);
     std::filesystem::remove(objectPath, ignored);
+    if (!bridgeCppPath.empty()) {
+      std::filesystem::remove(bridgeCppPath, ignored);
+    }
+    if (!bridgeObjectPath.empty()) {
+      std::filesystem::remove(bridgeObjectPath, ignored);
+    }
   }
 
   if (diagnostics.warningCount() != 0) {
