@@ -7,6 +7,7 @@ namespace coord {
 
 Stmt::~Stmt() = default;
 Decl::~Decl() = default;
+Pattern::~Pattern() = default;
 
 namespace {
 
@@ -171,6 +172,14 @@ void dumpExpr(const Expr* expr, std::ostream& out, int depth) {
       out << "Assign '" << expr->op << "'\n";
       dumpExpr(expr->lhs.get(), out, depth + 1);
       dumpExpr(expr->rhs.get(), out, depth + 1);
+      return;
+    case ExprKind::IfExpr:
+      out << "IfExpr\n";
+      if (expr->ifExpr != nullptr) {
+        dumpExpr(expr->ifExpr->condition.get(), out, depth + 1);
+        dumpExpr(expr->ifExpr->thenValue.get(), out, depth + 1);
+        dumpExpr(expr->ifExpr->elseValue.get(), out, depth + 1);
+      }
       return;
   }
 }

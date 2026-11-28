@@ -1,0 +1,16 @@
+// A pattern naming an unknown enumerate variant is rejected.
+enumerate Color {
+    Red,
+    Green,
+    Blue,
+}
+
+integer main() {
+    Color color = Color.Green;
+    match (color) {
+        Color.Red => { print("red"); }
+        Color.Green => { print("green"); }
+        Color.Purple => { print("purple"); }
+    }
+    return 0;
+}

@@ -1,0 +1,6 @@
+// Both branches of an if expression must agree on a type.
+integer main() {
+    integer value = if (true) 1 else "wrong";
+    print(value);
+    return 0;
+}

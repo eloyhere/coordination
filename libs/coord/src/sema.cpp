@@ -263,6 +263,11 @@ void Checker::initializeBuiltins() {
   typeMap_["Float"] = floatType_;
   typeMap_["Decimal"] = decimalType_;
   typeMap_["Record"] = recordType_;
+  // The keyword spellings must resolve to the primitives together with their
+  // uppercase aliases; the internal base classes that carry the same names are
+  // implementation details and must stay unreachable from source.
+  typeMap_["boolean"] = boolType_;
+  typeMap_["character"] = charType_;
 
   annotationType_ = makeType(TypeKind::Annotation, "annotation", classType_);
   functionType_ = makeType(TypeKind::Function, "function", classType_);
@@ -3058,6 +3063,61 @@ void Checker::checkLambda(Expr* expr, Type* expected) {
   expr->resolvedType = expected;
 }
 
+Type* Checker::checkIfExpr(Expr* expr) {
+  if (expr->ifExpr == nullptr) {
+    expr->resolvedType = errorType_;
+    return errorType_;
+  }
+  IfExprInfo& info = *expr->ifExpr;
+  requireAssignable(checkExpr(info.condition.get()), boolType_,
+                    info.condition->span, "if expression condition");
+  Type* thenType = nullptr;
+  Type* elseType = nullptr;
+  std::vector<std::pair<std::string, bool>> undo;
+  applyOptionalNarrowing(info.condition.get(), true, undo);
+  thenType = checkExpr(info.thenValue.get());
+  restoreOptionalNarrowing(undo);
+  applyOptionalNarrowing(info.condition.get(), false, undo);
+  elseType = checkExpr(info.elseValue.get());
+  restoreOptionalNarrowing(undo);
+  Type* result = thenType;
+  if (thenType == nullptr || elseType == nullptr) {
+    result = errorType_;
+  } else if (thenType != elseType && !assignable(thenType, elseType) &&
+             !assignable(elseType, thenType)) {
+    diagnostics_.error(expr->span, "E2005",
+                       "if expression branches have incompatible types ('" +
+                           thenType->name + "' and '" + elseType->name + "')");
+    result = errorType_;
+  } else if (thenType != elseType && assignable(thenType, elseType) &&
+             !assignable(elseType, thenType)) {
+    result = elseType;
+  }
+  if (result != nullptr && result->kind == TypeKind::Void) {
+    diagnostics_.error(expr->span, "E2005",
+                       "an if expression must produce a value; use an 'if' "
+                       "statement for side effects");
+    result = errorType_;
+  }
+  const int thenBorrow = info.thenValue != nullptr
+                             ? info.thenValue->borrowDepth
+                             : 0;
+  const int elseBorrow = info.elseValue != nullptr
+                             ? info.elseValue->borrowDepth
+                             : 0;
+  if (thenBorrow == 0) {
+    expr->borrowDepth = elseBorrow;
+  } else if (elseBorrow == 0) {
+    expr->borrowDepth = thenBorrow;
+  } else if (thenBorrow < 0 || elseBorrow < 0) {
+    expr->borrowDepth = -1;
+  } else {
+    expr->borrowDepth = std::max(thenBorrow, elseBorrow);
+  }
+  expr->resolvedType = result;
+  return result;
+}
+
 Type* Checker::checkExpr(Expr* expr) {
   if (expr == nullptr) {
     return errorType_;
@@ -3067,7 +3127,10 @@ Type* Checker::checkExpr(Expr* expr) {
       diagnostics_.error(expr->span, "E2079",
                          "lambda requires an explicit function target type");
       expr->resolvedType = errorType_;
-      return errorType_;    case ExprKind::IntLit:
+      return errorType_;
+    case ExprKind::IfExpr:
+      return checkIfExpr(expr);
+    case ExprKind::IntLit:
       expr->resolvedType = intType_;
       return intType_;
     case ExprKind::DecimalLit:
@@ -5173,6 +5236,59 @@ void Checker::checkStmt(Stmt* stmt) {
     }
     case StmtKind::Switch: {
       Type* value = checkExpr(stmt->condition.get());
+      if (stmt->isMatch) {
+        const bool supported =
+            value != nullptr &&
+            (value->kind == TypeKind::Enum || value->kind == TypeKind::Int ||
+             value->kind == TypeKind::String ||
+             value->kind == TypeKind::Char || value->kind == TypeKind::Bool);
+        if (!supported) {
+          diagnostics_.error(
+              stmt->span, "E2077",
+              "match requires an enumerate, integer, string, character or "
+              "boolean value");
+        }
+        if (stmt->matchPatterns.size() != stmt->switchBodies.size()) {
+          diagnostics_.error(stmt->span, "E2005", "malformed match branches");
+        }
+        MatchCoverage coverage;
+        for (std::size_t i = 0;
+             i < stmt->matchPatterns.size() && i < stmt->switchBodies.size();
+             ++i) {
+          pushScope(Scope::Kind::Block);
+          checkMatchPattern(stmt->matchPatterns[i].get(), value, coverage,
+                            false, stmt->matchPatterns[i]->span);
+          checkStmt(stmt->switchBodies[i].get());
+          popScope();
+        }
+        if (supported) {
+          if (value->kind == TypeKind::Enum) {
+            if (!coverage.exhaustive) {
+              for (const EnumVariantInfo& variant : value->variants) {
+                if (coverage.variants.count(variant.name) == 0) {
+                  diagnostics_.error(stmt->span, "E2077",
+                                     "match does not cover variant '" +
+                                         variant.name + "'");
+                }
+              }
+            }
+          } else if (value->kind == TypeKind::Bool) {
+            if (!coverage.exhaustive &&
+                (coverage.variants.count("true") == 0 ||
+                 coverage.variants.count("false") == 0)) {
+              diagnostics_.error(
+                  stmt->span, "E2077",
+                  "match on a boolean value must cover 'true' and 'false' or "
+                  "add a '_' branch");
+            }
+          } else if (!coverage.exhaustive) {
+            diagnostics_.error(stmt->span, "E2077",
+                               "match on a non-enumerate value requires a "
+                               "'_' branch");
+          }
+        }
+        return;
+      }
       if (value != nullptr && value->kind != TypeKind::Int &&
           value->kind != TypeKind::String && value->kind != TypeKind::Enum &&
           value->kind != TypeKind::Char && value->kind != TypeKind::Bool) {
@@ -5181,34 +5297,6 @@ void Checker::checkStmt(Stmt* stmt) {
                            "character, boolean, or enum value");
       }
       bool sawDefault = false;
-      if (stmt->isMatch) {
-        if (value == nullptr || value->kind != TypeKind::Enum) {
-          diagnostics_.error(stmt->span, "E2077",
-                             "match requires an enumerate value");
-        } else {
-          std::set<std::string> covered;
-          for (const ExprPtr& caseValue : stmt->switchValues) {
-            if (caseValue == nullptr) {
-              diagnostics_.error(stmt->span, "E2077",
-                                 "match does not allow a default branch");
-              continue;
-            }
-            if (caseValue->kind == ExprKind::Member &&
-                caseValue->lhs != nullptr) {
-              covered.insert(caseValue->name);
-            } else if (caseValue->kind == ExprKind::Name) {
-              covered.insert(caseValue->name);
-            }
-          }
-          for (const EnumVariantInfo& variant : value->variants) {
-            if (covered.count(variant.name) == 0) {
-              diagnostics_.error(stmt->span, "E2077",
-                                 "match does not cover variant '" +
-                                     variant.name + "'");
-            }
-          }
-        }
-      }
       if (stmt->switchValues.size() != stmt->switchBodies.size()) {
         diagnostics_.error(stmt->span, "E2005",
                            "malformed switch branches");
@@ -5465,6 +5553,187 @@ void Checker::checkStmt(Stmt* stmt) {
       return;
     case StmtKind::Destroy:
       checkDestroy(stmt);
+      return;
+  }
+}
+
+namespace {
+
+bool patternBindsName(const Pattern* pattern) {
+  if (pattern == nullptr) {
+    return false;
+  }
+  if (pattern->kind == PatternKind::Bind) {
+    return true;
+  }
+  if (pattern->kind == PatternKind::Or) {
+    return patternBindsName(pattern->left.get()) ||
+           patternBindsName(pattern->right.get());
+  }
+  if (pattern->kind == PatternKind::Guard) {
+    return patternBindsName(pattern->left.get());
+  }
+  return false;
+}
+
+}  // namespace
+
+void Checker::checkMatchPattern(Pattern* pattern, Type* value,
+                                MatchCoverage& coverage, bool guarded,
+                                Span span) {
+  (void)span;
+  if (pattern == nullptr) {
+    return;
+  }
+  switch (pattern->kind) {
+    case PatternKind::Wildcard:
+      if (!guarded) {
+        coverage.exhaustive = true;
+      }
+      return;
+    case PatternKind::Bind: {
+      const bool copyable =
+          value != nullptr &&
+          (value->kind == TypeKind::Enum || value->kind == TypeKind::Int ||
+           value->kind == TypeKind::String || value->kind == TypeKind::Char ||
+           value->kind == TypeKind::Bool);
+      if (!copyable) {
+        diagnostics_.error(
+            pattern->span, "E2077",
+            "binding patterns require an enumerate, integer, string, "
+            "character or boolean value");
+      } else {
+        declareVariable(pattern->name, value, true, nullptr, pattern->span);
+      }
+      if (!guarded) {
+        coverage.exhaustive = true;
+      }
+      return;
+    }
+    case PatternKind::Literal: {
+      Type* literalType = checkExpr(pattern->value.get());
+      requireAssignable(literalType, value, pattern->span, "match pattern");
+      if (value != nullptr && value->kind == TypeKind::Bool &&
+          pattern->value != nullptr &&
+          pattern->value->kind == ExprKind::BoolLit) {
+        coverage.variants.insert(pattern->value->boolValue ? "true" : "false");
+      }
+      return;
+    }
+    case PatternKind::Path: {
+      if (value != nullptr && value->kind == TypeKind::Enum) {
+        std::string variantName = pattern->name;
+        std::string prefix;
+        const std::size_t dot = pattern->name.rfind('.');
+        if (dot != std::string::npos) {
+          prefix = pattern->name.substr(0, dot);
+          variantName = pattern->name.substr(dot + 1);
+        }
+        if (!prefix.empty() && prefix != value->name) {
+          diagnostics_.error(pattern->span, "E2077",
+                             "pattern '" + pattern->name +
+                                 "' does not match enumerate '" + value->name +
+                                 "'");
+          return;
+        }
+        bool found = false;
+        for (const EnumVariantInfo& variant : value->variants) {
+          if (variant.name == variantName) {
+            found = true;
+            break;
+          }
+        }
+        if (found) {
+          pattern->enumName = value->name;
+          pattern->variant = variantName;
+          pattern->enumBehavior =
+              value->decl != nullptr &&
+              (!value->decl->members.empty() ||
+               !value->decl->interfaces.empty());
+          if (!guarded) {
+            coverage.variants.insert(variantName);
+          }
+          return;
+        }
+        if (prefix.empty()) {
+          // A bare name that is not a variant is a binding pattern.
+          pattern->kind = PatternKind::Bind;
+          declareVariable(pattern->name, value, true, nullptr, pattern->span);
+          if (!guarded) {
+            coverage.exhaustive = true;
+          }
+          return;
+        }
+        diagnostics_.error(pattern->span, "E2024",
+                           "enumerate '" + value->name +
+                               "' has no variant '" + variantName + "'");
+        return;
+      }
+      if (pattern->name.find('.') != std::string::npos) {
+        diagnostics_.error(pattern->span, "E2077",
+                           "path patterns require an enumerate value");
+        return;
+      }
+      const bool copyable =
+          value != nullptr &&
+          (value->kind == TypeKind::Int || value->kind == TypeKind::String ||
+           value->kind == TypeKind::Char || value->kind == TypeKind::Bool);
+      if (!copyable) {
+        diagnostics_.error(
+            pattern->span, "E2077",
+            "binding patterns require an enumerate, integer, string, "
+            "character or boolean value");
+        return;
+      }
+      pattern->kind = PatternKind::Bind;
+      declareVariable(pattern->name, value, true, nullptr, pattern->span);
+      if (!guarded) {
+        coverage.exhaustive = true;
+      }
+      return;
+    }
+    case PatternKind::Range: {
+      if (value == nullptr ||
+          (value->kind != TypeKind::Int && value->kind != TypeKind::Char)) {
+        diagnostics_.error(
+            pattern->span, "E2077",
+            "range patterns require an integer or character value");
+      }
+      const auto checkBound = [&](Pattern* bound, const char* side) {
+        if (bound == nullptr || bound->kind != PatternKind::Literal) {
+          diagnostics_.error(pattern->span, "E2077",
+                             std::string("range ") + side +
+                                 " bound must be a literal");
+          return;
+        }
+        Type* boundType = checkExpr(bound->value.get());
+        if (boundType != nullptr && !boundType->isInteger() &&
+            boundType->kind != TypeKind::Char) {
+          diagnostics_.error(pattern->span, "E2077",
+                             "range bounds must be integers or characters");
+          return;
+        }
+        requireAssignable(boundType, value, bound->span, "range bound");
+      };
+      checkBound(pattern->left.get(), "lower");
+      checkBound(pattern->right.get(), "upper");
+      return;
+    }
+    case PatternKind::Or: {
+      if (patternBindsName(pattern)) {
+        diagnostics_.error(
+            pattern->span, "E2077",
+            "binding patterns cannot be combined with '|'; use separate "
+            "branches or a wildcard");
+      }
+      checkMatchPattern(pattern->left.get(), value, coverage, guarded, span);
+      checkMatchPattern(pattern->right.get(), value, coverage, guarded, span);
+      return;
+    }
+    case PatternKind::Guard:
+      checkMatchPattern(pattern->left.get(), value, coverage, true, span);
+      requireAssignable(checkExpr(pattern->guard.get()), boolType_,
+                        pattern->guard->span, "match guard");
       return;
   }
 }

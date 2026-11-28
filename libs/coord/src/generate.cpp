@@ -2178,6 +2178,140 @@ void CppEmitter::emitBlock(const Stmt* block) {
   }
 }
 
+const Pattern* CppEmitter::patternInner(const Pattern* pattern) const {
+  if (pattern != nullptr && pattern->kind == PatternKind::Guard) {
+    return pattern->left.get();
+  }
+  return pattern;
+}
+
+void CppEmitter::emitPatternBindings(const Pattern* pattern,
+                                     const std::string& value) {
+  const Pattern* inner = patternInner(pattern);
+  if (inner != nullptr && inner->kind == PatternKind::Bind) {
+    indent();
+    out_ << "auto " << sanitize(inner->name) << " = " << value << ";\n";
+  }
+}
+
+void CppEmitter::emitPatternCondition(const Pattern* pattern,
+                                      const std::string& value) {
+  if (pattern == nullptr) {
+    out_ << "true";
+    return;
+  }
+  switch (pattern->kind) {
+    case PatternKind::Wildcard:
+    case PatternKind::Bind:
+      out_ << "true";
+      return;
+    case PatternKind::Literal:
+      out_ << '(' << value << " == ";
+      emitExpr(pattern->value.get());
+      out_ << ')';
+      return;
+    case PatternKind::Path:
+      if (pattern->enumBehavior) {
+        out_ << '(' << value << ".raw() == " << sanitize(pattern->enumName)
+             << "::" << sanitize(pattern->variant) << ".raw())";
+      } else {
+        out_ << '(' << value << " == " << sanitize(pattern->enumName) << "::"
+             << sanitize(pattern->variant) << ')';
+      }
+      return;
+    case PatternKind::Range:
+      out_ << "((" << value << " >= ";
+      emitExpr(pattern->left != nullptr ? pattern->left->value.get()
+                                        : nullptr);
+      out_ << ") && (" << value << ' '
+           << (pattern->inclusive ? "<=" : "<") << ' ';
+      emitExpr(pattern->right != nullptr ? pattern->right->value.get()
+                                         : nullptr);
+      out_ << "))";
+      return;
+    case PatternKind::Or:
+      out_ << '(';
+      emitPatternCondition(pattern->left.get(), value);
+      out_ << " || ";
+      emitPatternCondition(pattern->right.get(), value);
+      out_ << ')';
+      return;
+    case PatternKind::Guard:
+      emitPatternCondition(pattern->left.get(), value);
+      return;
+  }
+}
+
+void CppEmitter::emitMatchBranches(const Stmt* stmt, std::size_t index,
+                                   const std::string& value) {
+  if (index >= stmt->matchPatterns.size() ||
+      index >= stmt->switchBodies.size()) {
+    return;
+  }
+  const Pattern* pattern = stmt->matchPatterns[index].get();
+  const Pattern* inner = patternInner(pattern);
+  const bool hasBinding =
+      inner != nullptr && inner->kind == PatternKind::Bind;
+  if (hasBinding) {
+    indent();
+    out_ << "{\n";
+    ++depth_;
+    emitPatternBindings(pattern, value);
+  }
+  const std::string matched = "__matchOk" + std::to_string(tempCounter_++);
+  indent();
+  out_ << "bool " << matched << " = ";
+  emitPatternCondition(pattern, value);
+  out_ << ";\n";
+  if (pattern != nullptr && pattern->kind == PatternKind::Guard &&
+      pattern->guard != nullptr) {
+    indent();
+    out_ << "if (" << matched << ") " << matched << " = ";
+    emitExpr(pattern->guard.get());
+    out_ << ";\n";
+  }
+  indent();
+  out_ << "if (" << matched << ") {\n";
+  ++depth_;
+  if (stmt->switchBodies[index]->kind == StmtKind::Block) {
+    emitBlock(stmt->switchBodies[index].get());
+  } else {
+    emitStmt(stmt->switchBodies[index].get());
+  }
+  --depth_;
+  indent();
+  out_ << "}\n";
+  if (index + 1 < stmt->matchPatterns.size()) {
+    indent();
+    out_ << "else {\n";
+    ++depth_;
+    emitMatchBranches(stmt, index + 1, value);
+    --depth_;
+    indent();
+    out_ << "}\n";
+  }
+  if (hasBinding) {
+    --depth_;
+    indent();
+    out_ << "}\n";
+  }
+}
+
+void CppEmitter::emitMatch(const Stmt* stmt) {
+  const std::string value = "__match" + std::to_string(tempCounter_++);
+  indent();
+  out_ << "{\n";
+  ++depth_;
+  indent();
+  out_ << "auto " << value << " = ";
+  emitExpr(stmt->condition.get());
+  out_ << ";\n";
+  emitMatchBranches(stmt, 0, value);
+  --depth_;
+  indent();
+  out_ << "}\n";
+}
+
 void CppEmitter::emitStmt(const Stmt* stmt) {
   if (stmt == nullptr) {
     return;
@@ -2501,6 +2635,10 @@ void CppEmitter::emitStmt(const Stmt* stmt) {
       emitStmt(stmt->thenBranch.get());
       return;
     case StmtKind::Switch: {
+      if (stmt->isMatch) {
+        emitMatch(stmt);
+        return;
+      }
       const std::string temporary =
           "__switch" + std::to_string(tempCounter_++);
       indent();
@@ -2958,6 +3096,20 @@ void CppEmitter::emitExpr(const Expr* expr) {
       }
       out_ << ')';
       return;
+    case ExprKind::IfExpr: {
+      if (expr->ifExpr == nullptr) {
+        out_ << "0";
+        return;
+      }
+      out_ << '(';
+      emitExpr(expr->ifExpr->condition.get());
+      out_ << " ? ";
+      emitExpr(expr->ifExpr->thenValue.get());
+      out_ << " : ";
+      emitExpr(expr->ifExpr->elseValue.get());
+      out_ << ')';
+      return;
+    }
     case ExprKind::Lambda: {
       const bool implicitCaptures =
           expr->lambda != nullptr && expr->lambda->captureList.empty();

@@ -1025,6 +1025,54 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2087
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_match_patterns
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/match_patterns.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_match_patterns
+      -DEXPECTED=small|b|green|positive|outside|on
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_if_expression
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/if_expression.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_if_expression
+      -DEXPECTED=9|big|1|yes
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_match_missing
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/match_missing.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_match_missing
+      -DEXPECT_SUBSTRING=E2077
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_match_no_wildcard
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/match_no_wildcard.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_match_no_wildcard
+      -DEXPECT_SUBSTRING=E2077
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_match_bad_pattern
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/match_bad_pattern.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_match_bad_pattern
+      -DEXPECT_SUBSTRING=E2024
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_if_expression_type_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/if_expression_type_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_if_expression_type_error
+      -DEXPECT_SUBSTRING=E2005
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lambda_escape
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

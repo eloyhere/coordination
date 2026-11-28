@@ -1,0 +1,9 @@
+// A match over a non-enumerate value needs a '_' branch.
+integer main() {
+    integer value = 2;
+    match (value) {
+        0 => { print("zero"); }
+        1 | 2 | 3 => { print("small"); }
+    }
+    return 0;
+}

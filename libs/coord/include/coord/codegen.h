@@ -50,6 +50,12 @@ private:
   void emitType(const TypeExpr* type);
   void emitStmt(const Stmt* stmt);
   void emitBlock(const Stmt* block);
+  void emitMatch(const Stmt* stmt);
+  void emitMatchBranches(const Stmt* stmt, std::size_t index,
+                         const std::string& value);
+  void emitPatternCondition(const Pattern* pattern, const std::string& value);
+  void emitPatternBindings(const Pattern* pattern, const std::string& value);
+  [[nodiscard]] const Pattern* patternInner(const Pattern* pattern) const;
   void emitExpr(const Expr* expr);
   void emitInitializer(const Expr* expr, int radix);
   void emitShareEdgeRecord(const Expr* assign);

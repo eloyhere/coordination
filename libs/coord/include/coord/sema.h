@@ -277,6 +277,7 @@ private:
                                                std::size_t argc) const;
 
   Type* checkExpr(Expr* expr);
+  Type* checkIfExpr(Expr* expr);
   Type* checkCall(Expr* expr);
   Type* checkMember(Expr* expr);
   Type* checkUnary(Expr* expr);
@@ -286,6 +287,14 @@ private:
   void checkStmt(Stmt* stmt);
   void checkBlock(Stmt* block);
   void checkDestroy(Stmt* stmt);
+
+  /// Exhaustiveness bookkeeping for one match statement.
+  struct MatchCoverage {
+    std::set<std::string> variants;
+    bool exhaustive = false;
+  };
+  void checkMatchPattern(Pattern* pattern, Type* value,
+                         MatchCoverage& coverage, bool guarded, Span span);
 
   [[nodiscard]] bool isSubtype(Type* from, Type* to) const;
   [[nodiscard]] bool assignable(Type* from, Type* to) const;

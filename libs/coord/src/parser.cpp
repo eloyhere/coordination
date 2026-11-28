@@ -1447,6 +1447,163 @@ StmtPtr Parser::parseSwitch(bool isMatch) {
   return stmt;
 }
 
+StmtPtr Parser::parseMatchBody() {
+  if (check(TokKind::LBrace)) {
+    return parseBlock();
+  }
+  auto stmt = std::make_unique<Stmt>();
+  stmt->kind = StmtKind::Expr;
+  stmt->span = current().span;
+  stmt->expr = parseExpression();
+  return stmt;
+}
+
+PatternPtr Parser::parsePatternPrimary() {
+  auto pattern = std::make_unique<Pattern>();
+  pattern->span = current().span;
+  if (check(TokKind::Identifier) && current().text == "_") {
+    advance();
+    pattern->kind = PatternKind::Wildcard;
+    return pattern;
+  }
+  const auto literal = [&]() -> ExprPtr {
+    auto expr = std::make_unique<Expr>();
+    expr->span = current().span;
+    if (match(TokKind::Minus)) {
+      if (!check(TokKind::IntegerLiteral)) {
+        error(current(), "expected an integer after '-' in a range");
+        return expr;
+      }
+      expr->kind = ExprKind::IntLit;
+      expr->intValue = -advance().intValue;
+      return expr;
+    }
+    if (check(TokKind::IntegerLiteral)) {
+      expr->kind = ExprKind::IntLit;
+      expr->intValue = advance().intValue;
+    } else if (check(TokKind::CharacterLiteral)) {
+      expr->kind = ExprKind::CharLit;
+      expr->charValue = advance().charValue;
+    } else if (check(TokKind::StringLiteral)) {
+      expr->kind = ExprKind::StringLit;
+      expr->stringValue = advance().stringValue;
+    } else if (match(TokKind::KwTrue)) {
+      expr->kind = ExprKind::BoolLit;
+      expr->boolValue = true;
+    } else if (match(TokKind::KwFalse)) {
+      expr->kind = ExprKind::BoolLit;
+      expr->boolValue = false;
+    }
+    return expr;
+  };
+  if (check(TokKind::IntegerLiteral) || check(TokKind::CharacterLiteral) ||
+      check(TokKind::StringLiteral) || check(TokKind::KwTrue) ||
+      check(TokKind::KwFalse) ||
+      (check(TokKind::Minus) &&
+       peek(1).kind == TokKind::IntegerLiteral)) {
+    pattern->kind = PatternKind::Literal;
+    pattern->value = literal();
+  } else if (check(TokKind::Identifier)) {
+    std::string name = std::string(advance().text);
+    while (match(TokKind::Dot)) {
+      if (!check(TokKind::Identifier)) {
+        error(current(), "expected a name after '.' in a match pattern");
+        break;
+      }
+      name += ".";
+      name += std::string(advance().text);
+    }
+    pattern->kind = PatternKind::Path;
+    pattern->name = std::move(name);
+  } else {
+    error(current(), "expected a match pattern");
+    advance();
+    pattern->kind = PatternKind::Wildcard;
+    return pattern;
+  }
+  if (pattern->kind == PatternKind::Literal &&
+      (check(TokKind::DotDot) || check(TokKind::DotDotEqual))) {
+    auto range = std::make_unique<Pattern>();
+    range->kind = PatternKind::Range;
+    range->span = pattern->span;
+    range->inclusive = check(TokKind::DotDotEqual);
+    advance();
+    PatternPtr upper = parsePatternPrimary();
+    if (upper->kind != PatternKind::Literal) {
+      error(current(), "range patterns require literal bounds");
+    }
+    range->left = std::move(pattern);
+    range->right = std::move(upper);
+    return range;
+  }
+  return pattern;
+}
+
+PatternPtr Parser::parsePattern() {
+  PatternPtr pattern = parsePatternPrimary();
+  while (check(TokKind::Pipe)) {
+    advance();
+    PatternPtr right = parsePatternPrimary();
+    auto combined = std::make_unique<Pattern>();
+    combined->kind = PatternKind::Or;
+    combined->span = pattern->span;
+    combined->left = std::move(pattern);
+    combined->right = std::move(right);
+    pattern = std::move(combined);
+  }
+  if (check(TokKind::KwIf)) {
+    advance();
+    auto guarded = std::make_unique<Pattern>();
+    guarded->kind = PatternKind::Guard;
+    guarded->span = pattern->span;
+    guarded->left = std::move(pattern);
+    guarded->guard = parseExpression();
+    pattern = std::move(guarded);
+  }
+  return pattern;
+}
+
+StmtPtr Parser::parseMatch() {
+  auto stmt = std::make_unique<Stmt>();
+  stmt->kind = StmtKind::Switch;
+  stmt->isMatch = true;
+  stmt->span = current().span;
+  advance();  // match
+  expect(TokKind::LParen, "'('");
+  stmt->condition = parseExpression();
+  expect(TokKind::RParen, "')'");
+  if (!expect(TokKind::LBrace, "'{'")) {
+    return stmt;
+  }
+  while (!atEnd() && !check(TokKind::RBrace)) {
+    PatternPtr pattern;
+    if (check(TokKind::Identifier) && current().text == "case") {
+      advance();
+      pattern = parsePattern();
+      expect(TokKind::Colon, "':' after a match pattern");
+    } else if (check(TokKind::Identifier) && current().text == "default") {
+      advance();
+      pattern = std::make_unique<Pattern>();
+      pattern->kind = PatternKind::Wildcard;
+      pattern->span = current().span;
+      expect(TokKind::Colon, "':' after 'default'");
+    } else {
+      pattern = parsePattern();
+      expect(TokKind::FatArrow, "'=>' after a match pattern");
+    }
+    StmtPtr body = parseMatchBody();
+    if (body == nullptr) {
+      error(current(), "expected a match branch body");
+      break;
+    }
+    stmt->matchPatterns.push_back(std::move(pattern));
+    stmt->switchBodies.push_back(std::move(body));
+    match(TokKind::Comma);
+  }
+  expect(TokKind::RBrace, "'}'");
+  return stmt;
+}
+
 bool Parser::looksLikeDestructure() const {
   if (!check(TokKind::LBrace)) {
     return false;
@@ -1556,7 +1713,7 @@ StmtPtr Parser::parseStatement() {
     return parseSwitch();
   }
   if (check(TokKind::KwMatch)) {
-    return parseSwitch(true);
+    return parseMatch();
   }
   if (check(TokKind::KwWhile)) {
     return parseWhile();
@@ -1650,7 +1807,38 @@ bool Parser::isAssignmentOperator(TokKind kind) {
   }
 }
 
-ExprPtr Parser::parseExpression() { return parseAssignment(); }
+ExprPtr Parser::parseExpression() {
+  if (check(TokKind::KwIf)) {
+    return parseIfExpression();
+  }
+  return parseAssignment();
+}
+
+ExprPtr Parser::parseIfExpression() {
+  auto expr = std::make_unique<Expr>();
+  expr->kind = ExprKind::IfExpr;
+  expr->span = current().span;
+  expr->ifExpr = std::make_shared<IfExprInfo>();
+  advance();  // if
+  expect(TokKind::LParen, "'('");
+  expr->ifExpr->condition = parseExpression();
+  expect(TokKind::RParen, "')'");
+  if (check(TokKind::LBrace)) {
+    error(current(),
+          "if-expression branches must be expressions in v0; use a normal "
+          "'if' statement for blocks");
+  }
+  expr->ifExpr->thenValue = parseExpression();
+  if (!expect(TokKind::KwElse, "'else' in an if expression")) {
+    return expr;
+  }
+  if (check(TokKind::KwIf)) {
+    expr->ifExpr->elseValue = parseIfExpression();
+  } else {
+    expr->ifExpr->elseValue = parseExpression();
+  }
+  return expr;
+}
 
 ExprPtr Parser::parseAssignment() {
   ExprPtr lhs = parseBinary(1);

@@ -1,0 +1,50 @@
+// Match patterns: constants, or-patterns, ranges, bindings and guards.
+enumerate Color {
+    Red,
+    Green,
+    Blue,
+}
+
+integer main() {
+    integer small = 2;
+    match (small) {
+        0 => { print("zero"); }
+        1 | 2 | 3 => { print("small"); }
+        4..=9 => { print("medium"); }
+        _ => { print("large"); }
+    }
+
+    string name = "b";
+    match (name) {
+        "a" => { print("a"); }
+        "b" => { print("b"); }
+        _ => { print("other"); }
+    }
+
+    Color color = Color.Green;
+    match (color) {
+        Color.Red => { print("red"); }
+        Color.Green => { print("green"); }
+        Color.Blue => { print("blue"); }
+    }
+
+    integer value = 7;
+    match (value) {
+        x if x < 0 => { print("negative"); }
+        x if x == 0 => { print("origin"); }
+        _ => { print("positive"); }
+    }
+
+    integer edge = 10;
+    match (edge) {
+        1..10 => { print("inside"); }
+        _ => { print("outside"); }
+    }
+
+    boolean flag = true;
+    match (flag) {
+        true => { print("on"); }
+        false => { print("off"); }
+    }
+    return 0;
+}

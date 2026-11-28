@@ -1,0 +1,15 @@
+// A match over an enumerate must cover every variant.
+enumerate Color {
+    Red,
+    Green,
+    Blue,
+}
+
+integer main() {
+    Color color = Color.Green;
+    match (color) {
+        Color.Red => { print("red"); }
+        Color.Green => { print("green"); }
+    }
+    return 0;
+}

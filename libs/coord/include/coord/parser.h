@@ -59,6 +59,10 @@ private:
   StmtPtr parseFor();
   StmtPtr parseWhile();
   StmtPtr parseSwitch(bool isMatch = false);
+  StmtPtr parseMatch();
+  PatternPtr parsePattern();
+  PatternPtr parsePatternPrimary();
+  StmtPtr parseMatchBody();
   StmtPtr parseDestructure();
   StmtPtr parseReturn();
   StmtPtr parseDestroy();
@@ -70,6 +74,7 @@ private:
   bool parseConstructureInitializer(Stmt& stmt);
 
   ExprPtr parseExpression();
+  ExprPtr parseIfExpression();
   ExprPtr parseAssignment();
   ExprPtr parseBinary(int minPrecedence);
   ExprPtr parseUnary();

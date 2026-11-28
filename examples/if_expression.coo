@@ -1,0 +1,19 @@
+// `if` expressions produce a value; `else if` chains nest.
+integer maxOf(integer a, integer b) {
+    return if (a > b) a else b;
+}
+
+integer main() {
+    print(maxOf(3, 9));
+
+    integer value = 7;
+    string label = if (value > 5) "big" else if (value > 0) "small" else "none";
+    print(label);
+
+    integer sign = if (value > 0) 1 else if (value < 0) -1 else 0;
+    print(sign);
+
+    boolean flag = value > 5;
+    print(if (flag) "yes" else "no");
+    return 0;
+}

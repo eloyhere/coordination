@@ -67,9 +67,11 @@ enum class ExprKind {
   ArrayLit,
   ObjectLit,
   Lambda,
+  IfExpr,
 };
 
 struct LambdaInfo;
+struct IfExprInfo;
 
 struct Expr : Node {
   ExprKind kind = ExprKind::IntLit;
@@ -99,6 +101,47 @@ struct Expr : Node {
   bool optionalField = false;
   bool optionalCall = false;
   std::shared_ptr<LambdaInfo> lambda;
+  std::shared_ptr<IfExprInfo> ifExpr;
+};
+
+/// Value branches of an `if` expression: `if (c) a else b`.
+struct IfExprInfo {
+  ExprPtr condition;
+  ExprPtr thenValue;
+  ExprPtr elseValue;
+};
+
+// ---------------------------------------------------------------------------
+// Match patterns
+// ---------------------------------------------------------------------------
+
+enum class PatternKind {
+  Wildcard,  // _
+  Literal,   // 1, "x", 'a', true
+  Path,      // Color.Red (enumerate variant); a bare unknown name is a binding
+  Bind,      // x / x if guard -> binds the matched value
+  Range,     // 1..10, 1..=10
+  Or,        // p1 | p2
+  Guard,     // p if condition
+};
+
+struct Pattern;
+using PatternPtr = std::unique_ptr<Pattern>;
+
+struct Pattern : Node {
+  PatternKind kind = PatternKind::Wildcard;
+  ExprPtr value;      // Literal
+  std::string name;   // Path / Bind
+  PatternPtr left;    // Or left, Range lower, Guard inner
+  PatternPtr right;   // Or right, Range upper
+  bool inclusive = true;
+  ExprPtr guard;      // Guard condition
+  // Resolved by Sema for Path patterns.
+  std::string enumName;
+  std::string variant;
+  bool enumBehavior = false;
+
+  ~Pattern() override;
 };
 
 // ---------------------------------------------------------------------------
@@ -206,6 +249,7 @@ struct Stmt : Node {
   ExprPtr expr;
   std::vector<ExprPtr> initArgs;
   std::vector<ExprPtr> switchValues;
+  std::vector<PatternPtr> matchPatterns;
   std::vector<StmtPtr> switchBodies;
   std::vector<DestructureBinding> destructureBindings;
   const Decl* destructureMethod = nullptr;
