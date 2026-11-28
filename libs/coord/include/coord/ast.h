@@ -237,6 +237,7 @@ struct Stmt : Node {
   bool isWeak = false;
   bool isLet = false;
   bool isMatch = false;
+  bool isLockBlock = false;
   bool optionalDestructure = false;
   bool optionalDestructureNarrowed = false;
   ProxyPolicy proxyPolicy = ProxyPolicy::Error;

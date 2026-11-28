@@ -285,3 +285,5 @@ annotation Length {}
 
 @Target(type)
 annotation Radix {}
+@Target(block)
+annotation Lock {}

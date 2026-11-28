@@ -1185,6 +1185,54 @@ if(MSVC)
       -DEXPECT_SUBSTRING=E2091
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
 
+  add_test(NAME coord_e2e_atomic
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/atomic.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_atomic
+      -DEXPECTED=2|5|5|7
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_scopedlock_copy_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/scopedlock_copy_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_scopedlock_copy_error
+      -DEXPECT_SUBSTRING=E2092
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_atomic_copy_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/atomic_copy_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_atomic_copy_error
+      -DEXPECT_SUBSTRING=E2092
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_atomic_assign_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/atomic_assign_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_atomic_assign_error
+      -DEXPECT_SUBSTRING=E2092
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
+  add_test(NAME coord_e2e_lock_annotation
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_annotation.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_annotation
+      -DEXPECTED=2
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_lock_annotation_error
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lock_annotation_error.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lock_annotation_error
+      -DEXPECT_SUBSTRING=E2093
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/fail.cmake)
+
   add_test(NAME coord_e2e_lambda_escape
     COMMAND ${CMAKE_COMMAND}
       -DCOORC=$<TARGET_FILE:coorc>

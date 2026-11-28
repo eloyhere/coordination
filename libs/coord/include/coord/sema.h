@@ -39,6 +39,8 @@ enum class TypeKind {
   Pointer,
   Thread,
   Mutex,
+  ScopedLock,
+  Atomic,
   Array,
   Queue,
   ArrayView,
@@ -354,6 +356,8 @@ private:
   Type* proxyType_ = nullptr;
   Type* threadType_ = nullptr;
   Type* mutexType_ = nullptr;
+  Type* scopedLockType_ = nullptr;
+  Type* atomicType_ = nullptr;
 
   std::unordered_map<std::string, Decl*> typeDecls_;
   std::unordered_map<std::string, std::vector<Decl*>> functions_;

@@ -299,6 +299,23 @@ void Checker::initializeBuiltins() {
   addMutexMethod("lock", voidType_);
   addMutexMethod("unlock", voidType_);
   addMutexMethod("tryLock", boolType_);
+
+  scopedLockType_ = makeType(TypeKind::ScopedLock, "ScopedLock", classType_);
+
+  atomicType_ = makeType(TypeKind::Atomic, "Atomic", classType_);
+  const auto addAtomicMethod = [&](const char* name, Type* returnType,
+                                   std::vector<Type*> params) {
+    MethodInfo method;
+    method.name = name;
+    method.returnType = returnType;
+    method.paramTypes = std::move(params);
+    method.owner = atomicType_;
+    method.access = Access::Public;
+    atomicType_->methods.push_back(method);
+  };
+  addAtomicMethod("load", intType_, {});
+  addAtomicMethod("store", voidType_, {intType_});
+  addAtomicMethod("fetchAdd", intType_, {intType_});
 }
 
 Type* Checker::makeType(TypeKind kind, std::string name, Type* base) {
@@ -3624,6 +3641,11 @@ Type* Checker::checkAssign(Expr* expr) {
     diagnostics_.error(expr->span, "E2091",
                        "Mutex values cannot be assigned or copied");
   }
+  if (lhs != nullptr &&
+      (lhs->kind == TypeKind::ScopedLock || lhs->kind == TypeKind::Atomic)) {
+    diagnostics_.error(expr->span, "E2092",
+                       "ScopedLock/Atomic values cannot be assigned or copied");
+  }
   bool optional = false;
   if (expr->lhs->kind == ExprKind::Name) {
     if (Variable* variable = lookupVariable(expr->lhs->name)) {
@@ -4261,6 +4283,45 @@ Type* Checker::checkCall(Expr* expr) {
       }
       expr->resolvedType = threadType_;
       return threadType_;
+    }
+
+    if (callee->name == "ScopedLock") {
+      if (expr->args.size() != 1) {
+        diagnostics_.error(expr->span, "E2092",
+                           "ScopedLock() takes exactly one Mutex value");
+        for (const auto& arg : expr->args) {
+          checkExpr(arg.get());
+        }
+      } else {
+        Type* mutex = checkExpr(expr->args[0].get());
+        if (mutex == nullptr || mutex->kind != TypeKind::Mutex) {
+          diagnostics_.error(expr->args[0]->span, "E2092",
+                             "ScopedLock requires a Mutex value");
+        }
+        if (expr->args[0]->kind != ExprKind::Name &&
+            expr->args[0]->kind != ExprKind::Member) {
+          diagnostics_.error(expr->args[0]->span, "E2092",
+                             "ScopedLock requires a named Mutex lvalue");
+        }
+      }
+      expr->resolvedType = scopedLockType_;
+      return scopedLockType_;
+    }
+
+    if (callee->name == "Atomic") {
+      if (expr->args.size() != 1) {
+        diagnostics_.error(expr->span, "E2092",
+                           "Atomic() takes exactly one integer initial value");
+        for (const auto& arg : expr->args) {
+          checkExpr(arg.get());
+        }
+      } else {
+        Type* initial = checkExpr(expr->args[0].get());
+        requireAssignable(initial, intType_, expr->args[0]->span,
+                          "Atomic initial value");
+      }
+      expr->resolvedType = atomicType_;
+      return atomicType_;
     }
 
     const auto typeIt = typeMap_.find(callee->name);
@@ -5094,6 +5155,30 @@ void Checker::checkStmt(Stmt* stmt) {
                              "Runtime");
         }
       }
+      for (const AnnotationUse& use : stmt->annotations) {
+        if (use.name != "Lock") {
+          continue;
+        }
+        if (use.args.size() != 1 || use.args[0] == nullptr) {
+          diagnostics_.error(use.span, "E2093",
+                             "@Lock requires exactly one Mutex argument");
+          continue;
+        }
+        Expr* lockTarget = use.args[0].get();
+        Type* lockType = checkExpr(lockTarget);
+        if (lockType == nullptr || lockType->kind != TypeKind::Mutex) {
+          diagnostics_.error(lockTarget->span, "E2093",
+                             "@Lock requires a Mutex value");
+          continue;
+        }
+        if (lockTarget->kind != ExprKind::Name &&
+            lockTarget->kind != ExprKind::Member) {
+          diagnostics_.error(lockTarget->span, "E2093",
+                             "@Lock requires a named Mutex lvalue");
+          continue;
+        }
+        stmt->isLockBlock = true;
+      }
       checkBlock(stmt);
       return;
     }
@@ -5536,6 +5621,26 @@ void Checker::checkStmt(Stmt* stmt) {
             stmt->span, "E2091",
             "Mutex values cannot be copied; declare the mutex in place or "
             "keep it as a class field");
+      }
+      if (type != nullptr && type->kind == TypeKind::ScopedLock) {
+        const bool constructed =
+            stmt->expr != nullptr && stmt->expr->kind == ExprKind::Call &&
+            stmt->expr->lhs != nullptr &&
+            stmt->expr->lhs->kind == ExprKind::Name &&
+            stmt->expr->lhs->name == "ScopedLock";
+        if (!constructed) {
+          diagnostics_.error(
+              stmt->span, "E2092",
+              "ScopedLock must be initialized with ScopedLock(mutex) and "
+              "cannot be copied");
+        }
+      }
+      if (type != nullptr && type->kind == TypeKind::Atomic &&
+          (stmt->expr == nullptr || stmt->expr->kind != ExprKind::Call)) {
+        diagnostics_.error(
+            stmt->span, "E2092",
+            "Atomic values cannot be copied; initialize in place with "
+            "Atomic(initial)");
       }
       declareVariable(stmt->name, type, stmt->isConst, nullptr, stmt->span, stmt->isOptional, stmt->proxyPolicy, stmt->optionalDefault.get());
       if (Variable* declared = lookupVariable(stmt->name)) {

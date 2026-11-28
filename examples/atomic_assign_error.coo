@@ -1,0 +1,7 @@
+// Atomic values cannot be assigned.
+integer main() {
+    Atomic first = Atomic(0);
+    Atomic second = Atomic(1);
+    first = second;
+    return 0;
+}

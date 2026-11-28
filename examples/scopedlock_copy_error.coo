@@ -1,0 +1,7 @@
+// ScopedLock values cannot be copied.
+integer main() {
+    Mutex mutex;
+    ScopedLock first = ScopedLock(mutex);
+    ScopedLock second = first;
+    return 0;
+}

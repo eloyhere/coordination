@@ -1,0 +1,9 @@
+// @Lock requires exactly one Mutex argument.
+integer main() {
+    integer value = 0;
+    @Lock(value) {
+        value = value + 1;
+    }
+    print(value);
+    return 0;
+}

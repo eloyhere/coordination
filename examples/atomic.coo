@@ -1,0 +1,34 @@
+// Atomic v0: std::atomic<std::int64_t> with fixed seq_cst operations.
+class Counter {
+public:
+    Atomic count;
+
+    Counter() {
+        count.store(0);
+    }
+
+    void increment() {
+        count.fetchAdd(1);
+    }
+
+    integer get() {
+        return count.load();
+    }
+}
+
+integer main() {
+    @Share Counter counter = Counter();
+
+    Thread first = Thread([counter](): void -> { counter.increment(); });
+    Thread second = Thread([counter](): void -> { counter.increment(); });
+    first.join();
+    second.join();
+    print(counter.get());
+
+    Atomic local = Atomic(0);
+    local.store(5);
+    print(local.load());
+    print(local.fetchAdd(2));
+    print(local.load());
+    return 0;
+}

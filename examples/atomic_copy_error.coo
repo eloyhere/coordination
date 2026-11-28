@@ -1,0 +1,6 @@
+// Atomic values cannot be copied.
+integer main() {
+    Atomic first = Atomic(0);
+    Atomic second = first;
+    return 0;
+}

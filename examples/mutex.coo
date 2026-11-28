@@ -10,9 +10,8 @@ public:
     }
 
     void add(integer amount) {
-        mutex.lock();
+        ScopedLock guard = ScopedLock(mutex);
         value = value + amount;
-        mutex.unlock();
     }
 
     integer get() {

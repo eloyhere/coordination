@@ -1687,7 +1687,7 @@ StmtPtr Parser::parseExprStmt() {
 
 StmtPtr Parser::parseStatement() {
   if (check(TokKind::At) && peek(1).kind == TokKind::Identifier &&
-      peek(1).text == "Retention") {
+      (peek(1).text == "Retention" || peek(1).text == "Lock")) {
     std::vector<AnnotationUse> annotations = parseAnnotations();
     if (check(TokKind::LBrace)) {
       StmtPtr block = parseBlock();

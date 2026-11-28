@@ -217,6 +217,12 @@ std::string CppEmitter::cppTypeName(const Type* type) const {
   if (type->kind == TypeKind::Mutex) {
     return "std::mutex";
   }
+  if (type->kind == TypeKind::ScopedLock) {
+    return "std::lock_guard<std::mutex>";
+  }
+  if (type->kind == TypeKind::Atomic) {
+    return "std::atomic<std::int64_t>";
+  }
   const std::string& name = type->name;
   if (name == "integer") {
     return "std::int64_t";
@@ -314,6 +320,8 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
           {"boolean", "bool"},
           {"Thread", "std::thread"},
           {"Mutex", "std::mutex"},
+          {"ScopedLock", "std::lock_guard<std::mutex>"},
+          {"Atomic", "std::atomic<std::int64_t>"},
           {"Enumeration", "std::int64_t"},
           {"char", "char32_t"},
           {"string", "std::string"},
@@ -499,6 +507,7 @@ void CppEmitter::emitPrelude() {
   out_ << "#include <chrono>\n";
   out_ << "#include <thread>\n";
   out_ << "#include <mutex>\n";
+  out_ << "#include <atomic>\n";
   out_ << "#include <cstdio>\n";
   out_ << "#include <utility>\n";
   out_ << "#if defined(_WIN32)\n";
@@ -2403,6 +2412,20 @@ void CppEmitter::emitStmt(const Stmt* stmt) {
       }
       line("{");
       ++depth_;
+      if (stmt->isLockBlock) {
+        for (const AnnotationUse& use : stmt->annotations) {
+          if (use.name != "Lock" || use.args.empty() ||
+              use.args[0] == nullptr) {
+            continue;
+          }
+          indent();
+          out_ << "std::lock_guard<std::mutex> __lock_"
+               << tempCounter_++ << '(';
+          emitExpr(use.args[0].get());
+          out_ << ");\n";
+          break;
+        }
+      }
       emitBlock(stmt);
       --depth_;
       line("}");
@@ -3392,6 +3415,45 @@ void CppEmitter::emitExpr(const Expr* expr) {
       if (callee != nullptr && callee->kind == ExprKind::Name &&
           callee->name == "hardwareConcurrency") {
         out_ << "static_cast<std::int64_t>(std::thread::hardware_concurrency())";
+        return;
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Name &&
+          callee->name == "ScopedLock") {
+        out_ << "std::lock_guard<std::mutex>(";
+        for (std::size_t i = 0; i < expr->args.size(); ++i) {
+          if (i != 0) {
+            out_ << ", ";
+          }
+          emitExpr(expr->args[i].get());
+        }
+        out_ << ')';
+        return;
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Name &&
+          callee->name == "Atomic") {
+        out_ << "std::atomic<std::int64_t>(";
+        for (std::size_t i = 0; i < expr->args.size(); ++i) {
+          if (i != 0) {
+            out_ << ", ";
+          }
+          emitExpr(expr->args[i].get());
+        }
+        out_ << ')';
+        return;
+      }
+      if (callee != nullptr && callee->kind == ExprKind::Member &&
+          callee->lhs != nullptr && callee->lhs->resolvedType != nullptr &&
+          callee->lhs->resolvedType->kind == TypeKind::Atomic &&
+          callee->name == "fetchAdd") {
+        emitExpr(callee->lhs.get());
+        out_ << ".fetch_add(";
+        for (std::size_t i = 0; i < expr->args.size(); ++i) {
+          if (i != 0) {
+            out_ << ", ";
+          }
+          emitExpr(expr->args[i].get());
+        }
+        out_ << ')';
         return;
       }
       if (callee != nullptr && callee->kind == ExprKind::Name) {

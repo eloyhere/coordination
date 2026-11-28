@@ -1,0 +1,35 @@
+// @Lock(mutex) { ... } is a block-scoped RAII lock: entering the block locks,
+// leaving it (including return/break) unlocks.
+class Counter {
+public:
+    Mutex mutex;
+    integer value;
+
+    Counter() {
+        value = 0;
+    }
+
+    void add(integer amount) {
+        @Lock(mutex) {
+            value = value + amount;
+        }
+    }
+
+    integer get() {
+        @Lock(mutex) {
+            return value;
+        }
+    }
+}
+
+integer main() {
+    @Share Counter counter = Counter();
+
+    Thread first = Thread([counter](): void -> { counter.add(1); });
+    Thread second = Thread([counter](): void -> { counter.add(1); });
+    first.join();
+    second.join();
+
+    print(counter.get());
+    return 0;
+}
