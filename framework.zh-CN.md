@@ -321,7 +321,7 @@ class Service {
 - 只读、只增（完整规则见 §4.7）：应用不会覆盖/替换/修改先前注解，不能修改目标结构，处理器只能生成新的独立声明；默认同一目标上同类型注解只能出现一次，`@Repeatable` 才可重复。
 - 注解默认只存在于编译期，不能作为运行期字段/参数类型（`E2009`）；被 `@Retention` 标注的注解才物化为运行期只读元数据表与生成逻辑。处理器可调用唯一指令原语 `line(file, line)` 设置生成代码的 `#line` 映射。
 - 内建注解名（编译器识别，用户不能重定义同名内建）：`@Result`、`@Expect`、`@Invocation`、`@Proxy`、`@Get`、`@Set`、`@Destructure`、`@Construct`、`@Constructure`、`@Has`、`@Delete`、`@Keys`、`@Describe`、`@Call`、`@Copy`、`@Native`、`@FunctionalInterface`（已弃用）、`@Unique`、`@Share`、`@Weak`、`@Optional`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power`、`@Lock`、`@ReadOnly`、`@Unsafe`、`@Safe`、`@Test`、`@Bench`。`@Wrap` 已移出声明并标为 deferred；`@Processor` 已删除。
-- **目标修正**：`@Optional`、`@Unique`、`@Share`、`@Weak`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power` 是 `@Target(type)` 注解，附着在局部变量/字段/参数/返回值位置的类型表达式上，而不是声明本身；`@Constructure` 是 `@Target(constructor)`。`@Native` 只允许 class/function/method（不再允许 `variable`）。其它注解保持原有的声明目标。
+- **目标修正**：`@Optional`、`@Unique`、`@Share`、`@Weak`、`@Signed`、`@Unsigned`、`@Length`、`@Radix`、`@Power` 是 `@Target(type)` 注解，附着在局部变量/字段/参数/返回值位置的类型表达式上，而不是声明本身；`@Constructure` 是 `@Target(constructor)`。`@Native` 作用于 class 与自由 function；`@Native` class 的成员隐式为 native，不能再写 `@Native`（显式标在 method 上报 `E2113`）。其它注解保持原有的声明目标。
 - **分层原则**：元注解只有 6 个，只在 C++ 端实现；其余注解全部是标准库里的普通 Coo 声明（`lib/standard/annotations.coo`），按节组织（Meta / Processor interfaces / Proxy traps / Value protocols / Ownership-representation / Scope-capability / Native / Tooling）。编译器只保留按名字识别的语义 hook（如 `@Result` 的返回包装、`@Unsigned` 的存储映射），不维护第二套内建注解表。`Descriptor`/`Reflection` 是该文件中的普通类，`Description`/`Reflector<T>` 由编译器特殊处理。
 - `@Native(file: string, abi: "c" | "c++" = "c", symbol: string = 声明名)`：标注无 body 的 function 或无 body 的 class，只声明头文件与 ABI。编译器、target、flags 与链接输入来自项目清单 `[build]`/`[toolchain.<target>]`/`[native]`；`coorc` 用配置的 `cxx` 生成并编译 `extern "C"` bridge，再链接声明的 native objects/libs（见 §7.4）。旧的 `@Native("symbol")` 形式报 `E2114`。没有运行期 FFI/dlopen；声明不引入 Scope，也不参与运行期反射。
 
@@ -455,7 +455,7 @@ Function<integer, integer> original =
 | 未列出变量 | 写捕获列表时，未列出的外层变量不可见，与 C++ 一致（`E2087`） |
 | 捕获校验 | 未知名字、重复捕获、默认捕获位置/重复、混用 `[=, x]`/`[&, &x]` 报 `E2087` |
 | 目标类型 | 函数式接口（恰好一个抽象方法）、函数指针 `(A,B) -> R`、方法引用，或等价的后续可调用类型 |
-| 函数式接口目标 | `@FunctionalInterface` 且恰好一个抽象方法的接口降为等价函数类型：`Function<A,R>` 等价 `(A) -> R`，`Consumer<T>` 等价 `(T) -> void`，`Predicate<T>` 等价 `(T) -> boolean`，`Supplier<T>` 等价 `() -> T`，`BiFunction<A,B,R>` 等价 `(A,B) -> R`。lambda 与方法引用按抽象方法签名检查，`.apply`/`.accept`/`.test`/`.get` 调用该值。`lib/standard/utility.coo` 声明这些接口。持有类实现的具名接口值 ⏳：v0 中类不能 `implements` 函数式接口（`E2004`），类型实参数量错误报 `E2089` |
+| 函数式接口目标 | 已弃用的 `@FunctionalInterface` 且恰好一个抽象方法的接口降为等价函数类型：`Function<A,R>` 等价 `(A) -> R`，`Consumer<T>` 等价 `(T) -> void`，`Predicate<T>` 等价 `(T) -> boolean`，`Supplier<T>` 等价 `() -> T`，`BiFunction<A,B,R>` 等价 `(A,B) -> R`。lambda 与方法引用按抽象方法签名检查，`.apply`/`.accept`/`.test`/`.get` 调用该值。`lib/standard/utility.coo` 声明这些接口。持有类实现的具名接口值 ⏳：v0 中类不能 `implements` 函数式接口（`E2004`），类型实参数量错误报 `E2089` |
 | 函数指针目标 | 必须无捕获：只能 `[]`，或省略捕获列表且不引用任何外部变量 |
 | 类型检查 | 参数类型、返回类型必须与目标类型兼容；返回类型可协变；具体规则按泛型可赋值检查 |
 | `this` | 省略捕获列表时按值复制 `this`；显式捕获时必须写 `[this]` 才能访问成员；捕获 `this` 不能转函数指针 |
@@ -464,7 +464,7 @@ Function<integer, integer> original =
 | 泛型 | lambda 自身不声明类型参数；目标类型实例化决定参数/返回类型 |
 | 方法引用 | `Type::staticMethod` 生成函数值；`object::method` 生成绑定接收者的函数值，接收者按引用借用并遵循与按引用闭包相同的逃逸规则（`E2039`）。未绑定 `Type::instanceMethod` ⏳。 |
 
-lambda 的“值”只能通过目标类型使用：赋值、传参、返回、存容器前必须先确定目标类型。目标为函数式接口时生成闭包对象；目标为函数指针时生成无捕获的函数 thunk；方法引用同理。函数式接口由 `utility` 提供：`Function<T,R>`、`Consumer<T>`、`Supplier<T>`、`Predicate<T>`、`BiFunction<A,B,R>`。`@FunctionalInterface` 可选标注，编译器检查“恰好一个抽象方法”。lambda 编译为生成类/闭包对象，捕获值存在字段中；与普通接口实现一样参与单态化，不引入运行期元数据。实现状态：🚧。已实现：函数类型目标 `(A) -> R`、表达式/块体、隐式与显式捕获列表（`[]`、`[=]`、`[&]`、`[x]`、`[&x]`、`[this]`）、省略捕获列表的可变按值副本、捕获列表校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、变量初始化/赋值、调用、lambda 实参与返回、静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用、返回函数值的链式调用，以及 `@FunctionalInterface` 目标降为函数值（泛型实参替换、接口方法调用形式；`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction`）。未实现：具名函数式接口值/类实现、未绑定实例方法引用、函数指针 thunk 转换、跨线程闭包逃逸、`this` 生命周期检查。
+lambda 的“值”只能通过目标类型使用：赋值、传参、返回、存容器前必须先确定目标类型。目标为函数式接口时降为等价函数类型；目标为函数指针时生成无捕获的函数 thunk；方法引用同理。函数式接口由 `utility` 提供：`Function<T,R>`、`Consumer<T>`、`Supplier<T>`、`Predicate<T>`、`BiFunction<A,B,R>`。`@FunctionalInterface` 是已弃用兼容标记，用于选择唯一抽象方法，不承诺具名对象。lambda 降为函数值（无捕获时用函数指针/thunk，需要时生成闭包）；不合成具名接口对象，也不引入运行期元数据。实现状态：🚧。已实现：函数类型目标 `(A) -> R`、表达式/块体、隐式与显式捕获列表（`[]`、`[=]`、`[&]`、`[x]`、`[&x]`、`[this]`）、省略捕获列表的可变按值副本、捕获列表校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、变量初始化/赋值、调用、lambda 实参与返回、静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用、返回函数值的链式调用，以及 `@FunctionalInterface` 目标降为函数值（泛型实参替换、接口方法调用形式；`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction`）。未实现：具名函数式接口值/类实现、未绑定实例方法引用、函数指针 thunk 转换、跨线程闭包逃逸、`this` 生命周期检查。
 
 #### 4.3.3 控制流与模式匹配
 
@@ -542,7 +542,7 @@ public:
 - **`ScopedLock`**：内建 RAII 类型，降为 `std::lock_guard<std::mutex>`，由具名 `Mutex` 左值构造：`ScopedLock guard = ScopedLock(mutex);`。进入声明时加锁，离开作用域（含 `return`/`break`/`continue`）自动解锁。不可拷贝/赋值（`E2092`），必须就地初始化，且仅支持局部变量（字段/参数/返回位置拒绝）。
 - **`Atomic`**：内建 `std::atomic<std::int64_t>`，由 `integer` 初值构造：`Atomic count = Atomic(0);`。支持 `load()` 返回 `integer`、`store(integer)`、`fetchAdd(integer)`/`fetchSub(integer)`（返回操作前的值）、`exchange(integer)`（返回旧值）与 `compareExchange(expected, desired)` 返回 `boolean`（值等于 `expected` 并被替换为 `desired` 时为 true；`expected` 按值传入且不会被更新）。所有操作固定 **seq_cst**，没有内存序参数。`Atomic` 不可拷贝（`E2092`），可作局部变量或类字段；参数/返回位置 ⏳。没有泛型 `Atomic<T>`、没有浮点/指针原子、没有 `condition_variable`。
 - **`@Lock(Exclusive, mutex, [captures]) { ... }`**：带捕获能力列表的块注解。第一个参数是字面量模式 `Exclusive`（其它模式 ⏳），第二个是具名 `Mutex` 左值（`Name`/`Member`），可选的第三个是捕获列表。捕获是**能力声明**而非引用：
-  - `[x]` 复制值，只允许 primitive/string/enumerate；class/container/pointer 的值捕获报 `E2094`（浅拷贝会共享 `@Share`/指针字段，且暂无 `@Copy`）。对 `[x]` 的写入只改块内副本。
+  - `[x]` 复制值，primitive/string/enumerate 直接复制；class 值要求 `@Copy(Deep)`（否则 `E2094`）；container/pointer 被拒绝，因为浅拷贝会共享 `@Share`/指针状态。对 `[x]` 的写入只改块内副本。
   - `[&x]` 可变借用：允许字段/下标写入与修改方法调用。
   - `[const&x]` 只读借用：写报 `E2094`；只能调用标了 `@ReadOnly` 的方法，未标注/修改方法在 `const&` 下报 `E2094`。只分析直接调用（无别名分析），经由其它表达式到达的方法不检查。
   - 未捕获的外层对象被写报 `E2094`；块内新声明的局部变量可正常写。对**未捕获** class 对象的方法调用，除 `@ReadOnly` 外保守拒绝。`[&x]` 调用的方法所产生的全局副作用在 v0 不做效果分析（只检查直接写/调用）。
@@ -694,7 +694,7 @@ JPA cascade 映射：
 | `Default(expr)` | 用 `expr` 作为回退值；必须可赋给目标类型/pointee | 类型不符 `E2005` |
 
 - `@Optional` 是 `@Target(type)` 注解，应用在类型 `T*`、`@Unique T`、`@Share T` 上（如 `@Optional integer*`、`@Optional @Unique Box`）。v0 中普通 `@Optional Class` 仅描述符场景，**不承诺运行期可空**；默认策略是 `Error`。
-- **v0 覆盖范围**：已验证的 policy 执行覆盖 **局部变量** `T*`/`@Unique`/`@Share`（直接解引用、成员访问、隐式转非空、局部 Optional 解构）、**参数与字段**、收窄、`@Proxy(handler, policy)` 的 `Skip`/`Abort`/`Error` 解构路径，以及静态/runtime `@Construct`/`@Destructure` 钩子。字段/参数/返回值上的 `@Optional` 已解析和校验，但完整 policy 执行仍不完整 🚧；`@Proxy` 的 `Default(expr)` 构造/解构、runtime handler 构造前钩子、任意非默认构造类的 `Skip` 默认值也仍属 🚧。
+- **v0 覆盖范围**：已验证的 policy 执行覆盖 **局部变量** `T*`/`@Unique`/`@Share`（直接解引用、成员访问、隐式转非空、局部 Optional 解构）、**参数/字段/返回值上的基础 `Skip`/`Default`**（`coord_e2e_optional_params`/`_fields`/`_return`）、收窄、`@Proxy(handler, policy)` 的 `Skip`/`Abort`/`Error` 解构路径，以及静态/runtime `@Construct`/`@Destructure` 钩子。剩余 🚧：每个位置的四策略完整矩阵、`@Proxy` 的 `Default(expr)` 构造/解构、runtime handler 构造前钩子、任意非默认构造类的 `Skip` 默认值。
 - `@Proxy(handler, policy)` 为代理对象配置同一套四策略；不写 policy 时默认 `Skip`。`@Proxy` 策略同样作用于构造与解构路径（§4.8.1、§4.8.2）。
 - **直接访问**（Optional）指：`*p`、`p.field`、`p.method()`，以及把 optional 值赋给非 optional 变量/参数（隐式转非空）。
 - **收窄**：`if (p != null)`、`if (p.isPresent())` 的对应分支内视为已收窄；`if (p == null)` / `if (p.isEmpty())` 的 **else 分支**同理。收窄后访问不受 `Error` 策略限制。
@@ -1262,7 +1262,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **214 项**：`coord_unit` 加 213 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、`fix`（默认/显式 Power、integer/float 提升、radix 2/10/3、目标注解转换、除法目标覆盖、8/16/32/64/128 宽度、128 位字面量/算术/打印、同形状复制与结果加宽、全部运算符、`E2100`–`E2111` 负例）、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、AnnotationProcessor 生成声明与处理器契约、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为注解处理器切片 `coord_e2e_annotation_processor`、`coord_e2e_annotation_processor_class_error`、`coord_e2e_annotation_processor_missing_process_error`、`coord_e2e_annotation_processor_signature_error`、`coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_fix`、`coord_e2e_fix_radix`、`coord_e2e_fix_power_error`、`coord_e2e_fix_conversion`、`coord_e2e_fix_operators`、`coord_e2e_fix_division_target`、`coord_e2e_fix_lengths`、`coord_e2e_fix_wide_product`、`coord_e2e_fix_conversion_error`、`coord_e2e_fix_bitwise_error`、`coord_e2e_fix_scale_error`、`coord_e2e_fix128_operators`、`coord_e2e_fix128_integer`、`coord_e2e_fix128_conversion`、`coord_e2e_fix128_overflow`、`coord_e2e_fix128_divzero`、`coord_e2e_fix128_literal_error`、`coord_e2e_fix_copy`、`coord_e2e_fix_container_error`、`coord_e2e_radix`、`coord_e2e_radix_error`、`coord_e2e_radix_zero_error`，以及 lambda 闭包切片 `coord_e2e_lambda_capture`/`_escape`/`_escape_scope`/`_unlisted`/`_readonly`/`_this`，以及控制流切片 `coord_e2e_match_patterns`、`coord_e2e_if_expression`、`coord_e2e_match_missing`、`coord_e2e_match_no_wildcard`、`coord_e2e_match_bad_pattern`、`coord_e2e_if_expression_type_error`，以及函数值切片 `coord_e2e_method_ref`、`coord_e2e_method_ref_escape`、`coord_e2e_method_ref_unbound`，以及函数式接口切片 `coord_e2e_functional_interface`、`coord_e2e_functional_interface_error`、`coord_e2e_functional_interface_arity_error`、`coord_e2e_functional_interface_methods_error`，以及线程切片 `coord_e2e_thread`、`coord_e2e_thread_capture_error`、`coord_e2e_thread_this_error`、`coord_e2e_thread_copy_error`，以及 Mutex 切片 `coord_e2e_mutex`、`coord_e2e_mutex_copy_error`、`coord_e2e_mutex_assign_error`，以及 ScopedLock/Atomic/@Lock 切片 `coord_e2e_atomic`、`coord_e2e_scopedlock_copy_error`、`coord_e2e_atomic_copy_error`、`coord_e2e_atomic_assign_error`、`coord_e2e_lock_annotation`、`coord_e2e_lock_annotation_error`，以及 ScopedThread/Atomic-ops 切片 `coord_e2e_scoped_thread`、`coord_e2e_atomic_ops`、`coord_e2e_scopedthread_copy_error`、`coord_e2e_scopedthread_assign_error`、`coord_e2e_scopedthread_capture_error`、`coord_e2e_scopedthread_this_error`，以及 @Lock 能力切片 `coord_e2e_lock_capture`、`coord_e2e_lock_capture_uncaptured_write`、`coord_e2e_lock_capture_const_write`、`coord_e2e_lock_capture_readonly_method`、`coord_e2e_lock_capture_value_class`、`coord_e2e_lock_capture_escape`、`coord_e2e_lock_legacy_error`、`coord_e2e_lock_nested_error`、`coord_e2e_lock_capture_uncaptured_call`、`coord_e2e_lock_capture_value_return`，以及 @Copy 切片 `coord_e2e_copy_deep`、`coord_e2e_copy_deep_unique`、`coord_e2e_copy_shallow`、`coord_e2e_copy_deep_share_error`、`coord_e2e_copy_shallow_unique_error`、`coord_e2e_copy_explicit_required_error`、`coord_e2e_copy_bad_mode_error`、`coord_e2e_lock_capture_deep`、`coord_e2e_lock_capture_shallow_error`、`coord_e2e_copy_deep_unique_chain`、`coord_e2e_copy_deep_nested_error`、`coord_e2e_copy_explicit_shell_error`，以及 Safe/Unsafe 切片 `coord_e2e_unsafe_pointer_error`，以及 native bridge 切片 `coord_e2e_native_config`（fail-closed 工具链矩阵）、`coord_e2e_native_annotations`（`@Native(file:, abi:, symbol:)`、旧形式 `E2114`、move-only class `E2119`）、`coord_e2e_native_c_functions`（C 函数 + string 经项目配置 object）、`coord_e2e_native_cpp_class`（不透明句柄、构造/方法重载、析构顺序）、`coord_e2e_native_cross`（外部 target `--emit-cpp`，不回退宿主编译器）与 `coord_e2e_native_unsafe`（迁移后 native 调用的 `E2096` 门禁）。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 在 Windows 注册 **214 项**（1 个单元测试 + 213 个 e2e）；Linux 上当前只注册 **8 项**（`coord_unit`、`coord_e2e_packages` 与 6 个 native bridge 测试）。单元测试覆盖词法/解析、Scope/RAII、编译期求值、代码生成、Optional/所有权、proxy/反射、`fix`、lambda/match、线程/同步/复制、注解处理器、包依赖图、outline/hint 与 `@Test`。e2e 覆盖示例与 fixtures：编译/运行、负例、确定性与增量、包管理器/镜像/注册表、注解处理器、Optional/`@Constructure`/`@Destructure`、代码块保留、`fix`/radix、lambda/match、函数值/函数式接口、thread/mutex/atomic/lock、copy、Safe/Unsafe 与 native bridge。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1404,14 +1404,19 @@ interface Ord<T> {
     int compare(const T& other) const;   // <0, 0, >0
 }
 
+@FunctionalInterface
 interface Function<T, R> { R apply(T value); }
+@FunctionalInterface
 interface Consumer<T> { void accept(T value); }
+@FunctionalInterface
 interface Supplier<T> { T get(); }
+@FunctionalInterface
 interface Predicate<T> { bool test(T value); }
+@FunctionalInterface
 interface BiFunction<A, B, R> { R apply(A first, B second); }
 ```
 
-- `Function`/`Consumer`/`Supplier`/`Predicate`/`BiFunction` 是函数式接口，lambda 的目标类型；`@FunctionalInterface` 可选标注，编译器检查恰好一个抽象方法。
+- `Function`/`Consumer`/`Supplier`/`Predicate`/`BiFunction` 在 `lib/standard/utility.coo` 中是 `@FunctionalInterface` 声明。v0 将它们降为等价函数类型（替换泛型实参）；`.apply`/`.accept`/`.test`/`.get` 是调用形式。具名接口值与类实现不支持（`E2004`）；类型实参数量错误或抽象方法数不为 1 报 `E2089`。`@FunctionalInterface` 是这些声明使用的已弃用兼容标记。
 - `T?` 是 `T | void`；`next()` 返回 `void` 表示结束。
 - `for x in xs` 展开为 `iterator()` + `next()` 循环，不要求容器暴露下标。
 - `Hash`/`Eq` 用于 `UnorderedMap`/`UnorderedSet`；`Ord` 用于 `OrderedMap`/`OrderedSet` 与排序。用户 class 可显式实现这些接口；v0 先手写，后续可用注解派生。
@@ -2068,7 +2073,8 @@ coorc config list|get|set
 | `E2090` | Thread/ScopedThread 规则：入口调用/签名错误、按引用或捕获 `this`、调用期借用的函数值、拷贝/赋值线程值、`hardwareConcurrency()` 带参数 |
 | `E2091` | `Mutex` 值不能拷贝或赋值 |
 | `E2092` | `ScopedLock`/`Atomic` 值不能拷贝或赋值，或 `ScopedLock` 未用 `ScopedLock(mutex)` 就地初始化 |
-| `E2096` | `@Unsafe` 违规：safe 作用域中解引用原始指针，或调用 `@Unsafe`/`@Native` 声明/方法 |\n| `E2095` | `@Copy` 错误：缺失/非法模式、`@Copy(Deep)` 含 `@Share`/指针/线程/mutex 字段或 shallow 字段、`@Copy(Shallow)` 含 `@Unique`、含 owning 字段的类未显式 `@Copy` 就被复制 |
+| `E2096` | `@Unsafe` 违规：safe 作用域中解引用原始指针，或调用 `@Unsafe`/`@Native` 声明/方法 |
+| `E2095` | `@Copy` 错误：缺失/非法模式、`@Copy(Deep)` 含 `@Share`/指针/线程/mutex 字段或 shallow 字段、`@Copy(Shallow)` 含 `@Unique`、含 owning 字段的类未显式 `@Copy` 就被复制 |
 | `E2094` | `@Lock` 能力错误：旧语法、非 Mutex/非具名 mutex 参数、写未捕获或 `const&` 对象、经 `const&` 调用非 `@ReadOnly` 方法、class/container/pointer 的值捕获 |
 | `E2080`–`E2086` | 规划中的 Scope 专用诊断（不可见、同域冲突、歧义、声明点前使用、import 冲突、私有访问、初始化环） |
 | `E3001` | 编译期求值错误（fuel 耗尽、递归超限、除零等） |
@@ -2132,17 +2138,18 @@ coorc config list|get|set
 | 整数运算检查 | ✅ | `+ - * / %`、`++/--`、`+= -= *= /= %=` 使用溢出/除零 helper，覆盖 64 位与 128 位；`<<`/`>>` 对 8/16/32/64/128 位使用范围/溢出 helper；`coord_e2e_division`、`coord_e2e_overflow`、`coord_e2e_compound`、`coord_e2e_shift`、`coord_e2e_share_cycle`、`coord_e2e_share_cycle_ctor` |
 | `[]` 边界检查 | ✅ | `Array`/固定数组与 `ArrayView` 走 `checkedIndex`/`checkedIndexView`，越界终止；裸指针索引仍为 unsafe；`coord_e2e_bounds` |
 | `@Destructure` 目标类方法 + ProxyHandler trap | ✅ | `coord_e2e_destructure_annotation`；逐绑定 hook |
-| 代码块保留（`@Retention(Compile/Runtime)` 块） | ✅ | `examples/retention_block.coo` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`；`Invocation`/`enum` 块报 `E2044` |
-| 返回值上的 `@Optional`；`@Proxy` 的 `Default(expr)` 构造/解构；runtime 构造前钩子；任意非默认构造类的 `Skip` 默认值 | 🚧 | 参数与字段已实现；返回值策略及部分构造/解构回退仍不完整 |
+| 代码块保留（`@Retention(Compile/Runtime)` 块） | ✅ | `examples/retention_block.coo` 与 `coord_e2e_retention_block`；`Invocation`/`enum` 块报 `E2044` |
+| `@Optional` 参数/字段/返回值（基础 `Skip`/`Default`） | ✅ | `coord_e2e_optional_params`、`_fields`、`_return`；`Error`/`Abort` 走同一代理路径，但未在这些位置单独做 e2e |
+| 所有位置的完整 `@Optional` 策略矩阵；`@Proxy` 的 `Default(expr)` 构造/解构；runtime 构造前钩子；任意非默认构造类的 `Skip` 默认值 | 🚧 | 剩余 policy/回退边界 |
 | `@Has/@Delete/@Keys/@Describe` trap | ⏳ | 仅声明，未展开 |
 | ASan/UBSan + 解析器/编译器 fuzz | ✅ | `COORD_SANITIZE`、`COORD_FUZZ`、`linux-sanitize`；解析器 + 编译器 harness；诊断上限 256 |
 | 交叉编译 `--target`/`--sysroot` | 🚧 | native 项目按 target/工具链配置构建；外部 target 可用 `--emit-cpp` compile-only（`coord_e2e_native_cross`）；链接外部 target 需要已安装的交叉工具链，MSVC 不能交叉编译 |
 | workspace / feature / 签名 / git 依赖 | ⏳ | workspace `members` 只解析 |
 | Thread 模型 | 🚧 | 内建 move-only `Thread`，由 `() -> void` 构造，支持 `join()`/`detach()`/`joinable()`/`hardwareConcurrency()`，跨线程捕获检查 `E2090`；内建不可拷贝 `Mutex`，手动 `lock()`/`unlock()`/`tryLock()`（`E2091`、`coord_e2e_mutex`）、RAII `ScopedLock`（`E2092`）、`ScopedThread`/`std::jthread` 自动 join（`coord_e2e_scoped_thread`）、seq_cst `Atomic` 的 `load`/`store`/`fetchAdd`/`fetchSub`/`exchange`/`compareExchange`（`coord_e2e_atomic`、`coord_e2e_atomic_ops`）与 `@Lock(Exclusive, mutex, [captures])` 块注解（值/可变/只读捕获、`@ReadOnly` 方法效果与写集检查，`E2094`、`coord_e2e_lock_capture`）、显式 `@Copy(Deep|Shallow)` 与 `@Unique` 链深拷贝（`E2095`、`coord_e2e_copy_deep`）；数据竞争安全、其它类型 atomic、condition variable、scoped thread 与非局部位置 ⏳ |
 | lambda / `if` 表达式 / 完整模式匹配 | 🚧 | lambda 子集：函数类型目标、表达式/块体、隐式/显式捕获（`E2087` 捕获校验、`E2088` 按值只读）、按引用逃逸检查（`E2039`）、赋值/实参/返回、静态/绑定方法引用与链式调用；`@FunctionalInterface` 目标降为函数值并做泛型替换（`E2089`，`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction`，测试 `coord_e2e_functional_interface*`）；具名函数式接口值/类实现、未绑定实例引用、函数指针 thunk、跨线程逃逸 ⏳；测试 `coord_e2e_lambda*`、`coord_e2e_method_ref*`。`if` 表达式（表达式分支）已可用（`coord_e2e_if_expression`；块分支 ⏳）。`match` 支持常量/`|`/范围/绑定/guard 与枚举、布尔、标量穷尽性（`coord_e2e_match_patterns`，负例 `_missing`/`_no_wildcard`/`_bad_pattern`）；类型模式与类解构 ⏳ |
+| Safe/Unsafe | 🚧 | 支持 `@Safe`/`@Unsafe` 作用域、向下传播与块覆盖（`E2096`）；v0 强制原始指针解引用与 FFI/`@Native` 调用，指针算术/unsafe cast 已记录但尚未完全强制 |
 | `@Native` / FFI bridge | ✅/🚧 | `@Native(file:, abi:, symbol:)` 只声明头文件/ABI；`[build].target`、`[toolchain.<target>].cc/cxx`（可带 `sysroot`/`cflags`/`cxxflags`/`ldflags`）与 `[native].include/objects/libraries` 驱动构建。生成 `extern "C"` bridge：C 函数包装、`string` 以 `const char*` 传递、C++ class 通过 move-only 不透明句柄（`new (std::nothrow)`/`delete`、构造/析构/方法包装、无 `try`/`catch`）。`E2112`–`E2119` fail closed；旧 `@Native("symbol")` 为 `E2114`。测试：`coord_e2e_native_config`、`coord_e2e_native_annotations`、`coord_e2e_native_c_functions`、`coord_e2e_native_cpp_class`、`coord_e2e_native_cross`、`coord_e2e_native_unsafe`。遗留：per-object target 校验、Result proxy 错误映射、回调、交叉工具链链接验证、单文件 native 使用 |
 | `@Copy` / `@Wrap` / `@FunctionalInterface` 语义 | 🚧 | `@Copy(Deep/Shallow)` 已实现；`@Wrap` 标 deferred（声明已移除）；`@FunctionalInterface` 已弃用，等 Lambda 模块的结构化 `operator()`；`AnnotationProcessor` 层级已实现 |
-| `Weak<T>` / 共享环检测 | ⏳ | 设计与映射已定 |
 | `is` / `new` / `delete` / `unsafe` / `extern` | ⏳ | 保留字，未实现 |
 | `operator` / `where` | 🚧 | 可解析，完整语义待做 |
 | `T?` | ⏳ | 未解析 |
@@ -2153,9 +2160,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器、注解处理器层级、lambda/match/线程/同步/复制/安全等切片、静态定点（`fix`/`@Power`/`@Radix`/`@Length`）以及项目配置 native bridge 切片落地后的 214 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器、注解处理器层级、lambda/match/线程/同步/复制/安全等切片、静态定点（`fix`/`@Power`/`@Radix`/`@Length`）以及项目配置 native bridge 切片落地后的 Windows 214 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-28）**：`ctest` 注册 **214 项**，Windows 全套 **214/214 通过**；Linux（WSL Ubuntu，g++ 15）上注册的 8 项（`coord_unit`、`coord_e2e_packages` 与 6 个 native bridge 测试）同样全部通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表、静态定点（`fix`/`@Power`/`@Radix`/`@Length`，含有符号 128 位 raw）与目标注解转换、同形状复制已具备。
+**基线（2026-11-28）**：Windows 上 `ctest` 注册 **214 项**，全套 **214/214 通过**；Linux（WSL Ubuntu，g++ 15）上当前只注册 8 项（`coord_unit`、`coord_e2e_packages` 与 6 个 native bridge 测试），同样全部通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表、静态定点（`fix`/`@Power`/`@Radix`/`@Length`，含有符号 128 位 raw）与目标注解转换、同形状复制已具备。
 
 **最终验收**：
 

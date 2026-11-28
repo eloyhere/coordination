@@ -6,7 +6,7 @@ Coordination 是面向系统编程的静态类型语言：**没有宏**，编译
 
 - 源文件 `.coo`；模块接口 `.coox`；编译器 `coorc`。
 - 包清单 `coordination.toml` / `coord.pkg`；锁文件 `coord.lock`。
-- 当前基线：**214 项 CTest**，Windows 全套 **214/214 通过**；Linux（WSL Ubuntu，g++ 15）上注册的 8 项（`coord_unit`、`coord_e2e_packages` 与 6 个 native bridge 测试）同样全部通过。
+- 当前基线：**Windows 214 项 CTest，214/214 通过**；Linux（WSL Ubuntu，g++ 15）上当前只注册 8 项（`coord_unit`、`coord_e2e_packages` 与 6 个 native bridge 测试），同样全部通过。
 - 语言与工具链仍在 M3 收尾；规范以 [framework.zh-CN.md](framework.zh-CN.md) / [framework.md](framework.md) 为准，本文只负责“怎么用”。
 
 ## 1 30 秒跑起来
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows 使用 `windows-base` 派生 preset（Ninja + cl）；Linux/macOS 使用 `linux-release`/`macos-release`/`linux-debug`。
-- `ctest` 注册 **214 项**（1 个单元测试 + 213 个 e2e）；`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
+- Windows 上 `ctest` 注册 **214 项**（1 个单元测试 + 213 个 e2e）；Linux 上当前只注册 8 项。`coord_e2e_packages` 不依赖宿主编译器与网络，`coord_e2e_packages_build` 与其它 e2e 需要可用的宿主 C++ 工具链。
 - Sanitizer：`cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` 启用 ASan + UBSan；提供 `linux-sanitize` 预设。若不关心泄漏检查，运行测试时设 `ASAN_OPTIONS=detect_leaks=0`。
 - 解析器/编译器 fuzz：用 Clang 加 `-DCOORD_FUZZ=ON` 构建，见 [tests/fuzz/README.md](tests/fuzz/README.md)。解析器 fuzzer 已发现诊断无限增长问题；编译器 fuzzer 覆盖 Sema/emitter，要求 `Checker` 的生命周期长于 emitter。
 - 修改头文件后必须 `--clean-first`；生成 C++ 可用 `coorc --emit-cpp out\x.cpp file.coo` 保留检查。
@@ -257,7 +257,7 @@ objects = ["native/build/foo.o"]     # 由项目自己的构建系统产出
 libraries = ["m"]                    # 名称（m、user32）或 .a/.lib/.so 路径
 ```
 
-- `@Native(file: "native/include/foo.h", abi: "c" | "c++", symbol: "c_name")` 只声明头文件与 ABI（`symbol` 默认取声明名；class 必须 `abi: "c++"`）。bridge 模型见 §7.7。
+- `@Native(file: "native/include/foo.h", abi: "c" | "c++", symbol: "c_name")` 只声明头文件与 ABI（`symbol` 只用于 function，默认取声明名；class 必须 `abi: "c++"` 且不能带 `symbol`）。bridge 模型见 §7.7。
 - Fail closed：缺 `[build].target`、缺/不完整 `[toolchain.<target>]`、objects/libraries/include 或头文件不存在、命令行 target/flags 与清单冲突都是硬错误（`E2112`–`E2119`）；`coorc` 绝不从 `PATH` 猜编译器、绝不自动下载。单文件使用 `@Native` 报 `E2112`；旧的 `@Native("symbol")` 形式报 `E2114`。
 
 ### 5.2 信任策略与安装
@@ -612,7 +612,7 @@ coorc run .
 | 层 | 职责 |
 | --- | --- |
 | `coordination.toml` | target 三元组、`cc`/`cxx`、sysroot/flags、native include/objects/libraries；编译器信息的唯一来源 |
-| `@Native(file:, abi:, symbol:)` | 一个无函数体 function 或 class 的头文件与 ABI；`symbol` 默认取声明名 |
+| `@Native(file:, abi:, symbol:)` | 无函数体 function 的头文件/ABI；native class 必须 `abi: "c++"` 且不能带 `symbol`；`symbol` 只用于 function，默认取声明名 |
 | 项目构建系统 | 把用户 `.c`/`.cpp` 编译成 objects/libraries（coorc 不做） |
 | 生成的 bridge（`<program>.native.cpp`） | `extern "C"` 包装；C 函数直接调用、字符串以 `const char*`、C++ class 用 move-only 不透明句柄 + 外部 `new (std::nothrow)`/`delete`；无 `try`/`catch`、无异常泄漏 |
 | 生成的主程序 | 调用 bridge 并转换值（null `const char*` → 空字符串，native 句柄 → 值 class） |
@@ -634,14 +634,14 @@ Fail-closed：缺 `[build].target`、缺/不完整 `[toolchain.<target>]`、obje
 
 ## 9 限制与已知问题
 
-- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口目标以函数值子集提供：`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` 降为函数类型（泛型实参替换，`.apply`/`.accept`/`.test`/`.get` 调用形式）；具名接口值与类实现 `@FunctionalInterface` 仍属 ⏳（`E2004`/`E2089`），且 `@FunctionalInterface` 已弃用，等 Lambda 模块（切片 12）结构化 `operator()` 后删除。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 已改为项目配置：`@Native(file:, abi:, symbol:)` 只声明头文件/ABI，`coordination.toml` 的 `[build]`/`[toolchain.<target>]`/`[native]` 提供编译器/target/objects/libraries，`coorc` 生成 `extern "C"` bridge（C 函数包装、`const char*` 字符串、move-only 不透明 C++ class 句柄、无 `try`/`catch`）。旧 `@Native("symbol")` 报 `E2114`，单文件使用报 `E2112`；见 §7.7 与 `examples/native`。`@Copy`/`@Wrap`、`Weak<T>`、`unsafe`/`new`/`delete`/`extern` 仍属 ⏳；`@Wrap` 标 deferred（声明已移除）；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
-- `ProxyPolicy` 的执行主要验证了局部 `T*`/`@Unique`/`@Share` 变量（直接访问、收窄、局部 Optional 解构）与 `@Proxy` 的 `Skip`/`Abort`/`Error` 解构路径。字段/参数/返回值上的 `@Optional` 已解析/校验，但完整 policy 执行仍不完整；`@Proxy` 的 `Default(expr)` 构造/解构、runtime 构造前钩子、任意非默认构造类的 `Skip` 默认值仍属 🚧。
+- `lambda` 子集已可用：函数类型目标、表达式/块体、隐式/显式捕获（`[]`/`[=]`/`[&]`/`[x]`/`[&x]`/`[this]`）、捕获校验（`E2087`）、显式按值捕获只读（`E2088`）、按引用闭包逃逸检查（返回/字段/容器字面量/外层变量，`E2039`）、初始化/赋值、调用、实参与返回；省略捕获列表生成可变按值副本。函数式接口目标以函数值子集提供：`lib/standard/utility.coo` 的 `Function`/`Consumer`/`Predicate`/`Supplier`/`BiFunction` 降为函数类型（泛型实参替换，`.apply`/`.accept`/`.test`/`.get` 调用形式）；具名接口值与类实现 `@FunctionalInterface` 仍属 ⏳（`E2004`/`E2089`），且 `@FunctionalInterface` 已弃用，等 Lambda 模块（切片 12）结构化 `operator()` 后删除。未绑定实例方法引用与函数指针目标仍属 ⏳；跨线程入口捕获已由 `Thread` 检查（`E2090`），其余跨线程借用仍属 ⏳；静态（`Type::method`）与绑定（`object::method`）方法引用、函数类型字段调用与返回函数值的链式调用已可用，绑定接收者遵循按引用逃逸规则。`if` 表达式支持表达式分支（`if (c) a else b` 与 `else if` 链）；块分支 ⏳。`match` 支持常量、范围、`|`、绑定与 guard，并检查枚举/布尔/标量穷尽性；类型模式与类解构模式 ⏳。`@Native`/FFI 已改为项目配置：`@Native(file:, abi:, symbol:)` 只声明头文件/ABI，`coordination.toml` 的 `[build]`/`[toolchain.<target>]`/`[native]` 提供编译器/target/objects/libraries，`coorc` 生成 `extern "C"` bridge（C 函数包装、`const char*` 字符串、move-only 不透明 C++ class 句柄、无 `try`/`catch`）。旧 `@Native("symbol")` 报 `E2114`，单文件使用报 `E2112`；见 §7.7 与 `examples/native`。`@Wrap` 与 `unsafe`/`new`/`delete`/`extern` 仍属 ⏳；`@Copy` 与 `Weak<T>` 已实现；`@Wrap` 标 deferred（声明已移除）；详见 [framework.zh-CN.md](framework.zh-CN.md) §11。
+- `ProxyPolicy` 的执行覆盖局部 `T*`/`@Unique`/`@Share` 变量，以及参数/字段/返回值上的基础 `Skip`/`Default`（`coord_e2e_optional_params`/`_fields`/`_return`），并覆盖 `@Proxy` 的 `Skip`/`Abort`/`Error` 解构。`@Proxy` 的 `Default(expr)` 构造/解构、runtime 构造前钩子、任意非默认构造类的 `Skip` 默认值仍属 🚧。
 - `@Constructure` 类型化/命名构造与 `@Retention(Compile/Runtime)` 代码块已实现基础版；编译期块不能依赖运行期局部状态，代码块上的 `Invocation`/`enum` 报 `E2044`；复杂构造重载消歧仍属 🚧。
 - Atomic v0：内建不可拷贝 `Atomic`，降为 `std::atomic<std::int64_t>`，支持 `load()`、`store(v)`、`fetchAdd(v)`/`fetchSub(v)`（返回操作前的值）、`exchange(v)`（返回旧值）与 `compareExchange(expected, desired)`（值等于 expected 并替换为 desired 时返回 true；expected 不被更新）。所有操作 seq_cst，无内存序参数；没有 `Atomic<T>` 泛型、浮点/指针原子、condition variable 或数据竞争静态分析。支持局部变量与类字段，参数/返回位置 ⏳。拷贝或赋值报 `E2092`。
 - ScopedThread v0：内建 move-only `ScopedThread`，降为 `std::jthread`，析构时自动 join（离开声明块会等待线程结束）。支持 `join()`/`detach()`/`joinable()` 与和 `Thread` 相同的跨线程捕获规则（`E2090`）；不可拷贝/赋值，仅局部变量。没有 `stop_token`/`requestStop`、取消或跨线程异常传播。
 - Safe/Unsafe v0：默认 safe；`@Unsafe` 可标 module（`@Unsafe;`）、class、function、method、constructor、block 并向下传播，`@Safe` 覆盖。`@Unsafe` 只解锁原始指针解引用、指针算术、`@Native`/FFI 调用与 unsafe cast，类型/借用/越界检查仍生效。safe 作用域调用 `@Unsafe`/`@Native` 报 `E2096`；`@Safe` 代码中可写 `@Unsafe { ... }` 审计边界。v0 先强制指针解引用与 FFI 调用。
 - Copy v0：含 `@Unique`/`@Share`/指针字段的类默认不可复制，必须显式 `@Copy(Deep)`（值字段 + 可深拷贝 `@Unique` 链；拒绝 `@Share`/原始指针/引用/环）或 `@Copy(Shallow)`（逐成员拷贝，允许 `@Share` 与原始指针，禁止 `@Unique`）；可深拷贝性与“是否需要显式 @Copy”会递归检查值字段与基类；纯值类保留隐式复制。`@Copy` 错误报 `E2095`；类 `[x]` 锁捕获要求 `@Copy(Deep)`。
-- ScopedLock/@Lock v0：`ScopedLock guard = ScopedLock(mutex);` 是 `std::lock_guard<std::mutex>` 形式的 RAII，由具名 `Mutex` 左值构造并在离开作用域时解锁；不可拷贝（`E2092`）且仅局部变量。`@Lock(Exclusive, mutex, [captures]) { ... }` 是块形式：`[x]` 复制 primitive/string/enum 值（class 值捕获拒绝），`[&x]` 可变借用，`[const&x]` 只读借用且只能调用 `@ReadOnly` 方法；写未捕获/`const&` 对象与能力错误报 `E2094`，捕获逃逸报 `E2039`，旧 `@Lock(mutex)` 语法报 `E2094`。只检查直接写/调用（无别名/数据竞争证明）；未捕获 class 对象只允许 `@ReadOnly` 调用，嵌套 `@Lock` 报 `E2094`，`[x]` 副本可返回、借用捕获不能逃逸（`E2039`）。没有超时、try-lock 或重入检查：同一 mutex 嵌套加锁会死锁。
+- ScopedLock/@Lock v0：`ScopedLock guard = ScopedLock(mutex);` 是 `std::lock_guard<std::mutex>` 形式的 RAII，由具名 `Mutex` 左值构造并在离开作用域时解锁；不可拷贝（`E2092`）且仅局部变量。`@Lock(Exclusive, mutex, [captures]) { ... }` 是块形式：`[x]` 复制 primitive/string/enum 值，class 值要求 `@Copy(Deep)`（否则 `E2094`），`[&x]` 可变借用，`[const&x]` 只读借用且只能调用 `@ReadOnly` 方法；写未捕获/`const&` 对象与能力错误报 `E2094`，捕获逃逸报 `E2039`，旧 `@Lock(mutex)` 语法报 `E2094`。只检查直接写/调用（无别名/数据竞争证明）；未捕获 class 对象只允许 `@ReadOnly` 调用，嵌套 `@Lock` 报 `E2094`，`[x]` 副本可返回、借用捕获不能逃逸（`E2039`）。没有超时、try-lock 或重入检查：同一 mutex 嵌套加锁会死锁。
 - Mutex v0：内建不可拷贝 `Mutex`，降为 `std::mutex`，手动 `lock()`/`unlock()`/`tryLock()`；拷贝或赋值报 `E2091`。没有 RAII guard、没有静态数据竞争分析；忘记 unlock 会阻塞其它线程。`Mutex` 可作局部变量或类字段（含 Mutex 的对象用 `@Share` 共享）；参数/返回值位置 ⏳。
 - Thread v0：内建 move-only `Thread`，由 `() -> void` 入口构造，支持 `join()`/`detach()`/`joinable()`/`hardwareConcurrency()`。入口闭包必须拥有捕获（`[]`、`[=]`、`[x]`、`@Share` 拷贝）；`[&]`、`[&x]`、`[this]` 与调用期借用的函数值报 `E2090`。可 join 的线程必须在析构前 join/detach；共享可变状态不保证无数据竞争，同步原语、scoped thread 与非局部 `Thread` 位置仍属 ⏳。
 - 所有权与 borrow 检查仍是保守子集：`&` 不能返回/存字段/作容器元素；按引用闭包不能返回、存入字段/容器字面量或赋给外层作用域变量（`E2039`），完整跨线程借用与生命周期分析仍待补。函数类型参数按调用期借用处理：返回或存储它们会被拒绝。
