@@ -965,4 +965,13 @@ if(MSVC)
       -DEXPECTED=done
       -DEXPECT_STDERR=W0005
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_share_cycle_ctor
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/share_cycle_ctor.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_share_cycle_ctor
+      -DEXPECTED=done
+      -DEXPECT_STDERR=W0005
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()

@@ -1611,6 +1611,26 @@ void CppEmitter::emitClass(const Decl& decl) {
         }
       }
       out_ << " {\n";
+      for (const Initializer& initializer : member->initializers) {
+        if (initializer.kind != Initializer::Kind::Field ||
+            initializer.args.size() != 1) {
+          continue;
+        }
+        const Decl* field = fieldOf(currentClassDecl_, initializer.name);
+        if (field == nullptr || !field->isShare) {
+          continue;
+        }
+        indent();
+        out_ << "coord_rt::recordShareEdge(this, ";
+        if (initializer.args[0]->kind == ExprKind::NullLit) {
+          out_ << "nullptr";
+        } else {
+          out_ << "coord_rt::shareObjectAddress(";
+          emitExpr(initializer.args[0].get());
+          out_ << ')';
+        }
+        out_ << ");\n";
+      }
       depth_ = 2;
       locals_.clear();
       locals_.emplace_back();
@@ -2041,27 +2061,45 @@ void CppEmitter::emitInitializer(const Expr* expr, int radix) {
 
 void CppEmitter::emitShareEdgeRecord(const Expr* assign) {
   if (assign == nullptr || assign->kind != ExprKind::Assign ||
-      assign->lhs == nullptr || assign->lhs->kind != ExprKind::Member ||
-      assign->lhs->lhs == nullptr || assign->lhs->lhs->resolvedType == nullptr) {
+      assign->lhs == nullptr || assign->rhs == nullptr) {
     return;
   }
-  const Decl* owner = assign->lhs->lhs->resolvedType->decl;
-  const Decl* field = fieldOf(owner, assign->lhs->name);
+  const Decl* field = nullptr;
+  const Expr* owner = nullptr;
+  if (assign->lhs->kind == ExprKind::Member &&
+      assign->lhs->lhs != nullptr &&
+      assign->lhs->lhs->resolvedType != nullptr) {
+    field = fieldOf(assign->lhs->lhs->resolvedType->decl, assign->lhs->name);
+    owner = assign->lhs->lhs.get();
+  } else if (assign->lhs->kind == ExprKind::Name && currentClassDecl_ != nullptr) {
+    field = fieldOf(currentClassDecl_, assign->lhs->name);
+    owner = nullptr;
+  }
   if (field == nullptr || !field->isShare) {
     return;
   }
+  if (assign->rhs->kind != ExprKind::Name &&
+      assign->rhs->kind != ExprKind::Member &&
+      assign->rhs->kind != ExprKind::This &&
+      assign->rhs->kind != ExprKind::NullLit) {
+    return;
+  }
   indent();
-  out_ << "coord_rt::recordShareEdge(coord_rt::shareObjectAddress(";
-  emitExpr(assign->lhs->lhs.get());
-  out_ << "), ";
-  if (assign->rhs != nullptr && assign->rhs->kind == ExprKind::NullLit) {
+  out_ << "coord_rt::recordShareEdge(";
+  if (owner != nullptr) {
+    out_ << "coord_rt::shareObjectAddress(";
+    emitExpr(owner);
+    out_ << ')';
+  } else {
+    out_ << "this";
+  }
+  out_ << ", ";
+  if (assign->rhs->kind == ExprKind::NullLit) {
     out_ << "nullptr";
-  } else if (assign->rhs != nullptr) {
+  } else {
     out_ << "coord_rt::shareObjectAddress(";
     emitExpr(assign->rhs.get());
     out_ << ')';
-  } else {
-    out_ << "nullptr";
   }
   out_ << ");\n";
 }

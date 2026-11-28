@@ -1,0 +1,18 @@
+class Node {
+public:
+    @Optional @Share Node next = null;
+
+    Node() {}
+
+    Node(@Share Node link) {
+        next = link;
+    }
+}
+
+integer main() {
+    @Share Node first = Node();
+    @Share Node second = Node(first);
+    first.next = second;
+    print("done");
+    return 0;
+}
