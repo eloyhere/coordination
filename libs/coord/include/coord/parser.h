@@ -76,6 +76,8 @@ private:
   ExprPtr parsePostfix();
   ExprPtr parsePrimary();
   ExprPtr parseObjectLiteral();
+  [[nodiscard]] bool looksLikeLambda() const;
+  ExprPtr parseLambda();
   std::vector<ExprPtr> parseArguments();
 
   static int binaryPrecedence(TokKind kind);

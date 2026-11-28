@@ -6,7 +6,7 @@ Coordination is a statically typed systems language with **no macros**: compile-
 
 - Source files `.coo`; module interfaces `.coox`; compiler `coorc`.
 - Package manifests `coordination.toml` / `coord.pkg`; lockfile `coord.lock`.
-- Current baseline: **125 CTest cases**, with **125/125 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
+- Current baseline: **126 CTest cases**, with **126/126 passing on Windows**; on Linux, `coord_unit` + `coord_e2e_packages` and the new examples pass with g++.
 - The language and toolchain are wrapping up M3; [framework.md](framework.md) / [framework.zh-CN.md](framework.zh-CN.md) are authoritative, while this document focuses on usage.
 
 ## 1 Run It in 30 Seconds
@@ -99,7 +99,7 @@ ctest --test-dir out/build/linux-release --output-on-failure
 ```
 
 - Windows uses presets derived from `windows-base` (Ninja + cl); Linux/macOS use `linux-release`/`macos-release`/`linux-debug`.
-- `ctest` registers **125 tests** (1 unit test plus 124 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
+- `ctest` registers **126 tests** (1 unit test plus 125 e2e tests); `coord_e2e_packages` needs neither a host C++ compiler nor network, while `coord_e2e_packages_build` and the other e2e tests need a working host C++ toolchain.
 - Sanitizers: `cmake -S . -B out/build/asan -G Ninja -DCOORD_SANITIZE=ON` builds with ASan + UBSan; `linux-sanitize` preset is provided. Run tests with `ASAN_OPTIONS=detect_leaks=0` when leak checks are not relevant.
 - Parser/compiler fuzzing: build with Clang and `-DCOORD_FUZZ=ON`; see [tests/fuzz/README.md](tests/fuzz/README.md). The parser fuzzer caught unbounded diagnostics; the compiler fuzzer exercises Sema/emitter and requires the `Checker` to outlive emission.
 - Always `--clean-first` after header changes; keep generated C++ for inspection with `coorc --emit-cpp out\x.cpp file.coo`.
@@ -518,7 +518,7 @@ coorc build . -o out\app.exe
 
 ## 9 Limitations and Known Issues
 
-- `lambda`, `if` expressions and full pattern matching are not implemented. `@Native`/FFI has a v1 subset: body-less functions with primitive or string parameters/return values that call a C symbol through a generated wrapper; classes, pointers, headers/libraries and C++ ABI selection remain ⏳. `@Copy`/`@Wrap`, `Weak<T>` and `unsafe`/`new`/`delete`/`extern` remain ⏳; see [framework.md](framework.md) §11.
+- Lambda has a subset: function-type targets, expression/block bodies and implicit by-value captures (`[=]`), initialized variables and calls; explicit capture lists, functional interfaces, method references and function-pointer targets are ⏳. `if` expressions and full pattern matching are not implemented. `@Native`/FFI has a v1 subset: body-less functions with primitive or string parameters/return values that call a C symbol through a generated wrapper; classes, pointers, headers/libraries and C++ ABI selection remain ⏳. `@Copy`/`@Wrap`, `Weak<T>` and `unsafe`/`new`/`delete`/`extern` remain ⏳; see [framework.md](framework.md) §11.
 - `ProxyPolicy` execution covers local `T*`/`@Unique`/`@Share` variables, Optional parameters, fields, returns, and local Optional destructuring, plus `@Proxy` `Skip`/`Abort`/`Error` destructuring. `@Proxy` `Default(expr)` construction/destructuring, runtime pre-construction hooks, and `Skip` defaults for arbitrary non-default-constructible classes are still 🚧.
 - `@Constructure` typed/named construction and `@Retention(Compile/Runtime)` blocks are implemented at a basic level; compile-time blocks cannot depend on runtime local state, and `Invocation`/`enum` on a block reports `E2044`. Complex constructor-overload disambiguation remains 🚧.
 - Ownership and borrow checking remain a conservative subset: `&` cannot be returned, stored in fields, or used as a container element; cross-thread/closure escape checks and full lifetime analysis are incomplete. `@Share` cycles have type-graph, self-assignment and runtime edge-graph checks; in-class field initializers and some aliases are not tracked.

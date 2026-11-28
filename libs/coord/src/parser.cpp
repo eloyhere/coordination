@@ -1119,6 +1119,23 @@ bool Parser::looksLikeVarDecl() const {
   if (check(TokKind::At) || check(TokKind::KwConst)) {
     return true;
   }
+  if (check(TokKind::LParen)) {
+    int depth = 0;
+    for (std::size_t i = 0;; ++i) {
+      const TokKind kind = peek(i).kind;
+      if (kind == TokKind::End) {
+        return false;
+      }
+      if (kind == TokKind::LParen) {
+        ++depth;
+      } else if (kind == TokKind::RParen) {
+        --depth;
+        if (depth == 0) {
+          return peek(i + 1).kind == TokKind::Arrow;
+        }
+      }
+    }
+  }
   if (isTypeKeyword(current().kind) || check(TokKind::Star)) {
     return true;
   }
@@ -1849,6 +1866,9 @@ ExprPtr Parser::parsePrimary() {
     expr->name = std::string(advance().text);
     return expr;
   }
+  if (looksLikeLambda()) {
+    return parseLambda();
+  }
   if (match(TokKind::LParen)) {
     ExprPtr inner = parseExpression();
     expect(TokKind::RParen, "')'");
@@ -1860,6 +1880,44 @@ ExprPtr Parser::parsePrimary() {
   advance();
   expr->kind = ExprKind::IntLit;
   expr->intValue = 0;
+  return expr;
+}
+
+bool Parser::looksLikeLambda() const {
+  if (!check(TokKind::LParen)) {
+    return false;
+  }
+  int depth = 0;
+  for (std::size_t i = 0;; ++i) {
+    const TokKind kind = peek(i).kind;
+    if (kind == TokKind::End) {
+      return false;
+    }
+    if (kind == TokKind::LParen) {
+      ++depth;
+    } else if (kind == TokKind::RParen) {
+      --depth;
+      if (depth == 0) {
+        return peek(i + 1).kind == TokKind::Colon;
+      }
+    }
+  }
+}
+
+ExprPtr Parser::parseLambda() {
+  auto expr = std::make_unique<Expr>();
+  expr->kind = ExprKind::Lambda;
+  expr->span = current().span;
+  expr->lambda = std::make_shared<LambdaInfo>();
+  expr->lambda->params = parseParams();
+  expect(TokKind::Colon, "':' before a lambda return type");
+  expr->lambda->returnType = parseType(true);
+  expect(TokKind::Arrow, "'->' before a lambda body");
+  if (check(TokKind::LBrace)) {
+    expr->lambda->body = parseBlock();
+  } else {
+    expr->lambda->bodyExpr = parseExpression();
+  }
   return expr;
 }
 

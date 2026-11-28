@@ -1,0 +1,12 @@
+integer main() {
+    (integer) -> integer addOne = (integer x): integer -> x + 1;
+    integer base = 10;
+    (integer) -> integer addBase = (integer x): integer -> x + base;
+    (integer) -> integer doubleIt = (integer x): integer -> {
+        return x * 2;
+    };
+    print(addOne(41));
+    print(addBase(5));
+    print(doubleIt(21));
+    return 0;
+}

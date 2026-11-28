@@ -66,7 +66,10 @@ enum class ExprKind {
   Inc,
   ArrayLit,
   ObjectLit,
+  Lambda,
 };
+
+struct LambdaInfo;
 
 struct Expr : Node {
   ExprKind kind = ExprKind::IntLit;
@@ -93,6 +96,7 @@ struct Expr : Node {
   bool weakValue = false;
   bool optionalField = false;
   bool optionalCall = false;
+  std::shared_ptr<LambdaInfo> lambda;
 };
 
 // ---------------------------------------------------------------------------
@@ -241,6 +245,13 @@ struct Initializer {
   std::string name;
   std::vector<ExprPtr> args;
   Span span;
+};
+
+struct LambdaInfo {
+  std::vector<Param> params;
+  TypeExprPtr returnType;
+  StmtPtr body;
+  ExprPtr bodyExpr;
 };
 
 struct EnumVariant {

@@ -263,9 +263,19 @@ std::string CppEmitter::typeToString(const TypeExpr* type) const {
       return "std::array<" + typeToString(type->inner.get()) + ", " + length +
              ">";
     }
+    case TypeExprKind::Function: {
+      std::string parameters;
+      for (std::size_t i = 0; i < type->args.size(); ++i) {
+        if (i != 0) {
+          parameters += ", ";
+        }
+        parameters += typeToString(type->args[i].get());
+      }
+      return "std::function<" + typeToString(type->returnType.get()) + "(" +
+             parameters + ")>";
+    }
     case TypeExprKind::Union:
     case TypeExprKind::Intersect:
-    case TypeExprKind::Function:
       return "void*";
   }
   return "void";
@@ -2948,6 +2958,34 @@ void CppEmitter::emitExpr(const Expr* expr) {
       }
       out_ << ')';
       return;
+    case ExprKind::Lambda: {
+      out_ << "[=](";
+      if (expr->lambda != nullptr) {
+        for (std::size_t i = 0; i < expr->lambda->params.size(); ++i) {
+          if (i != 0) {
+            out_ << ", ";
+          }
+          out_ << typeToString(expr->lambda->params[i].type.get()) << ' '
+               << sanitize(expr->lambda->params[i].name);
+        }
+      }
+      out_ << ") -> ";
+      if (expr->lambda != nullptr) {
+        out_ << typeToString(expr->lambda->returnType.get());
+        out_ << " {";
+        if (expr->lambda->bodyExpr != nullptr) {
+          out_ << " return ";
+          emitExpr(expr->lambda->bodyExpr.get());
+          out_ << ';';
+        } else if (expr->lambda->body != nullptr) {
+          emitStmt(expr->lambda->body.get());
+        }
+        out_ << '}';
+      } else {
+        out_ << "void {}";
+      }
+      return;
+    }
     case ExprKind::ArrayLit:
       out_ << '{';
       for (std::size_t i = 0; i < expr->args.size(); ++i) {

@@ -304,6 +304,26 @@ Type* Checker::makeArrayType(Type* element, std::int64_t length) {
   return raw;
 }
 
+Type* Checker::makeFunctionType(std::vector<Type*> params, Type* returnType) {
+  const std::string name = "(" + joinTypes(params, ", ") + ") -> " +
+                           (returnType != nullptr ? returnType->name : "void");
+  const auto found = compositeTypes_.find(name);
+  if (found != compositeTypes_.end()) {
+    return found->second;
+  }
+  auto type = std::make_unique<Type>();
+  type->kind = TypeKind::Function;
+  type->name = name;
+  type->base = classType_;
+  type->alternatives = std::move(params);
+  type->returnType = returnType;
+  Type* raw = type.get();
+  types_.push_back(std::move(type));
+  compositeTypes_[name] = raw;
+  typeMap_[name] = raw;
+  return raw;
+}
+
 Type* Checker::makeQueueType(Type* element) {
   const std::string name =
       "Array<" + (element != nullptr ? element->name : "<error>") + ">";
@@ -912,13 +932,15 @@ Type* Checker::resolveType(TypeExpr* type, bool allowMeta) {
                                  : makeIntersectType(std::move(parts));
       break;
     }
-    case TypeExprKind::Function:
+    case TypeExprKind::Function: {
+      std::vector<Type*> parameters;
       for (const auto& arg : type->args) {
-        resolveType(arg.get(), allowMeta);
+        parameters.push_back(resolveType(arg.get(), allowMeta));
       }
-      resolveType(type->returnType.get(), allowMeta);
-      result = functionType_;
+      Type* resultType = resolveType(type->returnType.get(), allowMeta);
+      result = makeFunctionType(std::move(parameters), resultType);
       break;
+    }
     case TypeExprKind::Array: {
       Type* element = resolveType(type->inner.get(), allowMeta);
       if (type->arraySize == nullptr ||
@@ -2787,12 +2809,62 @@ void Checker::requireAssignable(Type* from, Type* to, Span span,
                          "', found '" + fromName + "'");
 }
 
+void Checker::checkLambda(Expr* expr, Type* expected) {
+  if (expr == nullptr || expr->lambda == nullptr) {
+    return;
+  }
+  if (expected == nullptr || expected->kind != TypeKind::Function) {
+    diagnostics_.error(expr->span, "E2079",
+                       "lambda requires a function target type");
+    expr->resolvedType = errorType_;
+    return;
+  }
+  if (expr->lambda->params.size() != expected->alternatives.size()) {
+    diagnostics_.error(expr->span, "E2079",
+                       "lambda parameter count does not match the target");
+  }
+  pushScope(Scope::Kind::Function);
+  const std::size_t count =
+      std::min(expr->lambda->params.size(), expected->alternatives.size());
+  for (std::size_t i = 0; i < count; ++i) {
+    Param& param = expr->lambda->params[i];
+    Type* paramType = param.type ? resolveType(param.type.get(), false)
+                                 : errorType_;
+    requireAssignable(paramType, expected->alternatives[i], param.span,
+                      "lambda parameter");
+    declareVariable(param.name, paramType, false, nullptr, param.span, false,
+                    ProxyPolicy::Error, nullptr);
+  }
+  Type* savedReturn = currentReturnType_;
+  Decl* savedFunction = currentFunction_;
+  const bool savedDestructor = inDestructor_;
+  currentReturnType_ = expected->returnType;
+  currentFunction_ = nullptr;
+  inDestructor_ = false;
+  if (expr->lambda->bodyExpr != nullptr) {
+    Type* body = checkExpr(expr->lambda->bodyExpr.get());
+    requireAssignable(body, expected->returnType,
+                      expr->lambda->bodyExpr->span, "lambda return");
+  } else if (expr->lambda->body != nullptr) {
+    checkStmt(expr->lambda->body.get());
+  }
+  currentReturnType_ = savedReturn;
+  currentFunction_ = savedFunction;
+  inDestructor_ = savedDestructor;
+  popScope();
+  expr->resolvedType = expected;
+}
+
 Type* Checker::checkExpr(Expr* expr) {
   if (expr == nullptr) {
     return errorType_;
   }
   switch (expr->kind) {
-    case ExprKind::IntLit:
+    case ExprKind::Lambda:
+      diagnostics_.error(expr->span, "E2079",
+                         "lambda requires an explicit function target type");
+      expr->resolvedType = errorType_;
+      return errorType_;    case ExprKind::IntLit:
       expr->resolvedType = intType_;
       return intType_;
     case ExprKind::DecimalLit:
@@ -3617,6 +3689,33 @@ Type* Checker::checkCall(Expr* expr) {
       }
       expr->resolvedType = constructed;
       return constructed;
+    }
+
+    if (Variable* variable = lookupVariable(callee->name);
+        variable != nullptr && variable->type != nullptr &&
+        variable->type->kind == TypeKind::Function) {
+      Type* functionType = variable->type;
+      if (expr->args.size() != functionType->alternatives.size()) {
+        diagnostics_.error(
+            expr->span, "E2004",
+            "function value '" + callee->name + "' takes " +
+                std::to_string(functionType->alternatives.size()) +
+                " argument(s)");
+      }
+      const std::size_t count =
+          std::min(expr->args.size(), functionType->alternatives.size());
+      for (std::size_t i = 0; i < count; ++i) {
+        if (expr->args[i] != nullptr &&
+            expr->args[i]->kind == ExprKind::Lambda) {
+          checkLambda(expr->args[i].get(), functionType->alternatives[i]);
+        } else {
+          Type* argType = checkExpr(expr->args[i].get());
+          requireAssignable(argType, functionType->alternatives[i],
+                            expr->args[i]->span, "function argument");
+        }
+      }
+      expr->resolvedType = functionType->returnType;
+      return functionType->returnType;
     }
 
     const Decl* function = lookupFunction(callee->name, expr->args.size());
@@ -4595,6 +4694,11 @@ void Checker::checkStmt(Stmt* stmt) {
           }
           stmt->expr->resolvedType = type;
         }
+        initType = type;
+      } else if (stmt->expr != nullptr &&
+                 stmt->expr->kind == ExprKind::Lambda && type != nullptr &&
+                 type->kind == TypeKind::Function) {
+        checkLambda(stmt->expr.get(), type);
         initType = type;
       } else {
         initType = stmt->expr ? checkExpr(stmt->expr.get()) : nullptr;

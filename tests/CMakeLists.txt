@@ -1000,4 +1000,12 @@ if(MSVC)
       -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_native_ffi_string
       -DEXPECTED=5|ok
       -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
+
+  add_test(NAME coord_e2e_lambda
+    COMMAND ${CMAKE_COMMAND}
+      -DCOORC=$<TARGET_FILE:coorc>
+      -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/../examples/lambda.coo
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e_lambda
+      -DEXPECTED=42|15|42
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/e2e.cmake)
 endif()

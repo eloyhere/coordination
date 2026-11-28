@@ -461,7 +461,7 @@ Function<integer, integer> original =
 | 泛型 | lambda 自身不声明类型参数；目标类型实例化决定参数/返回类型 |
 | 方法引用 | `Type::staticMethod`、`Type::instanceMethod`（未绑定接收者）、`object::method`（绑定接收者）；绑定接收者的引用只能转接口/闭包（⏳） |
 
-lambda 的“值”只能通过目标类型使用：赋值、传参、返回、存容器前必须先确定目标类型。目标为函数式接口时生成闭包对象；目标为函数指针时生成无捕获的函数 thunk；方法引用同理。函数式接口由 `utility` 提供：`Function<T,R>`、`Consumer<T>`、`Supplier<T>`、`Predicate<T>`、`BiFunction<A,B,R>`。`@FunctionalInterface` 可选标注，编译器检查“恰好一个抽象方法”。lambda 编译为生成类/闭包对象，捕获值存在字段中；与普通接口实现一样参与单态化，不引入运行期元数据。实现状态：⏳（Parser/Sema/Codegen 尚未实现）；本节语法与语义是既定设计。
+lambda 的“值”只能通过目标类型使用：赋值、传参、返回、存容器前必须先确定目标类型。目标为函数式接口时生成闭包对象；目标为函数指针时生成无捕获的函数 thunk；方法引用同理。函数式接口由 `utility` 提供：`Function<T,R>`、`Consumer<T>`、`Supplier<T>`、`Predicate<T>`、`BiFunction<A,B,R>`。`@FunctionalInterface` 可选标注，编译器检查“恰好一个抽象方法”。lambda 编译为生成类/闭包对象，捕获值存在字段中；与普通接口实现一样参与单态化，不引入运行期元数据。实现状态：🚧。已实现：函数类型目标 `(A) -> R`、表达式/块体、隐式按值捕获（`[=]`）、变量初始化与调用。未实现：显式捕获列表、函数式接口目标、方法引用、函数指针 thunk 转换。
 
 #### 4.3.3 控制流与模式匹配
 
@@ -1162,7 +1162,7 @@ coorc CLI
 
 ### 6.6 测试现状
 
-`ctest` 当前注册 **125 项**：`coord_unit` 加 124 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
+`ctest` 当前注册 **126 项**：`coord_unit` 加 125 个端到端测试。`coord_unit` 覆盖词法、解析、泛型、Scope、RAII、编译期求值、代码生成、接口、枚举、指针、Unicode/BOM、模块扫描、访问/继承、`super`、元注解、Optional/null、转换构造、Result/Expect、for-in、`@Signed/@Unsigned/@Length`、固定数组、数组字面量、ArrayView、OrderedMap、OrderedSet、UnorderedMap、UnorderedSet、128 位、Invocation/多 handler/虚分派、Processor 生成声明、Proxy class/annotation/runtime call/field trap/state、reflector、runtime retention/value/member/type、descriptor pipeline、ownership/optional/fields/params/returns/initializer、main 签名、`.coox` reader、package graph、outline/hint、`@Test`。e2e 覆盖示例与 fixtures 的编译、运行、负例、确定性、增量、循环依赖、两包构建、包管理器/镜像/注册表全流程；本轮新增覆盖为 `coord_e2e_optional_policies`、`coord_e2e_optional_error`、`coord_e2e_optional_implicit`、`coord_e2e_constructure`、`coord_e2e_constructure_error`、`coord_e2e_destructure_annotation`、`coord_e2e_proxy_construct_destructure`、`coord_e2e_platform` 与 `coord_e2e_retention_block`, `coord_e2e_radix`, `coord_e2e_radix_error`。完整列表见 [`tests/CMakeLists.txt`](tests/CMakeLists.txt)。`COORD_SANITIZE=ON` 以 ASan/UBSan 构建编译器（含 `linux-sanitize` 预设）；`COORD_FUZZ=ON` 构建 Clang/libFuzzer 解析器与编译器 harness，见 [`tests/fuzz`](tests/fuzz)；编译器 harness 需让 `Checker` 存活到 emitter 结束，因为 `TypeExpr::resolved` 指向 checker 拥有的类型。诊断最多存储 256 条，解析器在成员错误恢复后强制前进，避免诊断无限增长。`coord_e2e_packages` 不依赖宿主编译器与网络；`coord_e2e_packages_build` 需要可用宿主 C++ 工具链。
 
 ## 7 标准库设计
 
@@ -1982,9 +1982,9 @@ coorc config list|get|set
 
 ### 11.3 长程目标与执行计划（M3）
 
-**目标**：在 descriptor 统一、包管理器落地后的 125 项基线上，完成 M3 最小闭环。
+**目标**：在 descriptor 统一、包管理器落地后的 126 项基线上，完成 M3 最小闭环。
 
-**基线（2026-11-26）**：`ctest` 注册 **125 项**，Windows 全套 **125/125 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
+**基线（2026-11-26）**：`ctest` 注册 **126 项**，Windows 全套 **126/126 通过**；Linux 上 `coord_unit` + `coord_e2e_packages` 与新增示例已用 g++ 通过。P0–P3、descriptor 统一、collection/test、相对 import、工程目录、`.coox` 读写、outline/hint、基础 proxy/reflection/ownership、`ProxyPolicy`、`@Constructure`/`@Destructure`、代码块保留、main 参数形式，以及跨平台 driver、包管理器/镜像管理器/注册表已具备。
 
 **最终验收**：
 
